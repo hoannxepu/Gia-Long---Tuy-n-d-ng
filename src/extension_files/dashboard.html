@@ -936,33 +936,22 @@
             </div>
           </div>
 
-          <!-- 3 Bước Đặt Mua Trực Quan Dàn Ngang (Cực kỳ đẹp mắt) -->
-          <div class="process-steps-grid">
-            <!-- Bước 1 -->
-            <div style="display: flex; align-items: flex-start; gap: 9px; background: rgba(8, 13, 26, 0.85); padding: 11px 12px; border-radius: 10px; border: 1px solid #1e293b;">
-              <span style="background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4); width: 22px; height: 22px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 11.5px; font-weight: 800; shrink-0; margin-top: 1px;">1</span>
-              <div>
-                <div style="font-size: 12px; font-weight: 800; color: #ffffff;">Chọn Gói Bản Quyền</div>
-                <div style="font-size: 11px; color: #94a3b8; margin-top: 3px; line-height: 1.4;">Nhấp chọn gói Dùng Thử, 1 Tháng, 3 Tháng, 6 Tháng hoặc 12 Tháng ở bảng phía trên.</div>
+          <!-- LỊCH SỬ ĐƠN ĐẶT MUA & GÓI CƯỚC (ĐẦY ĐỦ THÔNG TIN CHI TIẾT) -->
+          <div style="background: #080d1a; border: 1px solid #1e293b; border-radius: 12px; padding: 14px 16px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; border-bottom: 1px solid #1e293b; padding-bottom: 8px;">
+              <div style="font-weight: 800; color: #f8fafc; font-size: 13px; display: flex; align-items: center; gap: 7px;">
+                <span>📜</span>
+                <span>Lịch Sử Đơn Đặt Mua &amp; Gói Cước Của Bạn (Chi Tiết Đầy Đủ)</span>
               </div>
+              <button id="btnRefreshClientOrders" class="btn btn-sub btn-sub-primary" style="font-size: 11px; padding: 4px 10px;">🔄 Tải Lại Lịch Sử</button>
             </div>
 
-            <!-- Bước 2 -->
-            <div style="display: flex; align-items: flex-start; gap: 9px; background: rgba(8, 13, 26, 0.85); padding: 11px 12px; border-radius: 10px; border: 1px solid #1e293b;">
-              <span style="background: rgba(37, 99, 235, 0.2); color: #60a5fa; border: 1px solid rgba(37, 99, 235, 0.4); width: 22px; height: 22px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 11.5px; font-weight: 800; shrink-0; margin-top: 1px;">2</span>
-              <div>
-                <div style="font-size: 12px; font-weight: 800; color: #ffffff;">Quét QR Thanh Toán (VietQR)</div>
-                <div style="font-size: 11px; color: #94a3b8; margin-top: 3px; line-height: 1.4;">Màn hình tiện ích tự động hiển thị mã VietQR kèm đúng số tiền và nội dung chuyển khoản.</div>
-              </div>
+            <div style="font-size: 11px; color: #94a3b8; margin-bottom: 8px;">
+              Danh sách các gói cước và yêu cầu mua bạn đã gửi từ thiết bị này lên hệ thống Quản Trị Viên:
             </div>
 
-            <!-- Bước 3 -->
-            <div style="display: flex; align-items: flex-start; gap: 9px; background: rgba(8, 13, 26, 0.85); padding: 11px 12px; border-radius: 10px; border: 1px solid rgba(16, 185, 129, 0.35);">
-              <span style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); width: 22px; height: 22px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 11.5px; font-weight: 800; shrink-0; margin-top: 1px;">3</span>
-              <div>
-                <div style="font-size: 12px; font-weight: 800; color: #34d399;">Kích "Xác Nhận Mua" ➔ Tự Động Duyệt</div>
-                <div style="font-size: 11px; color: #94a3b8; margin-top: 3px; line-height: 1.4;">Bấm Xác Nhận Mua, máy chủ ghi nhận yêu cầu và tự động kích hoạt mã bản quyền vào máy tính bạn!</div>
-              </div>
+            <div id="clientOrdersHistoryList" style="max-height: 220px; overflow-y: auto; font-size: 11.5px; color: #cbd5e1; display: flex; flex-direction: column; gap: 8px;">
+              <div style="color: #64748b; text-align: center; padding: 16px; background: rgba(15,23,42,0.6); border-radius: 8px;">Chưa có lịch sử đơn đặt mua nào từ thiết bị này.</div>
             </div>
           </div>
 
