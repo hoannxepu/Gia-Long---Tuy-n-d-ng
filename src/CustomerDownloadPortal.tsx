@@ -865,72 +865,7 @@ Hỗ trợ Zalo: 0869.029.310 (Gia Long - FB)`;
               </div>
             </div>
 
-            {/* KHỐI 3: FORM ĐẶT MUA NHANH QUA WEB (NẾU KHÁCH MUỐN ADMIN DUYỆT TRƯỚC) */}
-            {!quickOrderSuccess ? (
-              <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 space-y-2 text-xs">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-                  <span className="font-bold text-slate-200">
-                    💡 Hoặc gửi thông tin đặt mua nhanh qua Web (Quản trị viên liên hệ duyệt):
-                  </span>
-                  <span className="text-[11px] text-slate-400">
-                    Hỗ trợ 24/7
-                  </span>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <input
-                    type="text"
-                    value={quickOrderPhone}
-                    onChange={(e) => setQuickOrderPhone(e.target.value)}
-                    placeholder="Số điện thoại / Zalo nhận key (*) "
-                    className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white placeholder-slate-500 font-mono text-xs focus:border-sky-500 focus:outline-none"
-                  />
-                  <input
-                    type="text"
-                    value={quickOrderName}
-                    onChange={(e) => setQuickOrderName(e.target.value)}
-                    placeholder="Tên bạn hoặc Đơn vị (tùy chọn)"
-                    className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white placeholder-slate-500 text-xs focus:border-sky-500 focus:outline-none"
-                  />
-                </div>
-                <div className="flex justify-end pt-1">
-                  <button
-                    type="button"
-                    onClick={handleQuickWebOrder}
-                    disabled={isSubmittingQuickOrder}
-                    className="px-4 py-1.5 bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 text-white rounded-lg font-bold text-xs shadow transition cursor-pointer flex items-center gap-1.5 active:scale-95 disabled:opacity-50"
-                  >
-                    <Send className="w-3.5 h-3.5" />
-                    <span>{isSubmittingQuickOrder ? 'Đang gửi...' : 'Gửi Yêu Cầu Đặt Mua Qua Web'}</span>
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="bg-emerald-950/50 border border-emerald-500/40 rounded-xl p-3.5 space-y-2 text-xs text-center animate-in fade-in">
-                <div className="flex items-center justify-center gap-1.5 text-emerald-400 font-bold text-sm">
-                  <CheckCircle2 className="w-5 h-5" />
-                  <span>ĐÃ GỬI YÊU CẦU ĐẶT MUA THÀNH CÔNG!</span>
-                </div>
-                <p className="text-slate-300 text-xs">
-                  Mã đơn hàng: <strong className="text-sky-400 font-mono">#{quickOrderSuccess.id}</strong> • Gói: <strong className="text-white">{purchaseGuidePlan.name}</strong>
-                </p>
-                <p className="text-[11px] text-slate-400">
-                  Quản trị viên đã ghi nhận yêu cầu và sẽ hỗ trợ kích hoạt key bản quyền cho bạn qua SĐT/Zalo <strong>{quickOrderPhone}</strong>!
-                </p>
-                <div className="flex justify-center pt-1">
-                  <a
-                    href={`https://zalo.me/0869029310?text=${encodeURIComponent(
-                      `Chào Admin, tôi vừa gửi đơn mua ${purchaseGuidePlan.name} trên Web (SĐT: ${quickOrderPhone}, Mã đơn: #${quickOrderSuccess.id}). Nhờ Admin duyệt và cấp key giúp tôi nhé!`
-                    )}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="px-4 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded-lg font-bold text-xs transition shadow flex items-center gap-1.5"
-                  >
-                    <MessageSquare className="w-3.5 h-3.5" />
-                    <span>Mở Zalo Nhận Key Ngay (0869.029.310)</span>
-                  </a>
-                </div>
-              </div>
-            )}
+            {/* Đã xóa khu vực đặt mua nhanh qua web theo yêu cầu */}
 
             {/* Footer Buttons */}
             <div className="flex items-center justify-between pt-2 border-t border-slate-800 text-xs">
