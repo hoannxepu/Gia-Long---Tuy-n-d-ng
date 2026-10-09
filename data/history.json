@@ -1,5 +1,14 @@
 [
   {
+    "id": "hist_1791524547357_e2t1",
+    "createdAt": "2026-10-09T05:42:27.357Z",
+    "action": "update_date",
+    "actionName": "Đổi Mật Khẩu Quản Trị",
+    "clientName": "Hệ Thống Quản Trị",
+    "key": "ADMIN-SECURITY",
+    "notes": "Quản trị viên đã thay đổi mật khẩu / khóa quản trị thành công."
+  },
+  {
     "id": "hist_1791509358149_rc1k",
     "createdAt": "2026-10-09T01:29:18.149Z",
     "action": "create",

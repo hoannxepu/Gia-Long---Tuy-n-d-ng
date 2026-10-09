@@ -57,7 +57,8 @@ import {
   Filter,
   SlidersHorizontal,
   Laptop,
-  Edit3
+  Edit3,
+  EyeOff
 } from 'lucide-react';
 import { DEFAULT_EXTENSION_BUNDLE, ExtensionFileDef } from './extension_files/index.ts';
 import { CustomerDownloadPortal } from './CustomerDownloadPortal.tsx';
@@ -247,8 +248,21 @@ export default function App() {
   const [copiedBundle, setCopiedBundle] = useState(false);
 
   // Admin License Portal State
-  const [adminPin, setAdminPin] = useState<string>('123456');
+  const [adminPin, setAdminPin] = useState<string>(() => {
+    try {
+      return localStorage.getItem('glfb_admin_pin') || 'Ha26062018$';
+    } catch (e) {
+      return 'Ha26062018$';
+    }
+  });
   const [adminPinInput, setAdminPinInput] = useState<string>('');
+  const [showPinPassword, setShowPinPassword] = useState<boolean>(false);
+  const [showChangePinModal, setShowChangePinModal] = useState<boolean>(false);
+  const [currentPinInput, setCurrentPinInput] = useState<string>('');
+  const [newPinInput, setNewPinInput] = useState<string>('');
+  const [confirmPinInput, setConfirmPinInput] = useState<string>('');
+  const [showNewPinPassword, setShowNewPinPassword] = useState<boolean>(false);
+  const [isChangingPin, setIsChangingPin] = useState<boolean>(false);
   const [isAdminUnlocked, setIsAdminUnlocked] = useState<boolean>(false);
   const [licenses, setLicenses] = useState<AdminLicenseItem[]>([]);
   const [isLoadingLicenses, setIsLoadingLicenses] = useState<boolean>(false);
@@ -861,27 +875,105 @@ export default function App() {
 
   const handleVerifyPin = async (e: React.FormEvent) => {
     e.preventDefault();
+    const cleanInput = adminPinInput.trim();
+    if (!cleanInput) {
+      alert('Vui lòng nhập khóa / mật khẩu quản trị!');
+      return;
+    }
     try {
       const res = await fetch('/api/admin/verify-pin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin: adminPinInput }),
+        body: JSON.stringify({ pin: cleanInput }),
       });
       const data = await res.json();
       if (data.success) {
-        setAdminPin(adminPinInput);
+        setAdminPin(cleanInput);
+        try {
+          localStorage.setItem('glfb_admin_pin', cleanInput);
+        } catch (e) {}
         setIsAdminUnlocked(true);
-        fetchLicenses(adminPinInput);
+        fetchLicenses(cleanInput);
       } else {
-        alert('Mã PIN không đúng! Mặc định là: 123456');
+        alert('Khóa Quản Trị không chính xác! Vui lòng thử lại.');
       }
     } catch (e) {
-      if (adminPinInput === '123456') {
+      if (cleanInput === adminPin || cleanInput === 'Ha26062018$') {
+        setAdminPin(cleanInput);
+        try {
+          localStorage.setItem('glfb_admin_pin', cleanInput);
+        } catch (err) {}
         setIsAdminUnlocked(true);
-        fetchLicenses('123456');
+        fetchLicenses(cleanInput);
       } else {
-        alert('Mã PIN không đúng!');
+        alert('Khóa Quản Trị không chính xác! Vui lòng thử lại.');
       }
+    }
+  };
+
+  const handleChangePin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cur = currentPinInput.trim();
+    const nw = newPinInput.trim();
+    const cf = confirmPinInput.trim();
+
+    if (!cur) {
+      alert('Vui lòng nhập mật khẩu hiện tại!');
+      return;
+    }
+    if (!nw || nw.length < 6) {
+      alert('Mật khẩu mới phải có tối thiểu 6 ký tự!');
+      return;
+    }
+    if (nw !== cf) {
+      alert('Xác nhận mật khẩu mới không trùng khớp!');
+      return;
+    }
+
+    setIsChangingPin(true);
+    try {
+      const res = await fetch('/api/admin/change-pin', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-pin': adminPin,
+        },
+        body: JSON.stringify({
+          currentPin: cur,
+          newPin: nw,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setAdminPin(nw);
+        try {
+          localStorage.setItem('glfb_admin_pin', nw);
+        } catch (e) {}
+        alert('✅ Đổi mật khẩu Quản Trị thành công!');
+        setShowChangePinModal(false);
+        setCurrentPinInput('');
+        setNewPinInput('');
+        setConfirmPinInput('');
+      } else {
+        alert('❌ ' + (data.error || 'Đổi mật khẩu thất bại! Vui lòng kiểm tra lại mật khẩu hiện tại.'));
+      }
+    } catch (err: any) {
+      // Offline fallback
+      if (cur === adminPin || cur === 'Ha26062018$') {
+        setAdminPin(nw);
+        try {
+          localStorage.setItem('glfb_admin_pin', nw);
+        } catch (e) {}
+        alert('✅ Đổi mật khẩu Quản Trị thành công!');
+        setShowChangePinModal(false);
+        setCurrentPinInput('');
+        setNewPinInput('');
+        setConfirmPinInput('');
+      } else {
+        alert('❌ Mật khẩu hiện tại không chính xác!');
+      }
+    } finally {
+      setIsChangingPin(false);
     }
   };
 
@@ -2473,17 +2565,27 @@ Em xin gửi anh/chị hướng dẫn cài đặt và kích hoạt bản quyền
                 <form onSubmit={handleVerifyPin} className="space-y-3 pt-1">
                   <div>
                     <label className="text-[11px] font-semibold text-slate-400 block text-left mb-1">
-                      Nhập mã PIN Quản Trị (6 số):
+                      Khóa / Mật Khẩu Quản Trị:
                     </label>
-                    <input
-                      type="password"
-                      maxLength={10}
-                      value={adminPinInput}
-                      onChange={(e) => setAdminPinInput(e.target.value)}
-                      placeholder="Mã PIN (Mặc định: 123456)"
-                      className="w-full text-center tracking-widest text-sm sm:text-base font-mono font-bold bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 sm:py-2.5 text-white focus:border-emerald-500 focus:outline-none"
-                      autoFocus
-                    />
+                    <div className="relative">
+                      <input
+                        type={showPinPassword ? "text" : "password"}
+                        maxLength={64}
+                        value={adminPinInput}
+                        onChange={(e) => setAdminPinInput(e.target.value)}
+                        placeholder="Nhập khóa quản trị..."
+                        className="w-full text-center tracking-wider text-sm sm:text-base font-mono font-bold bg-slate-950 border border-slate-700 rounded-lg px-9 py-2 sm:py-2.5 text-white focus:border-emerald-500 focus:outline-none"
+                        autoFocus
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPinPassword(!showPinPassword)}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-1 rounded transition"
+                        title={showPinPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
+                      >
+                        {showPinPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
                   </div>
                   <button
                     type="submit"
@@ -2492,8 +2594,9 @@ Em xin gửi anh/chị hướng dẫn cài đặt và kích hoạt bản quyền
                     <Key className="w-4 h-4" />
                     <span>Mở Khóa Quản Trị</span>
                   </button>
-                  <p className="text-[10.5px] text-slate-500 italic">
-                    * Mã PIN mặc định khởi tạo là: <strong>123456</strong>
+                  <p className="text-[10.5px] text-slate-500 italic flex items-center justify-center gap-1.5">
+                    <Lock className="w-3 h-3 text-emerald-400 shrink-0" />
+                    <span>Hệ thống bảo mật độc quyền. Quản trị viên sử dụng khóa bí mật để đăng nhập.</span>
                   </p>
                 </form>
               </div>
@@ -2526,6 +2629,19 @@ Em xin gửi anh/chị hướng dẫn cài đặt và kích hoạt bản quyền
                       <span>Tạo Mã Mới</span>
                     </button>
                     <button
+                      onClick={() => {
+                        setCurrentPinInput('');
+                        setNewPinInput('');
+                        setConfirmPinInput('');
+                        setShowChangePinModal(true);
+                      }}
+                      className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 rounded-lg text-[11px] font-bold transition flex items-center gap-1 shadow-sm active:scale-98"
+                      title="Đổi mật khẩu / khóa quản trị"
+                    >
+                      <Key className="w-3 h-3 text-amber-400" />
+                      <span>Đổi Mật Khẩu</span>
+                    </button>
+                    <button
                       onClick={() => fetchLicenses()}
                       disabled={isLoadingLicenses}
                       className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-[11px] font-medium transition flex items-center gap-1 border border-slate-700 active:scale-98"
@@ -2535,11 +2651,15 @@ Em xin gửi anh/chị hướng dẫn cài đặt và kích hoạt bản quyền
                       <span>Làm mới</span>
                     </button>
                     <button
-                      onClick={() => setIsAdminUnlocked(false)}
-                      className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-lg text-[11px] font-medium transition border border-slate-700"
-                      title="Khóa bảo mật quản trị"
+                      onClick={() => {
+                        setIsAdminUnlocked(false);
+                        setAdminPinInput('');
+                      }}
+                      className="px-2 py-1 bg-slate-800 hover:bg-rose-900/40 text-slate-300 hover:text-rose-200 rounded-lg text-[11px] font-medium transition border border-slate-700 flex items-center gap-1 active:scale-98"
+                      title="Khóa lại giao diện quản trị"
                     >
-                      <Lock className="w-3 h-3" />
+                      <Lock className="w-3 h-3 text-rose-400" />
+                      <span>Khóa Lại</span>
                     </button>
                   </div>
                 </div>
@@ -4311,6 +4431,102 @@ Em xin gửi anh/chị hướng dẫn cài đặt và kích hoạt bản quyền
                     </div>
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* MODAL ĐỔI MẬT KHẨU / KHÓA QUẢN TRỊ */}
+            {showChangePinModal && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/80 backdrop-blur-sm overflow-y-auto">
+                <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-sm w-full p-4 shadow-2xl space-y-3.5 my-auto">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                    <h3 className="text-sm font-bold text-white flex items-center gap-1.5">
+                      <Lock className="w-4 h-4 text-amber-400" />
+                      <span>Đổi Khóa / Mật Khẩu Quản Trị</span>
+                    </h3>
+                    <button
+                      onClick={() => setShowChangePinModal(false)}
+                      className="text-slate-400 hover:text-white p-1 text-xs font-bold rounded-lg hover:bg-slate-800"
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  <form onSubmit={handleChangePin} className="space-y-3 text-xs">
+                    <div>
+                      <label className="block text-slate-300 font-semibold mb-1 text-[11.5px]">
+                        Mật Khẩu Hiện Tại: <span className="text-rose-400">*</span>
+                      </label>
+                      <input
+                        type={showNewPinPassword ? "text" : "password"}
+                        required
+                        value={currentPinInput}
+                        onChange={(e) => setCurrentPinInput(e.target.value)}
+                        placeholder="Nhập mật khẩu hiện tại..."
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white font-mono focus:border-amber-500 focus:outline-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-slate-300 font-semibold mb-1 text-[11.5px]">
+                        Mật Khẩu Mới (Tối thiểu 6 ký tự): <span className="text-rose-400">*</span>
+                      </label>
+                      <input
+                        type={showNewPinPassword ? "text" : "password"}
+                        required
+                        minLength={6}
+                        value={newPinInput}
+                        onChange={(e) => setNewPinInput(e.target.value)}
+                        placeholder="Nhập mật khẩu mới..."
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white font-mono focus:border-amber-500 focus:outline-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-slate-300 font-semibold mb-1 text-[11.5px]">
+                        Xác Nhận Mật Khẩu Mới: <span className="text-rose-400">*</span>
+                      </label>
+                      <input
+                        type={showNewPinPassword ? "text" : "password"}
+                        required
+                        minLength={6}
+                        value={confirmPinInput}
+                        onChange={(e) => setConfirmPinInput(e.target.value)}
+                        placeholder="Nhập lại mật khẩu mới..."
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white font-mono focus:border-amber-500 focus:outline-none"
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1">
+                      <label className="flex items-center gap-1.5 text-[11px] text-slate-400 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={showNewPinPassword}
+                          onChange={(e) => setShowNewPinPassword(e.target.checked)}
+                          className="rounded border-slate-700 bg-slate-950 text-amber-500 focus:ring-0"
+                        />
+                        <span>Hiện ký tự mật khẩu</span>
+                      </label>
+                    </div>
+
+                    <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+                      <button
+                        type="button"
+                        onClick={() => setShowChangePinModal(false)}
+                        className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold"
+                      >
+                        Hủy
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={isChangingPin}
+                        className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-md shadow-amber-600/30 transition disabled:opacity-50"
+                      >
+                        <Lock className="w-3.5 h-3.5" />
+                        <span>{isChangingPin ? 'Đang lưu...' : 'Lưu Mật Khẩu Mới'}</span>
+                      </button>
+                    </div>
+                  </form>
+                </div>
               </div>
             )}
 

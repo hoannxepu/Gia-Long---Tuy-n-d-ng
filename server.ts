@@ -13,7 +13,23 @@ const PORT = parseInt(process.env.PORT || '3000', 10);
 const DATA_DIR = path.join(__dirname, 'data');
 const DIST_EXT_DIR = path.join(__dirname, 'dist-extension');
 const LICENSES_FILE = path.join(DATA_DIR, 'licenses.json');
-const ADMIN_PIN = process.env.ADMIN_PIN || '123456';
+const ADMIN_PIN_FILE = path.join(DATA_DIR, 'admin-pin.json');
+
+function getActiveAdminPin(): string {
+  try {
+    if (fs.existsSync(ADMIN_PIN_FILE)) {
+      const data = JSON.parse(fs.readFileSync(ADMIN_PIN_FILE, 'utf-8'));
+      if (data && data.pin) return String(data.pin).trim();
+    }
+  } catch (e) {}
+  return process.env.ADMIN_PIN || 'Ha26062018$';
+}
+
+function setActiveAdminPin(pin: string) {
+  try {
+    fs.writeFileSync(ADMIN_PIN_FILE, JSON.stringify({ pin, updatedAt: new Date().toISOString() }, null, 2), 'utf-8');
+  } catch (e) {}
+}
 
 // Đảm bảo thư mục lưu dữ liệu tồn tại
 if (!fs.existsSync(DATA_DIR)) {
@@ -228,11 +244,11 @@ app.use((req, res, next) => {
 // Middleware kiểm tra quyền Admin
 function requireAdmin(req: Request, res: Response, next: () => void) {
   const pin = String(req.headers['x-admin-pin'] || req.body?.adminPin || req.query?.pin || '').trim();
-  // Chấp nhận ADMIN_PIN từ env hoặc mã mặc định 123456
-  if (pin === ADMIN_PIN || pin === '123456') {
+  const currentPin = getActiveAdminPin();
+  if (pin && pin === currentPin) {
     return next();
   }
-  return res.status(401).json({ success: false, error: 'Mã PIN Quản Trị không hợp lệ!' });
+  return res.status(401).json({ success: false, error: 'Khóa Quản Trị không hợp lệ!' });
 }
 
 // ============================================================================
@@ -463,13 +479,42 @@ app.post('/api/license/activate', (req: Request, res: Response) => {
 // 2. API DÀNH CHO ADMIN (QUẢN TRỊ BẢN QUYỀN & THU TIỀN)
 // ============================================================================
 
-// Xác thực mã PIN Quản trị
+// Xác thực mã PIN / Khóa Quản trị
 app.post('/api/admin/verify-pin', (req: Request, res: Response) => {
-  const { pin } = req.body;
-  if (pin === ADMIN_PIN) {
+  const pin = String(req.body?.pin || '').trim();
+  const currentPin = getActiveAdminPin();
+  if (pin && pin === currentPin) {
     return res.json({ success: true, message: 'Đăng nhập Quản Trị thành công!' });
   }
-  res.status(401).json({ success: false, message: 'Mã PIN Quản Trị không chính xác!' });
+  res.status(401).json({ success: false, message: 'Khóa Quản Trị không chính xác!' });
+});
+
+// Đổi mã PIN / Mật khẩu Quản trị
+app.post('/api/admin/change-pin', requireAdmin, (req: Request, res: Response) => {
+  const { currentPin, newPin } = req.body;
+  const activePin = getActiveAdminPin();
+  if (!currentPin || String(currentPin).trim() !== activePin) {
+    return res.status(400).json({ success: false, error: 'Mật khẩu hiện tại không chính xác!' });
+  }
+  if (!newPin || String(newPin).trim().length < 6) {
+    return res.status(400).json({ success: false, error: 'Mật khẩu mới phải có tối thiểu 6 ký tự!' });
+  }
+  const cleanNewPin = String(newPin).trim();
+  setActiveAdminPin(cleanNewPin);
+
+  addHistoryEntry({
+    action: 'update_date',
+    actionName: 'Đổi Mật Khẩu Quản Trị',
+    clientName: 'Hệ Thống Quản Trị',
+    key: 'ADMIN-SECURITY',
+    notes: 'Quản trị viên đã thay đổi mật khẩu / khóa quản trị thành công.',
+  });
+
+  return res.json({
+    success: true,
+    message: 'Đổi mật khẩu Quản trị thành công!',
+    pin: cleanNewPin,
+  });
 });
 
 // Lấy danh sách tất cả các License

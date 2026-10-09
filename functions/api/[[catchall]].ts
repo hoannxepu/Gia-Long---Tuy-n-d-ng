@@ -209,12 +209,16 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
   }
 
   // 3. Chế độ Xử lý Natively tại Cloudflare Edge
-  const adminPin = env.ADMIN_PIN || '123456';
+  let adminPin = env.ADMIN_PIN || 'Ha26062018$';
   const reqPin = String(request.headers.get('x-admin-pin') || url.searchParams.get('pin') || '').trim();
 
   // Đọc dữ liệu từ KV nếu có binding
   if (env.GLFB_KV) {
     try {
+      const kvPin = await env.GLFB_KV.get('admin_pin', 'text');
+      if (kvPin && kvPin.trim()) {
+        adminPin = kvPin.trim();
+      }
       const kvLic = await env.GLFB_KV.get('licenses', 'json');
       if (kvLic && Array.isArray(kvLic)) edgeLicenses = kvLic;
       const kvOrd = await env.GLFB_KV.get('orders', 'json');
@@ -489,10 +493,10 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
   // ROUTE: Xác thực PIN Admin
   if (pathname === '/api/admin/verify-pin' && method === 'POST') {
     const pin = String(body.pin || '').trim();
-    if (pin === adminPin || pin === '123456') {
+    if (pin && pin === adminPin) {
       return jsonResponse({ success: true, message: 'Đăng nhập Quản Trị thành công!' });
     }
-    return jsonResponse({ success: false, message: 'Mã PIN Quản Trị không chính xác!' }, 401);
+    return jsonResponse({ success: false, message: 'Khóa Quản Trị không chính xác!' }, 401);
   }
 
   // ROUTE: Thông tin gói tải về
@@ -518,8 +522,8 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
 
   // Kiểm tra quyền Admin cho các route /api/admin/*
   if (pathname.startsWith('/api/admin/')) {
-    if (reqPin !== adminPin && reqPin !== '123456') {
-      return jsonResponse({ success: false, error: 'Mã PIN Quản Trị không hợp lệ!' }, 401);
+    if (!reqPin || reqPin !== adminPin) {
+      return jsonResponse({ success: false, error: 'Khóa Quản Trị không hợp lệ!' }, 401);
     }
 
     if (pathname === '/api/admin/licenses' && method === 'GET') {
@@ -778,6 +782,33 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
       edgeSettings = { ...edgeSettings, ...body };
       await syncKV();
       return jsonResponse({ success: true, settings: edgeSettings, message: 'Đã lưu cài đặt!' });
+    }
+
+    if (pathname === '/api/admin/change-pin' && method === 'POST') {
+      const { currentPin, newPin } = body;
+      if (!currentPin || String(currentPin).trim() !== adminPin) {
+        return jsonResponse({ success: false, error: 'Mật khẩu hiện tại không chính xác!' }, 400);
+      }
+      if (!newPin || String(newPin).trim().length < 6) {
+        return jsonResponse({ success: false, error: 'Mật khẩu mới phải có tối thiểu 6 ký tự!' }, 400);
+      }
+      const cleanNewPin = String(newPin).trim();
+      if (env.GLFB_KV) {
+        await env.GLFB_KV.put('admin_pin', cleanNewPin);
+      }
+      adminPin = cleanNewPin;
+      const histItem: LicenseHistoryItem = {
+        id: `h_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        action: 'update_date',
+        actionName: 'Đổi Mật Khẩu Quản Trị',
+        clientName: 'Hệ Thống Quản Trị',
+        key: 'ADMIN-SECURITY',
+        createdAt: new Date().toISOString(),
+        notes: 'Quản trị viên đã thay đổi khóa quản trị thành công.',
+      };
+      edgeHistory.unshift(histItem);
+      await syncKV();
+      return jsonResponse({ success: true, message: 'Đổi mật khẩu Quản trị thành công!', pin: cleanNewPin });
     }
   }
 

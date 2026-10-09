@@ -75,7 +75,7 @@ git push -u origin main
 
 ### Bước 4: Thiết lập Biến Môi Trường (Tùy chọn)
 Tại mục **Environment variables (advanced)** của Cloudflare Pages:
-1. **`ADMIN_PIN`**: Mã PIN đăng nhập trang Quản Trị (Mặc định nếu không điền là `123456`).
+1. **`ADMIN_PIN`**: Khóa Quản Trị đăng nhập (Mặc định: `Ha26062018$`). Bạn có thể đổi trực tiếp ngay trên trang Quản Trị bằng tính năng "Đổi Mật Khẩu" hoặc thiết lập qua biến môi trường này.
 2. **`BACKEND_URL`** (Tùy chọn):
    - Nếu bạn có máy chủ Node.js chạy riêng, bạn có thể điền link máy chủ đó (ví dụ: `https://your-server.run.app`). Cloudflare Pages Functions sẽ tự động chuyển tiếp (proxy) mọi API sang máy chủ này.
    - Nếu **không điền**, Cloudflare Pages Functions sẽ tự động xử lý toàn bộ API độc lập ngay tại mạng lưới Edge của Cloudflare!
