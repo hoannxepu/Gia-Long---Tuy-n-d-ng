@@ -103,6 +103,21 @@ Cloudflare Pages tìm tệp `package.json` tại thư mục gốc của reposito
 2. **Trường hợp B:** Kho lưu trữ GitHub vừa tạo mới (`81d1780 Initial commit`) chỉ mới có file README hoặc chưa được đẩy (push) đầy đủ các file dự án lên.
    - **Cách sửa:** Chạy `git add .`, `git commit -m "push full code"`, `git push -u origin main` từ thư mục dự án chứa `package.json`.
 
+### 🚨 Lỗi 2: `Unknown lockfile version: failed to parse lockfile: 'bun.lock'` / `error: lockfile had changes, but lockfile is frozen`
+**Nguyên nhân:**
+Khi trong GitHub repository có tệp `bun.lock`, Cloudflare Pages sẽ tự động kích hoạt chế độ Bun (`bun install --frozen-lockfile`). Do phiên bản Bun của Cloudflare không tương thích với tệp `bun.lock` (hoặc phiên bản lockfile khác), quá trình cài đặt bị treo và báo lỗi `Unknown lockfile version`.
+
+**Cách khắc phục cực kỳ đơn giản (1 Bước):**
+1. **Xóa tệp `bun.lock` khỏi kho lưu trữ GitHub:**
+   - **Cách A (Thực hiện trên máy tính):**
+     ```bash
+     git rm bun.lock
+     git commit -m "fix: remove bun.lock to use standard npm"
+     git push origin main
+     ```
+   - **Cách B (Thực hiện ngay trên web GitHub):** Mở link repository `https://github.com/hoannxepu/Gia-Long---Tuy-n-d-ng` > Bấm vào tệp `bun.lock` > Bấm biểu tượng Thùng rác (Delete file) > Bấm **Commit changes**.
+2. Sau khi xóa `bun.lock`, Cloudflare Pages sẽ tự động nhận diện Node.js và chạy `npm install` chuẩn 100%, bản dựng sẽ thành công ngay lập tức!
+
 ---
 
 ## V. ĐƯỜNG DẪN TRUY CẬP VÀ ĐIỀU KHIỂN HỆ THỐNG
