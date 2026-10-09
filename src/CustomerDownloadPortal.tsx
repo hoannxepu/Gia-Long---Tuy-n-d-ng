@@ -195,7 +195,7 @@ export function CustomerDownloadPortal({
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
   const [copiedFullGuide, setCopiedFullGuide] = useState(false);
 
-  const currentVersion = packageInfo?.version || '1.0.3';
+  const currentVersion = packageInfo?.version || '1.0.4';
   const fileSizeKb = packageInfo?.sizeKb || 335;
   const zaloUrl = adminZaloUrl || 'https://zalo.me/0869029310';
 

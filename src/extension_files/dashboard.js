@@ -1564,12 +1564,12 @@ window.proceedSendOrder = async function() {
   // 2. Fallback gửi trực tiếp qua danh sách máy chủ khả dụng
   async function fallbackDirectFetch() {
     const candidates = [
-      window.location.origin.startsWith('http') ? window.location.origin : null,
-      'https://dang-bai-fb.pages.dev',
       'https://ais-dev-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app',
       'https://ais-pre-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app',
       'http://localhost:3000',
       'http://127.0.0.1:3000',
+      window.location.origin.startsWith('http') ? window.location.origin : null,
+      'https://dang-bai-fb.pages.dev',
     ].filter(Boolean);
 
     for (const sUrl of candidates) {

@@ -665,10 +665,12 @@ export default function App() {
     fetchLicenses(adminPin, false);
     fetchHistory(adminPin, false);
 
-    // Polling silent: chạy ngầm 10s/lần, so sánh dữ liệu trước khi set state để hoàn toàn không gây nhấp nháy giao diện
+    // Polling silent: chạy ngầm 5s/lần, tự động fetch cả orders, licenses, history để admin nhận thông tin ngay lập tức!
     const timer = setInterval(() => {
+      fetchOrders(adminPin, true);
       fetchLicenses(adminPin, true);
-    }, 10000);
+      fetchHistory(adminPin, true);
+    }, 5000);
 
     return () => clearInterval(timer);
   }, [isAdminUnlocked, adminPin]);
@@ -1677,7 +1679,7 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
                   Gia Long - FB
                 </h1>
                 <span className="text-[10px] sm:text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-1.5 sm:px-2 py-0.5 rounded-full font-medium">
-                  V1.0 - Phiên Bản Đầu Tiên
+                  V1.0.4 - Bản Store Chính Thức
                 </span>
               </div>
               <p className="text-[11px] sm:text-xs text-slate-400 hidden sm:block">

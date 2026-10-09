@@ -15,16 +15,16 @@ export function getExtensionVersion(): string {
     const manifestPath = path.join(extensionDir, 'manifest.json');
     if (fs.existsSync(manifestPath)) {
       const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
-      return manifest.version || '1.0.2';
+      return manifest.version || '1.0.4';
     }
   } catch (e) {}
-  return '1.0.2';
+  return '1.0.4';
 }
 
 export function bumpExtensionVersion(type: 'patch' | 'minor' = 'patch'): string {
   const manifestPath = path.join(extensionDir, 'manifest.json');
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
-  const current = manifest.version || '1.0.2';
+  const current = manifest.version || '1.0.4';
   const parts = current.split('.').map((n: string) => parseInt(n, 10) || 0);
   while (parts.length < 3) parts.push(0);
 

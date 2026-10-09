@@ -1338,14 +1338,14 @@ function getCurrentStoreVersion(): string {
       if (m.version) return m.version;
     }
   } catch (e) {}
-  return '1.0.2';
+  return '1.0.4';
 }
 
 app.get('/api/package/info', (_req: Request, res: Response) => {
   const version = getCurrentStoreVersion();
   const currentZip = path.join(DIST_EXT_DIR, `Gia_Long_FB_WebStore_v${version}.zip`);
   const fallbackZip = path.join(DIST_EXT_DIR, 'Gia_Long_FB_WebStore_latest.zip');
-  const targetFile = fs.existsSync(currentZip) ? currentZip : (fs.existsSync(fallbackZip) ? fallbackZip : path.join(DIST_EXT_DIR, 'Gia_Long_FB_WebStore_v1.0.2.zip'));
+  const targetFile = fs.existsSync(currentZip) ? currentZip : (fs.existsSync(fallbackZip) ? fallbackZip : path.join(DIST_EXT_DIR, 'Gia_Long_FB_WebStore_v1.0.4.zip'));
   
   const exists = fs.existsSync(targetFile);
   let sizeKb = 0;

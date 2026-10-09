@@ -90,18 +90,17 @@ async function getApiBaseUrl() {
       return u.origin;
     }
   } catch (e) {}
-  // Mặc định kết nối về domain Cloudflare Pages chính thức của hệ thống Gia Long - FB
-  return 'https://dang-bai-fb.pages.dev';
+  return 'https://ais-dev-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app';
 }
 
 function getCandidateServerUrls(primaryBase) {
   const list = [
     primaryBase,
-    'https://dang-bai-fb.pages.dev',
     'https://ais-dev-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app',
     'https://ais-pre-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app',
     'http://localhost:3000',
     'http://127.0.0.1:3000',
+    'https://dang-bai-fb.pages.dev',
   ];
   return list.filter((v, i, a) => Boolean(v) && a.indexOf(v) === i);
 }
