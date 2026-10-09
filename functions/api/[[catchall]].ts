@@ -178,10 +178,11 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
     });
   }
 
-  // 2. Chế độ Proxy: Nếu có BACKEND_URL được cấu hình trong Cloudflare Pages Environment
-  if (env.BACKEND_URL && env.BACKEND_URL.startsWith('http')) {
+  // 2. Chế độ Proxy: Proxy tới Central Backend (Cloud Run) để đảm bảo Cloudflare Pages & Cloud Run luôn đồng bộ 100%
+  const targetBackend = env.BACKEND_URL || 'https://ais-dev-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app';
+  if (targetBackend && targetBackend.startsWith('http')) {
     try {
-      const backendBase = env.BACKEND_URL.replace(/\/+$/, '');
+      const backendBase = targetBackend.replace(/\/+$/, '');
       const backendTarget = `${backendBase}${pathname}${url.search}`;
       
       const proxyReqInit: RequestInit = {
@@ -204,7 +205,7 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
         headers: respHeaders,
       });
     } catch (proxyErr) {
-      console.warn('[Cloudflare Pages Functions] Proxy to BACKEND_URL failed, falling back to Edge processing:', proxyErr);
+      console.warn('[Cloudflare Pages Functions] Proxy to Central Backend failed, falling back to Edge processing:', proxyErr);
     }
   }
 
@@ -268,7 +269,12 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
 
     const found = edgeLicenses.find((l) => l.key.trim().toUpperCase() === String(key).trim().toUpperCase());
     if (!found) {
-      return jsonResponse({ valid: false, message: 'Mã bản quyền không tồn tại trên hệ thống!' });
+      return jsonResponse({
+        valid: false,
+        isRevoked: true,
+        isDeleted: true,
+        message: 'Mã bản quyền không tồn tại hoặc đã bị Quản Trị Viên xóa khỏi hệ thống!',
+      });
     }
 
     if (found.isRevoked) {
@@ -490,6 +496,57 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
     });
   }
 
+  // ROUTE: Đồng bộ nhiều đơn hàng từ máy khách lên Server
+  if (pathname === '/api/orders/sync' && method === 'POST') {
+    const { orders: clientOrders } = body;
+    if (!Array.isArray(clientOrders) || !clientOrders.length) {
+      return jsonResponse({ success: true, count: 0, message: 'Không có đơn hàng nào cần đồng bộ.' });
+    }
+
+    let addedCount = 0;
+    for (const ord of clientOrders) {
+      if (!ord || !ord.id) continue;
+      const exists = edgeOrders.some((o) => o.id === ord.id || (o.deviceId === ord.deviceId && o.pkgName === ord.pkgName && Math.abs(new Date(o.createdAt).getTime() - new Date(ord.createdAt).getTime()) < 60000));
+      if (!exists) {
+        edgeOrders.unshift({
+          id: ord.id,
+          pkgName: ord.pkgName || 'Gói Bản Quyền',
+          price: ord.price || '1.000.000đ',
+          clientName: ord.clientName || 'Khách Đặt Mua',
+          phone: ord.phone || '',
+          deviceId: ord.deviceId || '',
+          createdAt: ord.createdAt || new Date().toISOString(),
+          status: ord.status || 'pending',
+          note: ord.note || 'Tự động đồng bộ từ Extension',
+        });
+        addedCount++;
+      }
+    }
+    if (addedCount > 0) {
+      await syncKV();
+    }
+    return jsonResponse({
+      success: true,
+      count: addedCount,
+      totalOrders: edgeOrders.length,
+      orders: edgeOrders,
+      message: `✓ Đã đồng bộ ${addedCount} đơn đặt mua từ máy khách lên Quản Trị thành công!`,
+    });
+  }
+
+  // ROUTE: Lấy số lượng đơn chờ duyệt cho quả chuông thông báo (Không yêu cầu PIN)
+  if (pathname === '/api/orders/pending-count' && method === 'GET') {
+    const pendingOrders = edgeOrders.filter((o) => o.status === 'pending');
+    return jsonResponse({ success: true, count: pendingOrders.length });
+  }
+
+  // ROUTE: Khách hàng / Extension tra cứu đơn hàng theo Device ID
+  if (pathname === '/api/orders/my-orders' && method === 'GET') {
+    const devId = String(url.searchParams.get('deviceId') || '').trim();
+    const matched = devId ? edgeOrders.filter((o) => o.deviceId === devId) : edgeOrders.slice(0, 50);
+    return jsonResponse({ success: true, orders: matched });
+  }
+
   // ROUTE: Xác thực PIN Admin
   if (pathname === '/api/admin/verify-pin' && method === 'POST') {
     const pin = String(body.pin || '').trim();
@@ -504,10 +561,10 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
     return jsonResponse({
       success: true,
       isReady: true,
-      sizeKb: 332,
+      sizeKb: 334,
       updatedAt: new Date().toISOString(),
-      fileName: 'Gia_Long_FB_WebStore_latest.zip',
-      version: '1.0.3',
+      fileName: 'Gia_Long_FB_WebStore_v1.0.4.zip',
+      version: '1.0.4',
     });
   }
 
@@ -551,6 +608,69 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
       edgeHistory = [];
       await syncKV();
       return jsonResponse({ success: true, message: 'Đã xóa toàn bộ lịch sử!' });
+    }
+
+    if (pathname === '/api/admin/orders/update' && method === 'POST') {
+      const { orderId, clientName, phone, pkgName, price, deviceId, note, status } = body;
+      const order = edgeOrders.find((o) => o.id === orderId);
+      if (!order) return jsonResponse({ success: false, error: 'Không tìm thấy đơn hàng!' }, 404);
+
+      if (clientName !== undefined) order.clientName = String(clientName).trim();
+      if (phone !== undefined) order.phone = String(phone).trim();
+      if (pkgName !== undefined) order.pkgName = String(pkgName).trim();
+      if (price !== undefined) order.price = String(price).trim();
+      if (deviceId !== undefined) order.deviceId = String(deviceId).trim();
+      if (note !== undefined) order.note = String(note).trim();
+      if (status !== undefined) order.status = status;
+
+      await addHistory({
+        action: 'create',
+        actionName: 'Cập nhật đơn hàng',
+        clientName: order.clientName || 'Khách Đặt Mua',
+        phone: order.phone || '',
+        deviceId: order.deviceId || '',
+        key: order.generatedKey || order.id.slice(-8).toUpperCase(),
+        planType: 'individual',
+        pkgName: normalizePkgSymbol(order.pkgName),
+        amount: order.price,
+        notes: `Cập nhật thông tin đơn hàng #${order.id}`,
+      });
+      await syncKV();
+
+      return jsonResponse({
+        success: true,
+        message: '✓ Đã cập nhật đơn đặt mua & đồng bộ lịch sử thành công!',
+        order,
+        orders: edgeOrders,
+        history: edgeHistory,
+      });
+    }
+
+    if (pathname === '/api/admin/licenses/update' && method === 'POST') {
+      const { id, expiresAt, clientName, phone, maxDevices, notes } = body;
+      const found = edgeLicenses.find((l) => l.id === id);
+      if (!found) return jsonResponse({ success: false, error: 'Không tìm thấy mã bản quyền!' }, 404);
+
+      if (expiresAt) found.expiresAt = new Date(expiresAt).toISOString();
+      if (clientName !== undefined) found.clientName = String(clientName).trim();
+      if (phone !== undefined) found.phone = String(phone).trim();
+      if (maxDevices !== undefined) found.maxDevices = parseInt(maxDevices, 10) || 1;
+      if (notes !== undefined) found.notes = String(notes).trim();
+
+      await addHistory({
+        action: 'update_date',
+        actionName: 'Sửa ngày hết hạn',
+        clientName: found.clientName,
+        phone: found.phone || '',
+        deviceId: found.devices?.[0]?.deviceId || '',
+        key: found.key,
+        planType: found.planType,
+        newExpiresAt: found.expiresAt,
+        notes: `Cập nhật hạn dùng mới: ${new Date(found.expiresAt).toLocaleDateString('vi-VN')}`,
+      });
+      await syncKV();
+
+      return jsonResponse({ success: true, message: '✓ Đã cập nhật thông tin mã bản quyền thành công!', license: found });
     }
 
     if (pathname === '/api/admin/orders/approve' && method === 'POST') {

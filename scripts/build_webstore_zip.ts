@@ -129,16 +129,17 @@ if (process.argv[1] && process.argv[1].endsWith('build_webstore_zip.ts')) {
       // Đồng bộ trực tiếp vào thư mục public để phục vụ tải trực tiếp trên Cloudflare Pages & Vercel
       fs.writeFileSync(path.join(publicDir, fileName), zipBuffer);
       fs.writeFileSync(path.join(publicDir, 'Gia_Long_FB_WebStore_latest.zip'), zipBuffer);
-      fs.writeFileSync(path.join(publicDir, 'Gia_Long_FB_WebStore_v1.0.2.zip'), zipBuffer);
+      fs.writeFileSync(path.join(publicDir, 'Gia_Long_FB_WebStore_v1.0.4.zip'), zipBuffer);
 
       const distDir = path.join(rootDir, 'dist');
       if (fs.existsSync(distDir)) {
         fs.writeFileSync(path.join(distDir, fileName), zipBuffer);
         fs.writeFileSync(path.join(distDir, 'Gia_Long_FB_WebStore_latest.zip'), zipBuffer);
+        fs.writeFileSync(path.join(distDir, 'Gia_Long_FB_WebStore_v1.0.4.zip'), zipBuffer);
       }
 
       // Lưu thêm các phiên bản để tương thích ngược tuyệt đối
-      fs.writeFileSync(path.join(outputDir, 'Gia_Long_FB_WebStore_v1.0.2.zip'), zipBuffer);
+      fs.writeFileSync(path.join(outputDir, 'Gia_Long_FB_WebStore_v1.0.4.zip'), zipBuffer);
       fs.writeFileSync(path.join(outputDir, 'Gia_Long_FB_WebStore_v1.0.0.zip'), zipBuffer);
       fs.writeFileSync(path.join(outputDir, 'Gia_Long_FB_WebStore_Unlisted_v1.6.zip'), zipBuffer);
       fs.writeFileSync(path.join(outputDir, 'AutoRecruit_FB_WebStore_Unlisted_v1.5.zip'), zipBuffer);

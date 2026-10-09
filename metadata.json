@@ -1,6 +1,6 @@
 {
-  "name": "Remix Remix Remix Remix Remix Remix Remix Remix Remix Chrome Extension Developer \u0026 Modification Guide",
-  "description": "Hướng dẫn chi tiết và bộ công cụ hỗ trợ chỉnh sửa, debug và nạp Chrome Extension từ các file có sẵn.",
+  "name": "Gia Long - FB • v1.0.4",
+  "description": "Gia Long - FB v1.0.4 • Nền tảng tự động hóa Facebook, hẹn giờ đăng bài nhóm và quản lý bản quyền Extension chuyên nghiệp.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

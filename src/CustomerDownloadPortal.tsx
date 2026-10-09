@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { getApiUrl } from './apiConfig.ts';
 import {
   Download,
   CheckCircle2,
@@ -209,7 +210,7 @@ export function CustomerDownloadPortal({
       const planName = purchaseGuidePlan?.name || 'Gói Bản Quyền';
       const planPrice = purchaseGuidePlan?.price || '1.000.000đ';
       const isTrial = planPrice === '0đ' || planName.includes('Dùng Thử');
-      const res = await fetch('/api/orders/create', {
+      const res = await fetch(getApiUrl('/api/orders/create'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -513,11 +514,7 @@ Hỗ trợ Zalo: 0869.029.310 (Gia Long - FB)`;
                 key={plan.id}
                 onClick={() => {
                   setSelectedPlan(plan);
-                  setPurchaseGuidePlan(plan);
                   setQuickOrderSuccess(null);
-                  if (onSelectPlan) {
-                    onSelectPlan({ name: plan.name, price: plan.price });
-                  }
                 }}
                 className={`rounded-2xl p-3.5 sm:p-4 flex flex-col justify-between transition-all cursor-pointer relative group border ${plan.theme.cardBorder} ${plan.theme.cardBg} ${isSelected ? 'ring-2 ring-emerald-400 border-emerald-500' : ''}`}
               >
@@ -586,7 +583,6 @@ Hỗ trợ Zalo: 0869.029.310 (Gia Long - FB)`;
                     onClick={(e) => {
                       e.stopPropagation();
                       setSelectedPlan(plan);
-                      setPurchaseGuidePlan(plan);
                       setQuickOrderSuccess(null);
                       if (onSelectPlan) {
                         onSelectPlan({ name: plan.name, price: plan.price });

@@ -18,7 +18,7 @@ Tài liệu này hướng dẫn cách kết nối kho lưu trữ GitHub và tri�
    - **Cơ Chế Dự Phòng (Multi-Server Fallback)**: Extension tự động thử kết nối lần lượt qua domain chính thức `dang-bai-fb.pages.dev`, máy chủ Backend hiện hành, và tự động cập nhật URL mới nhất khi người dùng mở trang web thông qua `web_bridge.js`.
 
 3. **Tự Động Đóng Gói Extension (`scripts/build_webstore_zip.ts`)**:
-   - Lệnh `npm run build` tự động chạy bộ đóng gói và sinh file ZIP chuẩn Store (`Gia_Long_FB_WebStore_latest.zip` và `v1.0.2.zip`) vào cả hai thư mục `dist-extension/` và `public/`, sau đó Vite sao chép trực tiếp vào `dist/` để khách hàng bấm là tải được ngay.
+   - Lệnh `npm run build` tự động chạy bộ đóng gói và sinh file ZIP chuẩn Store (`Gia_Long_FB_WebStore_latest.zip` và `Gia_Long_FB_WebStore_v1.0.4.zip`) vào cả hai thư mục `dist-extension/` và `public/`, sau đó Vite sao chép trực tiếp vào `dist/` để khách hàng bấm là tải được ngay.
 
 ---
 

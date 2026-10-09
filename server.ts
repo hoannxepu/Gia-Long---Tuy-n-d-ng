@@ -268,7 +268,9 @@ app.post('/api/license/verify', (req: Request, res: Response) => {
   if (!found) {
     return res.json({
       valid: false,
-      message: 'Mã bản quyền không tồn tại trên hệ thống!',
+      isRevoked: true,
+      isDeleted: true,
+      message: 'Mã bản quyền không tồn tại hoặc đã bị Quản Trị Viên xóa khỏi hệ thống!',
     });
   }
 
@@ -976,6 +978,29 @@ app.post('/api/orders/sync', (req: Request, res: Response) => {
     res.json({ success: true, message: `✓ Đã đồng bộ ${addedCount} đơn hàng cũ vào trang quản trị!`, totalOrders: serverOrders.length });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message || 'Lỗi đồng bộ đơn hàng' });
+  }
+});
+
+// Công khai số lượng đơn chờ duyệt để biểu tượng Quả Chuông (Bell) luôn hiện thông báo gây chú ý ngay lập tức
+app.get('/api/orders/pending-count', (_req: Request, res: Response) => {
+  try {
+    const orders = loadOrders();
+    const pendingOrders = orders.filter((o) => o.status === 'pending');
+    res.json({ success: true, count: pendingOrders.length });
+  } catch (err: any) {
+    res.json({ success: true, count: 0 });
+  }
+});
+
+// Khách hàng / Extension tra cứu danh sách đơn hàng theo Mã Thiết Bị (Device ID) để đồng bộ trạng thái duyệt & mã key
+app.get('/api/orders/my-orders', (req: Request, res: Response) => {
+  try {
+    const deviceId = String(req.query.deviceId || '').trim();
+    const orders = loadOrders();
+    const matched = deviceId ? orders.filter((o) => o.deviceId === deviceId) : orders.slice(0, 50);
+    res.json({ success: true, orders: matched });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 

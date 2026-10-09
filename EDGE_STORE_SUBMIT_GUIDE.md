@@ -8,7 +8,7 @@
 
 1. **Tương thích 100% không cần đổi code**:
    - Microsoft Edge chạy trên nền tảng Chromium y hệt Google Chrome.
-   - Toàn bộ Manifest V3, Service Worker, Content Scripts và file ZIP `Gia_Long_FB_WebStore_v1.0.2.zip` đã được tối ưu chạy mượt mà 100% trên Edge.
+   - Toàn bộ Manifest V3, Service Worker, Content Scripts và file ZIP `Gia_Long_FB_WebStore_v1.0.4.zip` đã được tối ưu chạy mượt mà 100% trên Edge.
 2. **Xét duyệt nhanh chóng & thoáng hơn**:
    - Microsoft có đội ngũ xét duyệt tự động và thủ công rất nhanh, ít khi bị "ngâm" hàng tuần như Chrome.
 3. **Chi phí $0**:
@@ -28,9 +28,9 @@
 - Đăng nhập bằng tài khoản Microsoft của bạn.
 - Nếu là lần đầu tiên, chỉ cần điền tên Developer / Đơn vị đại diện (ví dụ: `Gia Long - FB` hoặc tên cá nhân bạn) rồi đồng ý điều khoản (hoàn toàn miễn phí).
 
-### 📦 Bước 2: Bấm tạo mới Extension & Tải gói ZIP v1.0.2
+### 📦 Bước 2: Bấm tạo mới Extension & Tải gói ZIP v1.0.4
 - Trong mục **Microsoft Edge** ➔ Chọn **Developer** ➔ Bấm **"Create new extension"**.
-- Kéo thả file ZIP: **`Gia_Long_FB_WebStore_v1.0.2.zip`** (tải trực tiếp từ giao diện Quản Trị / Workspace trong app).
+- Kéo thả file ZIP: **`Gia_Long_FB_WebStore_v1.0.4.zip`** (tải trực tiếp từ giao diện Quản Trị / Workspace trong app).
 - Hệ thống Microsoft sẽ kiểm tra tệp manifest và báo **Package verified successfully** màu xanh lá!
 
 ### 📝 Bước 3: Điền thông tin Store Listing (Thông tin cửa hàng)
@@ -77,8 +77,8 @@ Khi bạn bấm nút **"Gửi đề nghị"** (Submit) ở cuối trang tổng q
 - **Hiện tượng:** Báo lỗi *"Logo must be 300 x 300 pixels"*.
 - **Cách khắc phục:** Bấm tải ảnh **[store_logo_300x300.png](/store_logo_300x300.png)** (đúng chuẩn 300x300 px PNG) và tải lên ô **Biểu trưng tiện ích (Extension logo)**.
 
-### 🔴 4. SỬ DỤNG GÓI ZIP MỚI NHẤT V1.0.3 (KHÔNG BỊ TRÙNG PHIÊN BẢN):
-- Dùng gói **`Gia_Long_FB_WebStore_v1.0.3.zip`** (đã được làm sạch 100% manifest, loại bỏ hoàn toàn localhost và match pattern không hợp lệ).
+### 🔴 4. SỬ DỤNG GÓI ZIP MỚI NHẤT V1.0.4 (KHÔNG BỊ TRÙNG PHIÊN BẢN):
+- Dùng gói **`Gia_Long_FB_WebStore_v1.0.4.zip`** (đã được làm sạch 100% manifest, loại bỏ hoàn toàn localhost và match pattern không hợp lệ).
 
 ---
 
@@ -103,7 +103,7 @@ Sau này khi Chrome Web Store của bạn được Google duyệt xong, trên gi
 ## 📲 CÁCH KHÁCH HÀNG CÀI ĐẶT SAU KHI EDGE DUYỆT
 
 ### Thông Tin Tiện Ích Đã Cấp Trên Microsoft Partner Center:
-* **Tên tiện ích:** Gia Long - FB (Version 1.0.2)
+* **Tên tiện ích:** Gia Long - FB (Version 1.0.4)
 * **CRX ID:** `blpkghkjimacggjlgiklkaddldbcnebo`
 * **Store ID:** `0RDCKC6WT538`
 * **Product ID:** `d51e5560-f786-49c3-bba8-cbf4272dfbe1`

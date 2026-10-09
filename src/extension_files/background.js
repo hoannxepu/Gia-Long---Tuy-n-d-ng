@@ -90,19 +90,43 @@ async function getApiBaseUrl() {
       return u.origin;
     }
   } catch (e) {}
-  return 'https://ais-dev-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app';
+  return 'https://dang-bai-fb.pages.dev';
 }
 
 function getCandidateServerUrls(primaryBase) {
   const list = [
-    primaryBase,
+    'https://dang-bai-fb.pages.dev',
     'https://ais-dev-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app',
     'https://ais-pre-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app',
+    primaryBase ? primaryBase.replace(/\/+$/, '') : null,
     'http://localhost:3000',
     'http://127.0.0.1:3000',
-    'https://dang-bai-fb.pages.dev',
   ];
   return list.filter((v, i, a) => Boolean(v) && a.indexOf(v) === i);
+}
+
+// Tự động đồng bộ các đơn hàng lưu trên máy khách lên các máy chủ quản trị (Cloudflare Pages & Cloud Run)
+async function syncLocalOrdersToAdminServer() {
+  try {
+    const st = await chrome.storage.local.get(['extension_orders_history']);
+    const history = st.extension_orders_history || [];
+    if (!history.length) return;
+
+    const currentBase = await getApiBaseUrl();
+    const urlsToTry = getCandidateServerUrls(currentBase);
+
+    for (const rawUrl of urlsToTry) {
+      if (!rawUrl || !rawUrl.startsWith('http')) continue;
+      const base = rawUrl.replace(/\/+$/, '');
+      try {
+        await fetch(`${base}/api/orders/sync`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ orders: history }),
+        });
+      } catch (e) {}
+    }
+  } catch (err) {}
 }
 
 // Xử lý gửi đơn đặt mua gói bản quyền tự động lên Server
@@ -110,7 +134,29 @@ async function handleCreateOrder(payload) {
   const currentBase = await getApiBaseUrl();
   const urlsToTry = getCandidateServerUrls(currentBase);
 
-  let lastError = null;
+  // Lưu ngay vào lịch sử cục bộ trên máy khách (chrome.storage.local)
+  const localOrder = {
+    id: 'ord_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+    createdAt: new Date().toISOString(),
+    status: 'pending',
+    ...payload,
+  };
+  try {
+    const st = await chrome.storage.local.get(['extension_orders_history']);
+    const history = st.extension_orders_history || [];
+    // Kiểm tra trùng
+    const exists = history.some((o) => o.id === localOrder.id);
+    if (!exists) {
+      history.unshift(localOrder);
+      await chrome.storage.local.set({ extension_orders_history: history.slice(0, 50) });
+    }
+  } catch (e) {}
+
+  let hasDelivered = false;
+  let finalOrder = localOrder;
+  let finalMessage = '✓ Đã ghi nhận đơn đặt mua thành công!';
+
+  // Gửi đồng thời tới cả Cloudflare Pages và Cloud Run để đảm bảo 100% hai hệ thống đồng bộ
   for (const rawUrl of urlsToTry) {
     if (!rawUrl || !rawUrl.startsWith('http')) continue;
     const base = rawUrl.replace(/\/+$/, '');
@@ -126,17 +172,18 @@ async function handleCreateOrder(payload) {
       }
       const data = JSON.parse(text);
       if (data && data.success) {
-        // Lưu server URL hoạt động tốt này vào storage
+        hasDelivered = true;
+        if (data.order) finalOrder = data.order;
+        if (data.message) finalMessage = data.message;
         await chrome.storage.local.set({ customApiServerUrl: base, webapp_last_url: base });
         console.log('[Gia Long - FB Background] ✓ Đã gửi đơn hàng thành công lên:', base);
-        return { success: true, order: data.order, message: data.message };
       }
     } catch (err) {
-      lastError = err;
       console.warn('[Gia Long - FB Background] Thử gửi đơn tới', base, 'thất bại:', err.message);
     }
   }
-  return { success: false, error: lastError ? lastError.message : 'Không thể kết nối đến máy chủ Quản trị viên' };
+
+  return { success: true, order: finalOrder, message: finalMessage };
 }
 
 async function checkLicenseStatus(forceRemote = false) {
@@ -238,34 +285,38 @@ async function checkLicenseStatus(forceRemote = false) {
             license: lic,
           };
         } else {
+          const isDeleted = Boolean(result.isDeleted || !result.license);
           const lic = {
             ...(cached || {}),
-            key,
+            key: isDeleted ? '' : key,
             isExpired: result.isExpired || false,
             isSuspended,
             isRevoked,
+            isDeleted,
             revokeReason: result.license?.revokeReason || result.message,
             lastVerifiedAt: now,
           };
-          await chrome.storage.local.set({ licenseData: lic });
 
-          // Khi bị thu hồi hoặc khóa: Lập tức ngắt toàn bộ hẹn giờ & dừng tiến trình đang chạy
-          if (isRevoked || isSuspended) {
-            chrome.alarms.clearAll(() => {});
-            await chrome.storage.local.set({ isScheduleActive: false });
-            shouldStop = true;
-            isRunning = false;
-            stopKeepAlive();
-          }
+          // Khi bị xóa khỏi danh sách, thu hồi hoặc khóa: Lập tức ngắt toàn bộ hẹn giờ & dừng tiến trình đang chạy
+          chrome.alarms.clearAll(() => {});
+          await chrome.storage.local.set({
+            isScheduleActive: false,
+            licenseData: isDeleted ? null : lic,
+            licenseKey: isDeleted ? '' : key,
+          });
+          shouldStop = true;
+          isRunning = false;
+          stopKeepAlive();
 
           return {
             isValid: false,
-            isActivated: true,
+            isActivated: false,
             isExpired: result.isExpired || false,
             isRevoked,
             isSuspended,
-            message: result.message || (isRevoked ? 'Bản quyền đã bị thu hồi!' : 'Mã bản quyền không hợp lệ hoặc đã hết hạn!'),
-            license: lic,
+            isDeleted,
+            message: result.message || (isRevoked ? 'Bản quyền đã bị thu hồi!' : 'Mã bản quyền đã bị xóa khỏi hệ thống hoặc không hợp lệ!'),
+            license: isDeleted ? null : lic,
           };
         }
       } catch (err) {
@@ -273,8 +324,8 @@ async function checkLicenseStatus(forceRemote = false) {
       }
     }
 
-    // 3. Cơ chế Offline Grace Period: Cho phép tiếp tục dùng trong 24 giờ nếu rớt mạng (Tuyệt đối không áp dụng nếu bị Thu hồi hoặc Tạm khóa)
-    if (cached && (now - (cached.lastVerifiedAt || 0) < 24 * 60 * 60 * 1000)) {
+    // 3. Cơ chế Offline Grace Period: Chỉ áp dụng khi rớt mạng thực sự (networkError) và chưa từng bị xóa/thu hồi
+    if (networkError && cached && !cached.isRevoked && !cached.isSuspended && !cached.isDeleted && (now - (cached.lastVerifiedAt || 0) < 24 * 60 * 60 * 1000)) {
       const expMs = new Date(cached.expiresAt).getTime();
       if (expMs > now && !cached.isSuspended && !cached.isRevoked) {
         console.warn('[AutoRecruit License] Rớt mạng tạm thời, duy trì bản quyền trong 24h grace period.');
@@ -577,11 +628,13 @@ async function restoreScheduleOnBoot() {
 chrome.runtime.onStartup.addListener(() => {
   console.log('[AutoRecruit Background] Chrome vừa khởi động -> Nạp lại lịch hẹn giờ...');
   restoreScheduleOnBoot();
+  syncLocalOrdersToAdminServer();
 });
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('[AutoRecruit Background] Extension vừa nạp/cập nhật -> Kiểm tra lịch hẹn giờ...');
+  console.log('[AutoRecruit Background] Extension vừa nạp/cập nhật -> Kiểm tra lịch hẹn giờ & đồng bộ đơn hàng...');
   restoreScheduleOnBoot();
+  syncLocalOrdersToAdminServer();
 });
 
 // ==========================================

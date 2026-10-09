@@ -58,10 +58,12 @@ import {
   SlidersHorizontal,
   Laptop,
   Edit3,
-  EyeOff
+  EyeOff,
+  Bell
 } from 'lucide-react';
 import { DEFAULT_EXTENSION_BUNDLE, ExtensionFileDef } from './extension_files/index.ts';
 import { CustomerDownloadPortal } from './CustomerDownloadPortal.tsx';
+import { getApiUrl } from './apiConfig.ts';
 
 export interface AdminLicenseItem {
   id: string;
@@ -268,6 +270,7 @@ export default function App() {
   const [isLoadingLicenses, setIsLoadingLicenses] = useState<boolean>(false);
   const [showCreateModal, setShowCreateModal] = useState<boolean>(false);
   const [showUserGuideModal, setShowUserGuideModal] = useState<boolean>(false);
+  const [publicPendingOrdersCount, setPublicPendingOrdersCount] = useState<number>(0);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [copiedLinkKey, setCopiedLinkKey] = useState<string | null>(null);
   const [copiedZaloMsg, setCopiedZaloMsg] = useState<string | null>(null);
@@ -366,7 +369,7 @@ export default function App() {
   const handleUpdateDirectDate = async () => {
     if (!actionModalLicense || !actionEditDate) return;
     try {
-      const res = await fetch('/api/admin/licenses/update', {
+      const res = await fetch(getApiUrl('/api/admin/licenses/update'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -395,7 +398,7 @@ export default function App() {
   // Lấy thông tin gói đóng gói ZIP bảo mật
   const fetchPackageInfo = async () => {
     try {
-      const res = await fetch('/api/package/info');
+      const res = await fetch(getApiUrl('/api/package/info'));
       const data = await res.json();
       if (data.success) setPackageInfo(data);
     } catch (e) {}
@@ -404,7 +407,7 @@ export default function App() {
   // Lấy cài đặt hệ thống (link Chrome Web Store, Microsoft Edge Add-ons & link Zalo Quản trị)
   const fetchSettings = async () => {
     try {
-      const res = await fetch('/api/settings');
+      const res = await fetch(getApiUrl('/api/settings'));
       const data = await res.json();
       if (data.success && data.settings) {
         if (data.settings.chromeStoreUrl) setChromeStoreUrl(data.settings.chromeStoreUrl);
@@ -418,7 +421,7 @@ export default function App() {
   const handleSaveStoreUrl = async () => {
     setIsSavingSettings(true);
     try {
-      const res = await fetch('/api/admin/settings', {
+      const res = await fetch(getApiUrl('/api/admin/settings'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-admin-pin': adminPin },
         body: JSON.stringify({ chromeStoreUrl, edgeStoreUrl }),
@@ -439,7 +442,7 @@ export default function App() {
   // Lưu link Zalo Quản trị viên
   const handleSaveZaloUrl = async () => {
     try {
-      const res = await fetch('/api/admin/settings', {
+      const res = await fetch(getApiUrl('/api/admin/settings'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-admin-pin': adminPin },
         body: JSON.stringify({ zaloUrl: adminZaloUrl }),
@@ -466,7 +469,7 @@ export default function App() {
     reader.onload = async (event) => {
       try {
         const base64 = event.target?.result as string;
-        const res = await fetch('/api/admin/upload-qr-image', {
+        const res = await fetch(getApiUrl('/api/admin/upload-qr-image'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-admin-pin': adminPin },
           body: JSON.stringify({ imageBase64: base64 }),
@@ -492,7 +495,7 @@ export default function App() {
   const handleRebuildPackage = async (bumpVersion: boolean = false) => {
     setIsRebuildingPackage(true);
     try {
-      const res = await fetch('/api/admin/package/rebuild', {
+      const res = await fetch(getApiUrl('/api/admin/package/rebuild'), {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -583,7 +586,7 @@ export default function App() {
 
     // 1. Kiểm tra trên server
     try {
-      const res = await fetch('/api/license/verify', {
+      const res = await fetch(getApiUrl('/api/license/verify'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key }),
@@ -618,7 +621,7 @@ export default function App() {
   const fetchOrders = async (pin = adminPin, isSilent = false) => {
     try {
       if (!isSilent) setIsLoadingOrders(true);
-      const res = await fetch('/api/admin/orders', {
+      const res = await fetch(getApiUrl('/api/admin/orders'), {
         headers: { 'x-admin-pin': pin },
       });
       const data = await res.json();
@@ -644,7 +647,7 @@ export default function App() {
   const fetchHistory = async (pin = adminPin, isSilent = false) => {
     try {
       if (!isSilent) setIsLoadingHistory(true);
-      const res = await fetch('/api/admin/history', {
+      const res = await fetch(getApiUrl('/api/admin/history'), {
         headers: { 'x-admin-pin': pin },
       });
       const data = await res.json();
@@ -657,6 +660,27 @@ export default function App() {
       if (!isSilent) setIsLoadingHistory(false);
     }
   };
+
+  // Tự động kiểm tra số lượng đơn chờ duyệt từ xa (ngay cả khi chưa mở khóa Admin)
+  // để biểu tượng Quả Chuông trên Header và Tab Quản Trị luôn gây chú ý và cập nhật thời gian thực!
+  useEffect(() => {
+    const checkPendingCount = async () => {
+      try {
+        const res = await fetch(getApiUrl('/api/orders/pending-count'));
+        const data = await res.json();
+        if (data && data.success && typeof data.count === 'number') {
+          setPublicPendingOrdersCount(data.count);
+        }
+      } catch (e) {}
+    };
+    checkPendingCount();
+    const timer = setInterval(checkPendingCount, 4000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const pendingOrdersCount = isAdminUnlocked
+    ? adminOrders.filter((o) => o.status === 'pending').length
+    : publicPendingOrdersCount;
 
   // Tự động kiểm tra đơn hàng mới định kỳ trong nền mà KHÔNG làm giật/nháy giao diện
   useEffect(() => {
@@ -677,7 +701,7 @@ export default function App() {
 
   const handleApproveOrder = async (orderId: string) => {
     try {
-      const res = await fetch('/api/admin/orders/approve', {
+      const res = await fetch(getApiUrl('/api/admin/orders/approve'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -709,7 +733,7 @@ export default function App() {
     if (!editingOrder) return;
     setIsUpdatingOrder(true);
     try {
-      const res = await fetch('/api/admin/orders/update', {
+      const res = await fetch(getApiUrl('/api/admin/orders/update'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -759,7 +783,7 @@ export default function App() {
 
     try {
       if (type === 'order') {
-        const res = await fetch('/api/admin/orders/delete', {
+        const res = await fetch(getApiUrl('/api/admin/orders/delete'), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -778,7 +802,7 @@ export default function App() {
           alert('Lỗi: ' + (data.error || 'Không thể xóa đơn'));
         }
       } else {
-        const res = await fetch('/api/admin/licenses/delete', {
+        const res = await fetch(getApiUrl('/api/admin/licenses/delete'), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -827,7 +851,7 @@ export default function App() {
 
     // 2. Gửi API lên Server tự động
     try {
-      const res = await fetch('/api/orders/create', {
+      const res = await fetch(getApiUrl('/api/orders/create'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -860,7 +884,7 @@ export default function App() {
   const fetchLicenses = async (pin = adminPin, isSilent = false) => {
     try {
       if (!isSilent) setIsLoadingLicenses(true);
-      const res = await fetch('/api/admin/licenses', {
+      const res = await fetch(getApiUrl('/api/admin/licenses'), {
         headers: { 'x-admin-pin': pin },
       });
       const data = await res.json();
@@ -884,7 +908,7 @@ export default function App() {
       return;
     }
     try {
-      const res = await fetch('/api/admin/verify-pin', {
+      const res = await fetch(getApiUrl('/api/admin/verify-pin'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pin: cleanInput }),
@@ -935,7 +959,7 @@ export default function App() {
 
     setIsChangingPin(true);
     try {
-      const res = await fetch('/api/admin/change-pin', {
+      const res = await fetch(getApiUrl('/api/admin/change-pin'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -984,7 +1008,7 @@ export default function App() {
     e.preventDefault();
     if (!newLicClient.trim()) return alert('Vui lòng nhập tên khách hàng hoặc công ty!');
     try {
-      const res = await fetch('/api/admin/licenses/create', {
+      const res = await fetch(getApiUrl('/api/admin/licenses/create'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1019,7 +1043,7 @@ export default function App() {
 
   const handleExtendLicense = async (id: string, addDays = 30) => {
     try {
-      const res = await fetch('/api/admin/licenses/extend', {
+      const res = await fetch(getApiUrl('/api/admin/licenses/extend'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1049,7 +1073,7 @@ export default function App() {
 
   const handleToggleLicense = async (id: string) => {
     try {
-      const res = await fetch('/api/admin/licenses/toggle', {
+      const res = await fetch(getApiUrl('/api/admin/licenses/toggle'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1078,7 +1102,7 @@ export default function App() {
     if (reason === null) return;
 
     try {
-      const res = await fetch('/api/admin/licenses/revoke', {
+      const res = await fetch(getApiUrl('/api/admin/licenses/revoke'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1104,7 +1128,7 @@ export default function App() {
   const handleUnrevokeLicense = async (id: string, clientName: string) => {
     if (!confirm(`Khôi phục quyền sử dụng lại cho khách "${clientName}"?`)) return;
     try {
-      const res = await fetch('/api/admin/licenses/unrevoke', {
+      const res = await fetch(getApiUrl('/api/admin/licenses/unrevoke'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1136,7 +1160,7 @@ export default function App() {
       return;
 
     try {
-      const res = await fetch('/api/admin/licenses/regenerate-key', {
+      const res = await fetch(getApiUrl('/api/admin/licenses/regenerate-key'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1167,7 +1191,7 @@ export default function App() {
   const handleResetDevices = async (id: string) => {
     if (!confirm('Bạn có chắc muốn Reset thiết bị cho mã này? (Khách có thể kích hoạt lại trên máy tính mới)')) return;
     try {
-      const res = await fetch('/api/admin/licenses/reset-devices', {
+      const res = await fetch(getApiUrl('/api/admin/licenses/reset-devices'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1354,7 +1378,7 @@ Em xin gửi anh/chị hướng dẫn cài đặt và kích hoạt bản quyền
   const handleDownloadStoreZip = async () => {
     try {
       setIsDownloadingZip(true);
-      const res = await fetch('/api/package/download-obfuscated-zip');
+      const res = await fetch(getApiUrl('/api/package/download-obfuscated-zip'));
       if (!res.ok) {
         throw new Error(`Lỗi tải file từ máy chủ (Mã lỗi ${res.status})`);
       }
@@ -1366,7 +1390,7 @@ Em xin gửi anh/chị hướng dẫn cài đặt và kích hoạt bản quyền
         }
       }
       const contentDisposition = res.headers.get('Content-Disposition');
-      let downloadFileName = packageInfo?.fileName || `Gia_Long_FB_WebStore_v${packageInfo?.version || '1.0.3'}.zip`;
+      let downloadFileName = packageInfo?.fileName || `Gia_Long_FB_WebStore_v${packageInfo?.version || '1.0.4'}.zip`;
       if (contentDisposition && contentDisposition.includes('filename="')) {
         const match = contentDisposition.match(/filename="([^"]+)"/);
         if (match && match[1]) downloadFileName = match[1];
@@ -1424,7 +1448,7 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `Gia_Long_FB_Extension_v${packageInfo?.version || '1.0.2'}_Source.zip`;
+      a.download = `Gia_Long_FB_Extension_v${packageInfo?.version || '1.0.4'}_Source.zip`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -1717,7 +1741,11 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
           <div className="flex flex-wrap items-center gap-1.5">
             {/* Tab 1: Cổng Khách Hàng (Xem Tiện Ích & Mua Key) */}
             <button
-              onClick={() => setActiveTab('client-portal')}
+              onClick={() => {
+                setOrderModalPkg(null);
+                setOrderSuccessData(null);
+                setActiveTab('client-portal');
+              }}
               className={`px-3.5 py-2 rounded-lg font-bold transition-all flex items-center ${
                 activeTab === 'client-portal'
                   ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-600/30'
@@ -1729,7 +1757,11 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
 
             {/* Tab 2: Chính Sách Quyền Riêng Tư */}
             <button
-              onClick={() => setActiveTab('privacy')}
+              onClick={() => {
+                setOrderModalPkg(null);
+                setOrderSuccessData(null);
+                setActiveTab('privacy');
+              }}
               className={`px-3.5 py-2 rounded-lg font-semibold transition-all flex items-center ${
                 activeTab === 'privacy'
                   ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
@@ -1742,17 +1774,26 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
             {/* Tab 3: Quản Trị Cấp Key (Duy nhất 1 nút Quản Trị tập trung tại thanh Tab) */}
             <button
               onClick={() => {
+                setOrderModalPkg(null);
+                setOrderSuccessData(null);
                 setActiveTab('license-admin');
                 if (isAdminUnlocked) fetchLicenses();
               }}
-              className={`px-3.5 py-2 rounded-lg font-semibold transition-all flex items-center ${
+              className={`px-3.5 py-2 rounded-lg font-semibold transition-all flex items-center gap-1.5 ${
                 activeTab === 'license-admin'
                   ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
                   : 'text-indigo-400 hover:text-indigo-200 hover:bg-slate-800/80'
               }`}
               title="Dành riêng cho Quản trị viên quản lý và cấp key"
             >
+              <Key className="w-3.5 h-3.5 text-amber-400" />
               <span>{isAdminUnlocked ? 'Bảng Quản Trị (Admin)' : 'Quản Trị Cấp Key'}</span>
+              {pendingOrdersCount > 0 && (
+                <span className="ml-1 px-2 py-0.5 rounded-full bg-gradient-to-r from-rose-600 via-amber-500 to-rose-600 text-white font-black text-[10px] animate-pulse border border-amber-300 flex items-center gap-1 shadow-lg shadow-rose-600/40">
+                  <Bell className="w-3 h-3 animate-bounce text-amber-200" />
+                  <span>{pendingOrdersCount} Chờ Duyệt!</span>
+                </span>
+              )}
             </button>
 
             {/* Các tab kỹ thuật: CHỈ hiển thị khi bật chế độ nhà phát triển */}
@@ -1954,7 +1995,7 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
                     className="px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-bold flex items-center gap-2 transition shadow-lg shadow-emerald-600/30 cursor-pointer active:scale-98 disabled:opacity-75"
                   >
                     <Download className={`w-4 h-4 ${isDownloadingZip ? 'animate-bounce' : ''}`} />
-                    <span>{isDownloadingZip ? 'Đang nén & tải (334 KB)...' : `Tải ZIP v1.0.3 Chuẩn Store (${packageInfo?.sizeKb || 334} KB)`}</span>
+                    <span>{isDownloadingZip ? 'Đang nén & tải (334 KB)...' : `Tải ZIP v1.0.4 Chuẩn Store (${packageInfo?.sizeKb || 334} KB)`}</span>
                   </button>
                   <a
                     href="/store_logo_300x300.png"
@@ -2332,7 +2373,7 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
                     className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-lg shadow-indigo-600/20 cursor-pointer"
                   >
                     <Download className={`w-3.5 h-3.5 ${isDownloadingZip ? 'animate-bounce' : ''}`} />
-                    <span>Tải ZIP v1.0.3 Chuẩn Edge</span>
+                    <span>Tải ZIP v1.0.4 Chuẩn Edge</span>
                   </button>
                   <a
                     href="/store_logo_300x300.png"
@@ -2402,11 +2443,11 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
                   </div>
 
                   <div className="bg-slate-950/80 p-3 rounded-xl border border-slate-800 space-y-1">
-                    <strong className="text-emerald-400 block font-bold">4. Gói ZIP v1.0.3 Mới Nhất Đã Chuẩn Hóa:</strong>
+                    <strong className="text-emerald-400 block font-bold">4. Gói ZIP v1.0.4 Mới Nhất Đã Chuẩn Hóa:</strong>
                     <p className="text-slate-400">
                       Đã dọn sạch 100% <code>host_permissions</code>, loại bỏ localhost và chuẩn hóa HTTPS.
                     </p>
-                    <p className="text-indigo-300 font-medium">➔ Tải gói <span className="underline font-bold">v1.0.3</span> kéo thả vào mục Packages không bao giờ bị báo lỗi!</p>
+                    <p className="text-indigo-300 font-medium">➔ Tải gói <span className="underline font-bold">v1.0.4</span> kéo thả vào mục Packages không bao giờ bị báo lỗi!</p>
                   </div>
                 </div>
               </div>
@@ -2463,7 +2504,7 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
                     <ol className="list-decimal pl-4 space-y-2 text-slate-300 text-xs">
                       <li>Truy cập <a href="https://partner.microsoft.com/dashboard/microsoftedge" target="_blank" rel="noreferrer" className="text-teal-400 underline font-mono font-bold">partner.microsoft.com</a> và đăng nhập tài khoản Microsoft.</li>
                       <li>Chọn <strong>"Developer"</strong> &rarr; <strong>"Microsoft Edge"</strong> &rarr; Bấm <strong>"Create new extension"</strong>.</li>
-                      <li>Tải file ZIP <strong className="text-white font-mono">Gia_Long_FB_WebStore_v1.0.2.zip</strong> lên.</li>
+                      <li>Tải file ZIP <strong className="text-white font-mono">Gia_Long_FB_WebStore_v1.0.4.zip</strong> lên.</li>
                       <li>Điền tên tiện ích: <strong className="text-white">Gia Long - FB</strong>, danh mục: <strong>Productivity (Năng suất)</strong>.</li>
                       <li>Dán link Chính sách quyền riêng tư:
                         <div className="flex items-center gap-2 mt-1 bg-slate-900 p-1.5 rounded-lg border border-slate-800 font-mono text-[10.5px]">
@@ -2630,6 +2671,13 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
                   </p>
                 </div>
 
+                {pendingOrdersCount > 0 && (
+                  <div className="bg-gradient-to-r from-rose-950/80 via-amber-950/60 to-rose-950/80 border border-amber-400/40 rounded-xl p-2.5 text-xs text-amber-200 flex items-center justify-center gap-2 animate-pulse shadow-lg shadow-rose-950/50">
+                    <Bell className="w-4 h-4 text-amber-300 animate-bounce shrink-0" />
+                    <span>🔔 Có <strong>{pendingOrdersCount} đơn đặt mua / dùng thử</strong> đang chờ duyệt!</span>
+                  </div>
+                )}
+
                 <form onSubmit={handleVerifyPin} className="space-y-3 pt-1">
                   <div>
                     <label className="text-[11px] font-semibold text-slate-400 block text-left mb-1">
@@ -2689,6 +2737,19 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
                   </div>
 
                   <div className="flex items-center gap-1.5 flex-wrap w-full sm:w-auto justify-end">
+                    {adminOrders.filter((o) => o.status === 'pending').length > 0 && (
+                      <button
+                        onClick={() => {
+                          const el = document.getElementById('danh-sach-don-hang');
+                          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        }}
+                        className="px-2.5 py-1 bg-gradient-to-r from-rose-600 via-amber-500 to-rose-600 text-white rounded-lg text-[11px] font-black transition flex items-center gap-1.5 shadow-lg shadow-rose-600/40 animate-pulse border border-amber-300 active:scale-98 cursor-pointer"
+                        title="Bấm để xem ngay các đơn chờ duyệt"
+                      >
+                        <Bell className="w-3.5 h-3.5 animate-bounce" />
+                        <span>🔔 {adminOrders.filter((o) => o.status === 'pending').length} Đơn Chờ Duyệt!</span>
+                      </button>
+                    )}
                     <button
                       onClick={() => setShowCreateModal(true)}
                       className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[11px] font-bold transition flex items-center gap-1 shadow-sm active:scale-98"
@@ -4310,195 +4371,6 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
                     </div>
                   </div>
                 )}
-
-                {/* MODAL XÁC NHẬN MUA GÓI BẢN QUYỀN - TỰ ĐỘNG GỬI VỀ SERVER */}
-                {orderModalPkg && (
-                  <div
-                    className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/80 backdrop-blur-sm overflow-y-auto"
-                    onClick={() => {
-                      setOrderModalPkg(null);
-                      setOrderSuccessData(null);
-                    }}
-                  >
-                    <div
-                      className="bg-slate-900 border border-blue-500/40 rounded-2xl max-w-md w-full p-4 sm:p-5 shadow-2xl space-y-3.5 my-auto"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      {/* Header */}
-                      <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
-                        <h3 className="text-sm font-bold text-white flex items-center gap-1.5">
-                          <Key className="w-4 h-4 text-sky-400" />
-                          <span>
-                            {(orderModalPkg.price === '0đ' || orderModalPkg.name.includes('Dùng Thử'))
-                              ? 'Kích Hoạt Gói Dùng Thử 1 Ngày'
-                              : 'Đặt Mua Gói Bản Quyền'}
-                          </span>
-                        </h3>
-                        <button
-                          onClick={() => {
-                            setOrderModalPkg(null);
-                            setOrderSuccessData(null);
-                          }}
-                          className="text-slate-400 hover:text-white p-1 rounded-lg text-xs font-bold hover:bg-slate-800"
-                        >
-                          ✕
-                        </button>
-                      </div>
-
-                      {!orderSuccessData ? (
-                        /* BƯỚC 1: NHẬP THÔNG TIN VÀ BẤM GỬI */
-                        <div className="space-y-3 text-xs">
-                          <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-1.5">
-                            <div className="flex justify-between items-center">
-                              <span className="text-slate-400">Gói đã chọn:</span>
-                              <strong className="text-sky-400 font-bold">{orderModalPkg.name}</strong>
-                            </div>
-                            <div className="flex justify-between items-center">
-                              <span className="text-slate-400">Chi phí:</span>
-                              <strong className="text-emerald-400 text-sm font-black">
-                                {(orderModalPkg.price === '0đ' || orderModalPkg.name.includes('Dùng Thử'))
-                                  ? '0đ (Miễn phí 100% • Không cần chuyển khoản)'
-                                  : `${orderModalPkg.price} / 1 máy`}
-                              </strong>
-                            </div>
-                          </div>
-
-                          <div className="space-y-2">
-                            <div>
-                              <label className="block text-slate-300 font-semibold mb-1 text-[11px]">
-                                Tên của bạn hoặc Tên đơn vị (Tùy chọn):
-                              </label>
-                              <input
-                                type="text"
-                                value={orderCustomerName}
-                                onChange={(e) => setOrderCustomerName(e.target.value)}
-                                placeholder="VD: Anh Long (hoặc Cty Hoa Phượng)"
-                                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-sky-400"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-slate-300 font-semibold mb-1 text-[11px]">
-                                Số Điện Thoại / Zalo để nhận mã kích hoạt: <span className="text-rose-400">*</span>
-                              </label>
-                              <input
-                                type="text"
-                                value={orderCustomerPhone}
-                                onChange={(e) => setOrderCustomerPhone(e.target.value)}
-                                placeholder="VD: 0869029310"
-                                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-sky-400 font-mono"
-                              />
-                            </div>
-                          </div>
-
-                          <div className={`p-2.5 rounded-xl text-[11px] flex items-start gap-2 ${
-                            orderModalPkg.price === '0đ' || orderModalPkg.name.includes('Dùng Thử')
-                              ? 'bg-purple-950/40 border border-purple-500/30 text-purple-200'
-                              : 'bg-blue-950/30 border border-blue-500/25 text-slate-300'
-                          }`}>
-                            <Zap className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
-                            <span>
-                              {(orderModalPkg.price === '0đ' || orderModalPkg.name.includes('Dùng Thử')) ? (
-                                <>
-                                  🎁 <strong>Gói dùng thử 1 ngày (giới hạn 20 bài đăng)</strong>. Hoàn toàn miễn phí, không mất tiền và <strong>không cần chuyển khoản ngân hàng</strong>. Bấm nút bên dưới để gửi yêu cầu kích hoạt ngay!
-                                </>
-                              ) : (
-                                <>
-                                  Khi bấm <strong>"Gửi Đơn Đặt Mua"</strong>: Yêu cầu của bạn sẽ được gửi thẳng lên hệ thống Quản Trị Viên để cấp mã bản quyền tự động.
-                                </>
-                              )}
-                            </span>
-                          </div>
-
-                          <div className="flex gap-2 justify-end pt-1">
-                            <button
-                              onClick={() => setOrderModalPkg(null)}
-                              className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium text-xs rounded-lg transition"
-                            >
-                              Hủy
-                            </button>
-                            <button
-                              onClick={handleSubmitCustomerOrder}
-                              disabled={isSubmittingOrder}
-                              className={`px-4 py-1.5 text-white font-bold text-xs rounded-lg shadow-md transition flex items-center gap-1.5 active:scale-95 disabled:opacity-50 cursor-pointer ${
-                                orderModalPkg.price === '0đ' || orderModalPkg.name.includes('Dùng Thử')
-                                  ? 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 shadow-purple-500/20'
-                                  : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 shadow-emerald-500/20'
-                              }`}
-                            >
-                              <Send className="w-3.5 h-3.5" />
-                              <span>
-                                {isSubmittingOrder
-                                  ? 'Đang gửi...'
-                                  : (orderModalPkg.price === '0đ' || orderModalPkg.name.includes('Dùng Thử'))
-                                  ? '🚀 Gửi Yêu Cầu Kích Hoạt Dùng Thử (0đ)'
-                                  : '🚀 Gửi Đơn Đặt Mua'}
-                              </span>
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        /* BƯỚC 2: THÔNG BÁO GỬI ĐƠN THÀNH CÔNG */
-                        <div className="space-y-3.5 text-xs text-center py-2">
-                          <div className="w-12 h-12 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 mx-auto flex items-center justify-center">
-                            <CheckCircle2 className="w-6 h-6" />
-                          </div>
-
-                          <div>
-                            <h4 className="text-sm font-bold text-white">
-                              {(orderModalPkg.price === '0đ' || orderModalPkg.name.includes('Dùng Thử'))
-                                ? 'ĐÃ GỬI YÊU CẦU KÍCH HOẠT DÙNG THỬ THÀNH CÔNG!'
-                                : 'ĐÃ GỬI ĐƠN ĐẶT MUA THÀNH CÔNG!'}
-                            </h4>
-                            <p className="text-[11px] text-slate-400 mt-1">
-                              Mã đơn hàng: <strong className="text-sky-400 font-mono">#{orderSuccessData.order.id}</strong>
-                            </p>
-                          </div>
-
-                          <div className="bg-slate-950 p-3 rounded-xl border border-emerald-500/30 text-left space-y-1.5 text-[11px] text-slate-300">
-                            <div>📦 Gói đăng ký: <strong className="text-white">{orderModalPkg.name}</strong></div>
-                            <div>💰 Chi phí: <strong className="text-emerald-400">{orderModalPkg.price === '0đ' || orderModalPkg.name.includes('Dùng Thử') ? '0 VNĐ (Miễn phí • Không mất tiền)' : orderModalPkg.price}</strong></div>
-                            {(orderModalPkg.price === '0đ' || orderModalPkg.name.includes('Dùng Thử')) && (
-                              <div className="text-purple-300 font-medium">🎯 Hạn mức: <strong>1 Ngày • Tối đa 20 bài đăng tự động</strong></div>
-                            )}
-                            {orderCustomerPhone && (
-                              <div>📞 SĐT / Zalo nhận mã: <strong className="text-sky-400">{orderCustomerPhone}</strong></div>
-                            )}
-                            <div className="pt-1 border-t border-slate-800 text-[10.5px] text-slate-400">
-                              {(orderModalPkg.price === '0đ' || orderModalPkg.name.includes('Dùng Thử'))
-                                ? '✓ Yêu cầu dùng thử đã được lưu. Không cần chuyển khoản ngân hàng, Quản trị viên đang kích hoạt mã cho bạn!'
-                                : '✓ Đơn hàng đã được lưu trên máy chủ Quản trị viên. Quản trị viên sẽ phê duyệt và kích hoạt mã bản quyền cho bạn ngay!'}
-                            </div>
-                          </div>
-
-                          <div className="flex gap-2">
-                            <a
-                              href={`https://zalo.me/0869029310?text=${encodeURIComponent(
-                                (orderModalPkg.price === '0đ' || orderModalPkg.name.includes('Dùng Thử'))
-                                  ? `Chào Admin, tôi vừa gửi yêu cầu Gói Dùng Thử 1 Ngày (20 bài đăng, SĐT: ${orderCustomerPhone || 'Chưa rõ'}, Mã đơn: #${orderSuccessData.order.id}). Nhờ Admin duyệt và cấp key dùng thử giúp tôi nhé!`
-                                  : `Chào Admin, tôi vừa gửi đơn mua ${orderModalPkg.name} (SĐT: ${orderCustomerPhone || 'Chưa rõ'}, Mã đơn: #${orderSuccessData.order.id}). Nhờ Admin duyệt và cấp key giúp tôi nhé!`
-                              )}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="flex-1 py-2 px-3 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-xs font-bold transition shadow-md flex items-center justify-center gap-1"
-                            >
-                              <MessageSquare className="w-3.5 h-3.5" />
-                              <span>Nhắn Zalo Nhận Key Ngay</span>
-                            </a>
-                            <button
-                              onClick={() => {
-                                setOrderModalPkg(null);
-                                setOrderSuccessData(null);
-                              }}
-                              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-bold transition"
-                            >
-                              Đóng
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
               </div>
             )}
 
@@ -4855,7 +4727,7 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
                   <h3 className="text-sm font-bold text-white">
                     HƯỚNG DẪN SỬ DỤNG &amp; LƯU Ý VẬN HÀNH AN TOÀN
                   </h3>
-                  <span className="text-[11px] text-slate-400">Phần mềm tự động đăng bài Facebook - Gia Long FB (V1.0)</span>
+                  <span className="text-[11px] text-slate-400">Phần mềm tự động đăng bài Facebook - Gia Long FB (V1.0.4 - Bản Store Chính Thức)</span>
                 </div>
               </div>
               <button
@@ -5018,6 +4890,195 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
                 ✓ Đã Nắm Rõ
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL XÁC NHẬN MUA GÓI BẢN QUYỀN - CHỈ HIỂN THỊ KHI Ở CỔNG KHÁCH HÀNG */}
+      {orderModalPkg && activeTab === 'client-portal' && (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center p-3 bg-black/80 backdrop-blur-sm overflow-y-auto"
+          onClick={() => {
+            setOrderModalPkg(null);
+            setOrderSuccessData(null);
+          }}
+        >
+          <div
+            className="bg-slate-900 border border-blue-500/40 rounded-2xl max-w-md w-full p-4 sm:p-5 shadow-2xl space-y-3.5 my-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+              <h3 className="text-sm font-bold text-white flex items-center gap-1.5">
+                <Key className="w-4 h-4 text-sky-400" />
+                <span>
+                  {(orderModalPkg.price === '0đ' || orderModalPkg.name.includes('Dùng Thử'))
+                    ? 'Kích Hoạt Gói Dùng Thử 1 Ngày'
+                    : 'Đặt Mua Gói Bản Quyền'}
+                </span>
+              </h3>
+              <button
+                onClick={() => {
+                  setOrderModalPkg(null);
+                  setOrderSuccessData(null);
+                }}
+                className="text-slate-400 hover:text-white p-1 rounded-lg text-xs font-bold hover:bg-slate-800"
+              >
+                ✕
+              </button>
+            </div>
+
+            {!orderSuccessData ? (
+              /* BƯỚC 1: NHẬP THÔNG TIN VÀ BẤM GỬI */
+              <div className="space-y-3 text-xs">
+                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-1.5">
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-400">Gói đã chọn:</span>
+                    <strong className="text-sky-400 font-bold">{orderModalPkg.name}</strong>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-400">Chi phí:</span>
+                    <strong className="text-emerald-400 text-sm font-black">
+                      {(orderModalPkg.price === '0đ' || orderModalPkg.name.includes('Dùng Thử'))
+                        ? '0đ (Miễn phí 100% • Không cần chuyển khoản)'
+                        : `${orderModalPkg.price} / 1 máy`}
+                    </strong>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1 text-[11px]">
+                      Tên của bạn hoặc Tên đơn vị (Tùy chọn):
+                    </label>
+                    <input
+                      type="text"
+                      value={orderCustomerName}
+                      onChange={(e) => setOrderCustomerName(e.target.value)}
+                      placeholder="VD: Anh Long (hoặc Cty Hoa Phượng)"
+                      className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-sky-400"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1 text-[11px]">
+                      Số Điện Thoại / Zalo để nhận mã kích hoạt: <span className="text-rose-400">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={orderCustomerPhone}
+                      onChange={(e) => setOrderCustomerPhone(e.target.value)}
+                      placeholder="VD: 0869029310"
+                      className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-sky-400 font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div className={`p-2.5 rounded-xl text-[11px] flex items-start gap-2 ${
+                  orderModalPkg.price === '0đ' || orderModalPkg.name.includes('Dùng Thử')
+                    ? 'bg-purple-950/40 border border-purple-500/30 text-purple-200'
+                    : 'bg-blue-950/30 border border-blue-500/25 text-slate-300'
+                }`}>
+                  <Zap className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
+                  <span>
+                    {(orderModalPkg.price === '0đ' || orderModalPkg.name.includes('Dùng Thử')) ? (
+                      <>
+                        🎁 <strong>Gói dùng thử 1 ngày (giới hạn 20 bài đăng)</strong>. Hoàn toàn miễn phí, không mất tiền và <strong>không cần chuyển khoản ngân hàng</strong>. Bấm nút bên dưới để gửi yêu cầu kích hoạt ngay!
+                      </>
+                    ) : (
+                      <>
+                        Khi bấm <strong>"Gửi Đơn Đặt Mua"</strong>: Yêu cầu của bạn sẽ được gửi thẳng lên hệ thống Quản Trị Viên để cấp mã bản quyền tự động.
+                      </>
+                    )}
+                  </span>
+                </div>
+
+                <div className="flex gap-2 justify-end pt-1">
+                  <button
+                    onClick={() => setOrderModalPkg(null)}
+                    className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium text-xs rounded-lg transition"
+                  >
+                    Hủy
+                  </button>
+                  <button
+                    onClick={handleSubmitCustomerOrder}
+                    disabled={isSubmittingOrder}
+                    className={`px-4 py-1.5 text-white font-bold text-xs rounded-lg shadow-md transition flex items-center gap-1.5 active:scale-95 disabled:opacity-50 cursor-pointer ${
+                      orderModalPkg.price === '0đ' || orderModalPkg.name.includes('Dùng Thử')
+                        ? 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 shadow-purple-500/20'
+                        : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 shadow-emerald-500/20'
+                    }`}
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>
+                      {isSubmittingOrder
+                        ? 'Đang gửi...'
+                        : (orderModalPkg.price === '0đ' || orderModalPkg.name.includes('Dùng Thử'))
+                        ? '🚀 Gửi Yêu Cầu Kích Hoạt Dùng Thử (0đ)'
+                        : '🚀 Gửi Đơn Đặt Mua'}
+                    </span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* BƯỚC 2: THÔNG BÁO GỬI ĐƠN THÀNH CÔNG */
+              <div className="space-y-3.5 text-xs text-center py-2">
+                <div className="w-12 h-12 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 mx-auto flex items-center justify-center">
+                  <CheckCircle2 className="w-6 h-6" />
+                </div>
+
+                <div>
+                  <h4 className="text-sm font-bold text-white">
+                    {(orderModalPkg.price === '0đ' || orderModalPkg.name.includes('Dùng Thử'))
+                      ? 'ĐÃ GỬI YÊU CẦU KÍCH HOẠT DÙNG THỬ THÀNH CÔNG!'
+                      : 'ĐÃ GỬI ĐƠN ĐẶT MUA THÀNH CÔNG!'}
+                  </h4>
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Mã đơn hàng: <strong className="text-sky-400 font-mono">#{orderSuccessData.order.id}</strong>
+                  </p>
+                </div>
+
+                <div className="bg-slate-950 p-3 rounded-xl border border-emerald-500/30 text-left space-y-1.5 text-[11px] text-slate-300">
+                  <div>📦 Gói đăng ký: <strong className="text-white">{orderModalPkg.name}</strong></div>
+                  <div>💰 Chi phí: <strong className="text-emerald-400">{orderModalPkg.price === '0đ' || orderModalPkg.name.includes('Dùng Thử') ? '0 VNĐ (Miễn phí • Không mất tiền)' : orderModalPkg.price}</strong></div>
+                  {(orderModalPkg.price === '0đ' || orderModalPkg.name.includes('Dùng Thử')) && (
+                    <div className="text-purple-300 font-medium">🎯 Hạn mức: <strong>1 Ngày • Tối đa 20 bài đăng tự động</strong></div>
+                  )}
+                  {orderCustomerPhone && (
+                    <div>📞 SĐT / Zalo nhận mã: <strong className="text-sky-400">{orderCustomerPhone}</strong></div>
+                  )}
+                  <div className="pt-1 border-t border-slate-800 text-[10.5px] text-slate-400">
+                    {(orderModalPkg.price === '0đ' || orderModalPkg.name.includes('Dùng Thử'))
+                      ? '✓ Yêu cầu dùng thử đã được lưu. Không cần chuyển khoản ngân hàng, Quản trị viên đang kích hoạt mã cho bạn!'
+                      : '✓ Đơn hàng đã được lưu trên máy chủ Quản trị viên. Quản trị viên sẽ phê duyệt và kích hoạt mã bản quyền cho bạn ngay!'}
+                  </div>
+                </div>
+
+                <div className="flex gap-2">
+                  <a
+                    href={`https://zalo.me/0869029310?text=${encodeURIComponent(
+                      (orderModalPkg.price === '0đ' || orderModalPkg.name.includes('Dùng Thử'))
+                        ? `Chào Admin, tôi vừa gửi yêu cầu Gói Dùng Thử 1 Ngày (20 bài đăng, SĐT: ${orderCustomerPhone || 'Chưa rõ'}, Mã đơn: #${orderSuccessData.order.id}). Nhờ Admin duyệt và cấp key dùng thử giúp tôi nhé!`
+                        : `Chào Admin, tôi vừa gửi đơn mua ${orderModalPkg.name} (SĐT: ${orderCustomerPhone || 'Chưa rõ'}, Mã đơn: #${orderSuccessData.order.id}). Nhờ Admin duyệt và cấp key giúp tôi nhé!`
+                    )}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex-1 py-2 px-3 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-xs font-bold transition shadow-md flex items-center justify-center gap-1"
+                  >
+                    <MessageSquare className="w-3.5 h-3.5" />
+                    <span>Nhắn Zalo Nhận Key Ngay</span>
+                  </a>
+                  <button
+                    onClick={() => {
+                      setOrderModalPkg(null);
+                      setOrderSuccessData(null);
+                    }}
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-bold transition"
+                  >
+                    Đóng
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

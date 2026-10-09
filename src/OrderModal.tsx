@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { getApiUrl } from './apiConfig.ts';
 import {
   X,
   Send,
@@ -183,7 +184,7 @@ export function OrderModal({
       const memo = generateTransferMemo(customerName, customerPhone, pkgName, deviceId);
       const note = `Đăng ký từ Hộp Thoại Web • Gói: ${selectedPlan} • Nội dung CK: ${memo}`;
 
-      const res = await fetch('/api/orders/create', {
+      const res = await fetch(getApiUrl('/api/orders/create'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

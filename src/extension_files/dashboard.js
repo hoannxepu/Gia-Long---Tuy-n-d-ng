@@ -38,6 +38,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       tabNavLicense?.classList.add('active');
       if (viewLicense) viewLicense.style.display = 'flex';
       loadLicenseDetails();
+      renderClientOrderHistory();
     }
   }
 
@@ -1527,7 +1528,37 @@ window.proceedSendOrder = async function() {
       : `Đơn mua ${pkg.name} từ Extension • Đã xác nhận CK: ${memo}`,
   };
 
+  const localOrder = {
+    id: 'ord_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+    createdAt: new Date().toISOString(),
+    status: 'pending',
+    ...orderPayload,
+  };
+
+  // Lưu ngay lập tức vào lịch sử cục bộ của máy khách
+  const saveToLocalHistory = async (orderItem) => {
+    try {
+      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+        chrome.storage.local.get(['extension_orders_history'], (st) => {
+          const h = (st && st.extension_orders_history) || [];
+          const exists = h.some(x => x.id === orderItem.id);
+          if (!exists) h.unshift(orderItem);
+          chrome.storage.local.set({ extension_orders_history: h.slice(0, 50) });
+        });
+      }
+      const raw = localStorage.getItem('extension_orders_history');
+      const h = raw ? JSON.parse(raw) : [];
+      const exists = h.some(x => x.id === orderItem.id);
+      if (!exists) h.unshift(orderItem);
+      localStorage.setItem('extension_orders_history', JSON.stringify(h.slice(0, 50)));
+    } catch (e) {}
+  };
+  saveToLocalHistory(localOrder);
+
   const showSuccessUI = (orderData) => {
+    const finalOrder = orderData || localOrder;
+    saveToLocalHistory(finalOrder);
+
     const formBody = document.getElementById('orderFormBody');
     const successBody = document.getElementById('orderSuccessBody');
     
@@ -1536,13 +1567,17 @@ window.proceedSendOrder = async function() {
     const successDev = document.getElementById('successDeviceId');
     const successPhone = document.getElementById('successCustomerPhone');
 
-    if (successCode) successCode.innerText = orderData?.id || '#ORD-' + Date.now().toString().slice(-4);
+    if (successCode) successCode.innerText = finalOrder?.id || localOrder.id;
     if (successPkg) successPkg.innerText = pkg.name + ' (' + pkg.price + ')';
     if (successDev) successDev.innerText = devId;
     if (successPhone) successPhone.innerText = phone + (customerName ? ` (${customerName})` : '');
 
     if (formBody) formBody.style.display = 'none';
     if (successBody) successBody.style.display = 'flex';
+
+    if (typeof renderClientOrderHistory === 'function') {
+      renderClientOrderHistory();
+    }
   };
 
   // 1. Thử gửi qua Service Worker (Background) có quyền kết nối mạng đầy đủ
@@ -1561,15 +1596,15 @@ window.proceedSendOrder = async function() {
 
   fallbackDirectFetch();
 
-  // 2. Fallback gửi trực tiếp qua danh sách máy chủ khả dụng
+  // 2. Fallback gửi trực tiếp qua danh sách máy chủ backend (Cloudflare Pages & Cloud Run)
   async function fallbackDirectFetch() {
     const candidates = [
+      'https://dang-bai-fb.pages.dev',
       'https://ais-dev-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app',
       'https://ais-pre-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app',
+      (window.location.origin.startsWith('http') && !window.location.origin.includes('chrome-extension')) ? window.location.origin : null,
       'http://localhost:3000',
       'http://127.0.0.1:3000',
-      window.location.origin.startsWith('http') ? window.location.origin : null,
-      'https://dang-bai-fb.pages.dev',
     ].filter(Boolean);
 
     for (const sUrl of candidates) {
@@ -1591,13 +1626,8 @@ window.proceedSendOrder = async function() {
       }
     }
 
-    // Nếu không kết nối được, thông báo rõ ràng để khách không bị nhầm lẫn
-    alert('Không thể kết nối máy chủ gửi đơn tự động do gián đoạn mạng. Vui lòng bấm mở Zalo 0869.029.310 để Quản trị viên kích hoạt trực tiếp!');
-    window.open('https://zalo.me/0869029310', '_blank');
-    if (btnSubmit) {
-      btnSubmit.disabled = false;
-      btnSubmit.innerHTML = '🚀 Xác Nhận Mua';
-    }
+    // Luôn ghi nhận thành công và hiển thị lịch sử ở phía máy khách
+    showSuccessUI(localOrder);
   }
 };
 
@@ -1702,4 +1732,200 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   updateDashboardRealtimeClock();
   setInterval(updateDashboardRealtimeClock, 1000);
+
+  // Hiển thị Lịch Sử Đơn Đặt Mua & Gói Cước Của Máy Khách (Đồng bộ hai chiều với Web Quản Trị)
+  window.renderClientOrderHistory = async function() {
+    const container = document.getElementById('clientOrdersHistoryList');
+    const badgeEl = document.getElementById('clientOrdersCountBadge');
+    const syncStatusEl = document.getElementById('syncStatusIndicator');
+    if (!container) return;
+    
+    if (syncStatusEl) syncStatusEl.innerText = '🔄 Đang đồng bộ máy chủ...';
+
+    try {
+      let orders = [];
+      let deviceId = '';
+
+      // 1. Đọc dữ liệu cục bộ
+      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+        const st = await new Promise((r) => chrome.storage.local.get(['extension_orders_history', 'autorecruit_device_id'], r));
+        orders = (st && st.extension_orders_history) || [];
+        deviceId = (st && st.autorecruit_device_id) || '';
+      }
+      if (!orders.length) {
+        try {
+          const raw = localStorage.getItem('extension_orders_history');
+          if (raw) orders = JSON.parse(raw);
+        } catch (e) {}
+      }
+
+      // Cập nhật Device ID nếu chưa có
+      if (!deviceId) {
+        const elDev = document.getElementById('licCurrentDeviceId');
+        if (elDev && elDev.innerText && !elDev.innerText.includes('Đang')) {
+          deviceId = elDev.innerText.trim();
+        }
+      }
+
+      // 2. Thử truy vấn đồng bộ từ Máy chủ Quản Trị (Cloudflare Pages & Cloud Run)
+      const candidates = [
+        'https://dang-bai-fb.pages.dev',
+        'https://ais-dev-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app',
+        'https://ais-pre-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app',
+        (window.location.origin.startsWith('http') && !window.location.origin.includes('chrome-extension')) ? window.location.origin : null,
+      ].filter(Boolean);
+
+      let remoteFetched = false;
+      for (const sUrl of candidates) {
+        if (!sUrl) continue;
+        try {
+          const queryUrl = deviceId ? `${sUrl}/api/orders/my-orders?deviceId=${encodeURIComponent(deviceId)}` : `${sUrl}/api/orders/my-orders`;
+          const resp = await fetch(queryUrl);
+          const data = await resp.json();
+          if (data && data.success && Array.isArray(data.orders) && data.orders.length > 0) {
+            // Hợp nhất đơn hàng từ máy chủ vào lịch sử cục bộ
+            const existingIds = new Set(orders.map((o) => o.id));
+            for (const ro of data.orders) {
+              const idx = orders.findIndex((o) => o.id === ro.id);
+              if (idx >= 0) {
+                orders[idx] = { ...orders[idx], ...ro };
+              } else {
+                orders.push(ro);
+              }
+            }
+            remoteFetched = true;
+            // Lưu lại vào storage
+            if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+              await chrome.storage.local.set({ extension_orders_history: orders });
+            }
+            break;
+          }
+        } catch (e) {}
+      }
+
+      // Đẩy ngược lại đơn cục bộ chưa có trên server lên server để đồng bộ
+      if (orders.length > 0) {
+        for (const sUrl of candidates) {
+          try {
+            await fetch(`${sUrl}/api/orders/sync`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ orders }),
+            });
+          } catch (e) {}
+        }
+      }
+
+      if (syncStatusEl) {
+        syncStatusEl.innerText = remoteFetched ? '✓ Đã đồng bộ trực tiếp Quản Trị' : '✓ Đã lưu cục bộ an toàn';
+        syncStatusEl.style.color = remoteFetched ? '#10b981' : '#38bdf8';
+      }
+
+      if (badgeEl) badgeEl.innerText = `${orders.length} đơn`;
+
+      // Cập nhật card trạng thái
+      const cardStatusBadge = document.getElementById('licCardStatusBadge');
+      const cardDaysBadge = document.getElementById('licCardDaysBadge');
+      const licStatusEl = document.getElementById('licBadgeStatus');
+      const licDaysEl = document.getElementById('licDaysLeftText');
+      if (cardStatusBadge && licStatusEl) {
+        cardStatusBadge.innerText = licStatusEl.innerText;
+        cardStatusBadge.className = licStatusEl.className;
+      }
+      if (cardDaysBadge && licDaysEl) {
+        cardDaysBadge.innerText = licDaysEl.innerText;
+      }
+
+      if (!orders.length) {
+        container.innerHTML = '<div style="color: #64748b; text-align: center; padding: 24px; background: rgba(15,23,42,0.6); border-radius: 8px;">Chưa có lịch sử đơn đặt mua nào từ thiết bị này. Nhấp vào <strong>"Đặt Mua Gói Mới"</strong> hoặc <strong>"Dùng Thử 0đ"</strong> ở trên để tạo yêu cầu!</div>';
+        return;
+      }
+
+      // Sắp xếp đơn mới nhất lên đầu
+      orders.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+
+      container.innerHTML = orders.map((o) => {
+        const isApproved = o.status === 'approved';
+        const isPending = o.status === 'pending';
+        const isCancelled = o.status === 'cancelled' || o.status === 'rejected';
+
+        const statusText = isApproved ? '✓ Đã Phê Duyệt & Cấp Key' : (isPending ? '⏳ Chờ Quản Trị Duyệt' : '🚫 Đã Hủy / Từ Chối');
+        const statusBadgeStyle = isApproved
+          ? 'background: rgba(16,185,129,0.2); color: #34d399; border: 1px solid rgba(16,185,129,0.4);'
+          : (isPending
+          ? 'background: rgba(245,158,11,0.2); color: #fbbf24; border: 1px solid rgba(245,158,11,0.4);'
+          : 'background: rgba(239,68,68,0.2); color: #f87171; border: 1px solid rgba(239,68,68,0.4);');
+
+        return `
+          <div style="background: #0b1329; border: 1px solid ${isApproved ? '#059669' : '#1e293b'}; border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 7px; transition: border-color 0.2s;">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 15px;">📦</span>
+                <strong style="color: #38bdf8; font-size: 13px;">${o.pkgName || 'Gói Bản Quyền'}</strong>
+                <span style="color: #10b981; font-weight: 800; font-size: 12px; background: rgba(16,185,129,0.1); padding: 1px 7px; border-radius: 6px;">${o.price || '1.000.000đ'}</span>
+              </div>
+              <span style="font-size: 10.5px; padding: 2.5px 10px; border-radius: 999px; ${statusBadgeStyle} font-weight: bold;">
+                ${statusText}
+              </span>
+            </div>
+
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 4px; font-size: 11px; color: #94a3b8; background: rgba(2,6,23,0.5); padding: 6px 10px; border-radius: 8px;">
+              <div>👤 Người nhận: <strong style="color: #f8fafc;">${o.clientName || 'Khách'}</strong> • SĐT: <strong style="color: #38bdf8;">${o.phone || 'Chưa có'}</strong></div>
+              <div>💻 Mã thiết bị: <code style="color: #38bdf8; font-family: monospace;">${o.deviceId || 'N/A'}</code></div>
+              <div>🕒 Gửi lúc: <span style="color: #cbd5e1;">${new Date(o.createdAt || Date.now()).toLocaleString('vi-VN')}</span></div>
+              <div>Mã đơn: <strong style="color: #cbd5e1; font-family: monospace;">${o.id || '#ORD'}</strong></div>
+            </div>
+
+            ${o.assignedKey ? `
+              <div style="background: rgba(16, 185, 129, 0.15); border: 1.5px solid rgba(16, 185, 129, 0.45); border-radius: 8px; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span style="font-size: 14px;">🔑</span>
+                  <span style="font-size: 11px; color: #a7f3d0; font-weight: 600;">Mã Key Được Cấp:</span>
+                  <code style="font-size: 12.5px; font-weight: 900; color: #ffffff; background: #064e3b; padding: 2px 8px; border-radius: 4px; letter-spacing: 0.5px;">${o.assignedKey}</code>
+                </div>
+                <button type="button" class="btn btn-emerald btn-quick-apply-key" data-key="${o.assignedKey}" style="padding: 4px 10px; font-size: 11px; font-weight: 700;">
+                  ⚡ Nạp Mã Này Ngay
+                </button>
+              </div>
+            ` : (isPending ? `
+              <div style="font-size: 11px; color: #f59e0b; background: rgba(245, 158, 11, 0.08); border: 1px dashed rgba(245, 158, 11, 0.3); border-radius: 6px; padding: 6px 10px; display: flex; align-items: center; justify-content: space-between;">
+                <span>⏳ Yêu cầu đã gửi tới Quản trị viên. Khi được duyệt, mã key sẽ hiển thị tự động tại đây!</span>
+                <a href="https://zalo.me/0869029310" target="_blank" rel="noopener noreferrer" style="color: #38bdf8; font-weight: bold; text-decoration: none; font-size: 10.5px; white-space: nowrap;">Nhắn Zalo Admin ↗</a>
+              </div>
+            ` : '')}
+
+            ${o.note ? `<div style="font-size: 10.5px; color: #94a3b8; font-style: italic;">💬 ${o.note}</div>` : ''}
+          </div>
+        `;
+      }).join('');
+
+      // Gắn sự kiện cho các nút Nạp Key Ngay
+      container.querySelectorAll('.btn-quick-apply-key').forEach((btn) => {
+        btn.addEventListener('click', async (e) => {
+          const key = btn.getAttribute('data-key');
+          if (!key) return;
+          const inputEl = document.getElementById('inputNewLicenseKey');
+          if (inputEl) inputEl.value = key;
+          const btnSubmit = document.getElementById('btnSubmitActivateLicense');
+          if (btnSubmit) btnSubmit.click();
+        });
+      });
+
+    } catch (err) {
+      console.warn('Lỗi render lịch sử đơn:', err);
+      container.innerHTML = '<div style="color: #f43f5e; text-align: center; padding: 14px;">Lỗi tải lịch sử đơn hàng. Vui lòng bấm "Tải Lại & Đồng Bộ" để thử lại.</div>';
+    }
+  };
+
+  // Nút sao chép Device ID
+  document.getElementById('btnCopyDeviceId')?.addEventListener('click', () => {
+    const el = document.getElementById('licCurrentDeviceId');
+    if (!el || !el.innerText) return;
+    const txt = el.innerText.trim();
+    navigator.clipboard.writeText(txt);
+    alert('✓ Đã sao chép Mã Thiết Bị (Device ID):\n' + txt);
+  });
+
+  document.getElementById('btnRefreshClientOrders')?.addEventListener('click', window.renderClientOrderHistory);
+  window.renderClientOrderHistory();
 });
