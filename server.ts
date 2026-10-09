@@ -941,6 +941,44 @@ app.post('/api/orders/create', (req: Request, res: Response) => {
   }
 });
 
+// Đồng bộ danh sách đơn hàng cũ của máy khách lên trang admin khi khởi động hoặc cập nhật phiên bản
+app.post('/api/orders/sync', (req: Request, res: Response) => {
+  try {
+    const { orders: clientOrders } = req.body || {};
+    if (!Array.isArray(clientOrders)) {
+      return res.status(400).json({ success: false, error: 'Danh sách đơn hàng không hợp lệ!' });
+    }
+    const serverOrders = loadOrders();
+    let addedCount = 0;
+
+    for (const co of clientOrders) {
+      if (!co || !co.id) continue;
+      const exists = serverOrders.find((so) => so.id === co.id || (so.phone && co.phone && so.phone === so.phone && so.pkgName === co.pkgName));
+      if (!exists) {
+        serverOrders.unshift({
+          id: co.id,
+          pkgName: co.pkgName || 'Gói 1 Tháng (30 ngày)',
+          price: co.price || '1.000.000đ',
+          clientName: co.clientName || 'Khách Đồng Bộ',
+          phone: co.phone || '',
+          deviceId: co.deviceId || '',
+          createdAt: co.createdAt || new Date().toISOString(),
+          status: co.status || 'pending',
+          note: co.note || 'Đồng bộ tự động từ phiên bản extension',
+        });
+        addedCount++;
+      }
+    }
+
+    if (addedCount > 0) {
+      saveOrders(serverOrders);
+    }
+    res.json({ success: true, message: `✓ Đã đồng bộ ${addedCount} đơn hàng cũ vào trang quản trị!`, totalOrders: serverOrders.length });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || 'Lỗi đồng bộ đơn hàng' });
+  }
+});
+
 // Admin xem danh sách đơn hàng
 app.get('/api/admin/orders', requireAdmin, (_req: Request, res: Response) => {
   const orders = loadOrders();
