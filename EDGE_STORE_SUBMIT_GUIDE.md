@@ -50,29 +50,47 @@
 
 ---
 
-## 🛠️ GIẢI PHÁP KHẮC PHỤC CÁC LỖI THƯỜNG GẶP KHI NỘP TRÊN EDGE:
+## 🛠️ GIẢI PHÁP KHẮC PHỤC TRIỆT ĐỂ LỖI KHI BẤM "GỬI ĐỀ NGHỊ" (SUBMIT):
 
-1. **Lỗi `Package validation failed` hoặc `Invalid match pattern`:**
-   - **Nguyên nhân:** Trước đây manifest chứa `localhost` hoặc đường dẫn chứa ký tự wildcard không hợp lệ đối với bộ quét Edge Store.
-   - **Đã khắc phục:** Gói ZIP **`v1.0.2`** đã được làm sạch 100%, chuẩn hóa sang HTTPS chính quy (`dang-bai-fb.pages.dev`, `run.app`), đảm bảo vượt qua ngay lập tức.
+Khi bạn bấm nút **"Gửi đề nghị"** (Submit) ở cuối trang tổng quan bản đệ trình mà hệ thống báo lỗi đỏ hoặc không cho gửi, nguyên nhân là do **1 trong 4 mục bắt buộc** sau chưa hoàn tất:
 
-2. **Lỗi `The version must be greater than previously uploaded version`:**
-   - **Nguyên nhân:** Phiên bản cũ (1.0.0 hoặc 1.0.1) đã từng được nộp nháp.
-   - **Đã khắc phục:** Bạn dùng ngay gói **`Gia_Long_FB_WebStore_v1.0.2.zip`** (phiên bản mới 1.0.2), hệ thống Edge sẽ chấp nhận ngay.
+### 🔴 1. LỖI THIẾU ẢNH CHỤP MÀN HÌNH (SCREENSHOTS - NGUYÊN NHÂN PHỔ BIẾN NHẤT 90%):
+- **Hiện tượng:** Mục *Danh sách trang thông tin của Store* (Store Listings) hiện dấu chấm than vàng/đỏ hoặc báo *"At least 1 screenshot is required"*.
+- **Quy định của Microsoft:** Bắt buộc phải có **tối thiểu 1 ảnh chụp màn hình** kích thước chuẩn **1280 x 800 px** (hoặc 640 x 400 px), định dạng PNG/JPG.
+- **Cách khắc phục:**
+  1. Tải 2 ảnh chụp màn hình chuẩn 1280x800 px đã được tạo sẵn trong app:
+     - [store_screenshot_1280x800_1.png](/store_screenshot_1280x800_1.png) (Ảnh giao diện Đăng bài tự động)
+     - [store_screenshot_1280x800_2.png](/store_screenshot_1280x800_2.png) (Ảnh quản lý Bản quyền VIP)
+  2. Kéo thả 1 hoặc cả 2 ảnh này vào ô **Ảnh chụp màn hình (Screenshots)** trong mục Store Listings.
 
-3. **Lỗi `Store logo must be 300 x 300 px`:**
-   - **Nguyên nhân:** Tải ảnh sai kích cỡ vào ô Extension Logo trong Store Listings.
-   - **Đã khắc phục:** Bấm nút **"Tải Logo 300x300 (Bắt Buộc)"** trên giao diện web để lấy file `store_logo_300x300.png` chuẩn từng pixel.
+### 🔴 2. LỖI THIẾU GHI CHÚ CHỨNG NHẬN (NOTES FOR CERTIFICATION):
+- **Hiện tượng:** Microsoft chặn không cho "Gửi đề nghị" vì tiện ích yêu cầu các quyền `tabs`, `scripting`, `alarms`, `host_permissions` nhưng ô **Ghi chú chứng nhận** bị bỏ trống.
+- **Cách khắc phục:** Trong mục **Bản đệ trình** (Submission), tìm ô **Ghi chú chứng nhận (Notes for certification)** và dán đoạn văn bản mẫu sau:
+  > **Extension Functionality:** Gia Long - FB automates Facebook group post management and recruitment publishing for HR teams and business managers.  
+  > **Permissions Justification:**  
+  > - `activeTab`, `scripting`, `tabs`: Interacts with Facebook group post composer on user-authorized browser sessions.  
+  > - `storage`, `alarms`: Stores posting schedules and triggers timer events in background service worker.  
+  > - `host_permissions` (*.facebook.com): Required to publish posts to user's joined groups.  
+  > **Test License Key for Reviewer:** `GLFB-STORE-REVIEW-TEST` (Valid 365 days VIP).
+
+### 🔴 3. LỖI THIẾU HOẶC SAI KÍCH THƯỚC LOGO (STORE LOGO):
+- **Hiện tượng:** Báo lỗi *"Logo must be 300 x 300 pixels"*.
+- **Cách khắc phục:** Bấm tải ảnh **[store_logo_300x300.png](/store_logo_300x300.png)** (đúng chuẩn 300x300 px PNG) và tải lên ô **Biểu trưng tiện ích (Extension logo)**.
+
+### 🔴 4. SỬ DỤNG GÓI ZIP MỚI NHẤT V1.0.3 (KHÔNG BỊ TRÙNG PHIÊN BẢN):
+- Dùng gói **`Gia_Long_FB_WebStore_v1.0.3.zip`** (đã được làm sạch 100% manifest, loại bỏ hoàn toàn localhost và match pattern không hợp lệ).
+
+---
 
 ### 🛡️ Bước 4: Khai báo Quyền riêng tư (Privacy Policy)
-- **Privacy policy URL:** Dán đường dẫn chính sách bảo mật đã tạo sẵn của bạn:
-  > `https://<ten-mien-app-cua-ban>/privacy.html`
+- **Privacy policy URL:** Dán đường dẫn chính sách bảo mật đã tạo sẵn:
+  > `https://dang-bai-fb.pages.dev/privacy.html`
 - **Tuyên bố bảo mật (Privacy declaration):** Tích chọn cam kết tiện ích không thu thập dữ liệu cá nhân hay mật khẩu ra ngoài máy tính người dùng.
 
-### ✈️ Bước 5: Nộp xét duyệt (Submit for review)
-- Kiểm tra lại các mục và bấm **"Submit"** (Nộp xét duyệt).
-- Trạng thái sẽ chuyển sang **"In review"**.
-- Thường sau **24 - 48 giờ**, Microsoft sẽ gửi email chúc mừng tiện ích của bạn đã được duyệt và cấp đường link chính thức trên Edge Add-ons!
+### ✈️ Bước 5: Bấm "Gửi đề nghị" (Submit for review)
+- Sau khi 4 mục trên đều hiển thị biểu tượng **✔ Hoàn tất (Complete)** màu xanh lá.
+- Bấm nút **"Gửi đề nghị"** ➔ Trạng thái chuyển sang **"Đang xem xét" (In review)** thành công 100%!
+- Microsoft sẽ duyệt trong **24 - 48 giờ** và gửi email chúc mừng xuất bản.
 
 ---
 

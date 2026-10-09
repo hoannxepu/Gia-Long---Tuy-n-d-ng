@@ -889,49 +889,56 @@ function saveOrders(items: OrderItem[]) {
 
 // Khách hàng bấm gửi đơn mua (Tự động ghi nhận lên server)
 app.post('/api/orders/create', (req: Request, res: Response) => {
-  const { pkgName, price, clientName, phone, deviceId, note } = req.body;
-  const orders = loadOrders();
-  const isTrial = (price === '0đ' || String(pkgName || '').toLowerCase().includes('dùng thử') || String(pkgName || '').toLowerCase().includes('trial'));
+  try {
+    const { pkgName, price, clientName, phone, deviceId, note } = req.body || {};
+    const orders = loadOrders();
+    const isTrial = (price === '0đ' || String(pkgName || '').toLowerCase().includes('dùng thử') || String(pkgName || '').toLowerCase().includes('trial'));
 
-  const newOrder: OrderItem = {
-    id: `ord_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-    pkgName: pkgName || (isTrial ? 'Gói Dùng Thử (1 ngày)' : 'Gói 1 Tháng (30 ngày)'),
-    price: price || (isTrial ? '0đ' : '1.000.000đ'),
-    clientName: clientName ? String(clientName).trim() : (isTrial ? 'Khách Dùng Thử 1 Ngày' : 'Khách Đặt Mua Tự Động'),
-    phone: phone ? String(phone).trim() : 'Chờ liên hệ Zalo',
-    deviceId: deviceId ? String(deviceId).trim() : 'Chưa gắn',
-    createdAt: new Date().toISOString(),
-    status: 'pending',
-    note: note || (isTrial ? 'Đăng ký dùng thử 1 ngày (giới hạn 20 bài đăng, 0đ)' : ''),
-  };
+    const newOrder: OrderItem = {
+      id: `ord_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      pkgName: pkgName || (isTrial ? 'Gói Dùng Thử (1 ngày)' : 'Gói 1 Tháng (30 ngày)'),
+      price: price || (isTrial ? '0đ' : '1.000.000đ'),
+      clientName: clientName ? String(clientName).trim() : (isTrial ? 'Khách Dùng Thử 1 Ngày' : 'Khách Đặt Mua Tự Động'),
+      phone: phone ? String(phone).trim() : 'Chờ liên hệ Zalo',
+      deviceId: deviceId ? String(deviceId).trim() : 'Chưa gắn',
+      createdAt: new Date().toISOString(),
+      status: 'pending',
+      note: note || (isTrial ? 'Đăng ký dùng thử 1 ngày (giới hạn 20 bài đăng, 0đ)' : ''),
+    };
 
-  orders.unshift(newOrder);
-  saveOrders(orders);
+    orders.unshift(newOrder);
+    saveOrders(orders);
 
-  addHistoryEntry({
-    action: 'create',
-    actionName: isTrial ? 'Đơn đăng ký dùng thử' : 'Đơn đặt mua mới',
-    clientName: newOrder.clientName || 'Khách Đặt Mua Tự Động',
-    phone: newOrder.phone,
-    deviceId: newOrder.deviceId,
-    key: newOrder.id.slice(-8).toUpperCase(),
-    planType: isTrial ? 'trial' : 'individual',
-    pkgName: normalizePkgSymbol(newOrder.pkgName),
-    amount: newOrder.price,
-    notes: isTrial
-      ? `Khách gửi đơn dùng thử 1 ngày (20 bài đăng, 0đ)${newOrder.note ? ` - ${newOrder.note}` : ''}`
-      : `Khách gửi đơn mua: ${newOrder.pkgName} (${newOrder.price})${newOrder.note ? ` - Ghi chú: ${newOrder.note}` : ''}`,
-  });
+    try {
+      addHistoryEntry({
+        action: 'create',
+        actionName: isTrial ? 'Đơn đăng ký dùng thử' : 'Đơn đặt mua mới',
+        clientName: newOrder.clientName || 'Khách Đặt Mua Tự Động',
+        phone: newOrder.phone,
+        deviceId: newOrder.deviceId,
+        key: newOrder.id.slice(-8).toUpperCase(),
+        planType: isTrial ? 'trial' : 'individual',
+        pkgName: normalizePkgSymbol(newOrder.pkgName),
+        amount: newOrder.price,
+        notes: isTrial
+          ? `Khách gửi đơn dùng thử 1 ngày (20 bài đăng, 0đ)${newOrder.note ? ` - ${newOrder.note}` : ''}`
+          : `Khách gửi đơn mua: ${newOrder.pkgName} (${newOrder.price})${newOrder.note ? ` - Ghi chú: ${newOrder.note}` : ''}`,
+      });
+    } catch (e) {}
 
-  console.log(`[Order API] Nhận đơn mới: ${newOrder.pkgName} từ khách ${newOrder.clientName} (SĐT: ${newOrder.phone})`);
+    console.log(`[Order API] Nhận đơn mới: ${newOrder.pkgName} từ khách ${newOrder.clientName} (SĐT: ${newOrder.phone})`);
 
-  res.json({
-    success: true,
-    message: isTrial
-      ? `✓ Đã ghi nhận yêu cầu dùng thử 1 ngày (20 bài đăng) lên hệ thống Quản Trị Viên thành công!`
-      : `✓ Đã ghi nhận đơn đặt mua "${newOrder.pkgName}" lên hệ thống Quản Trị Viên thành công!`,
-    order: newOrder,
-  });
+    res.json({
+      success: true,
+      message: isTrial
+        ? `✓ Đã ghi nhận yêu cầu dùng thử 1 ngày (20 bài đăng) lên hệ thống Quản Trị Viên thành công!`
+        : `✓ Đã ghi nhận đơn đặt mua "${newOrder.pkgName}" lên hệ thống Quản Trị Viên thành công!`,
+      order: newOrder,
+    });
+  } catch (err: any) {
+    console.error('[Order API] Lỗi tạo đơn:', err);
+    res.status(500).json({ success: false, error: err.message || 'Lỗi xử lý tạo đơn hàng' });
+  }
 });
 
 // Admin xem danh sách đơn hàng

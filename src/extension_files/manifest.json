@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Gia Long - FB",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Gia Long - FB • Tự động đăng bài nhóm Facebook thông minh, hỗ trợ hẹn giờ chuẩn Alarms, đảo Spintax và chống khóa tài khoản an toàn.",
   "permissions": [
     "activeTab",
@@ -14,8 +14,9 @@
   "host_permissions": [
     "https://*.facebook.com/*",
     "https://facebook.com/*",
-    "https://*/*",
-    "http://localhost/*"
+    "https://dang-bai-fb.pages.dev/*",
+    "https://*.pages.dev/*",
+    "https://*.run.app/*"
   ],
   "content_scripts": [
     {
@@ -30,9 +31,7 @@
       "matches": [
         "https://dang-bai-fb.pages.dev/*",
         "https://*.pages.dev/*",
-        "https://*.run.app/*",
-        "http://localhost/*",
-        "http://127.0.0.1/*"
+        "https://*.run.app/*"
       ],
       "js": ["web_bridge.js"],
       "run_at": "document_start"
@@ -66,9 +65,7 @@
         "https://*.facebook.com/*",
         "https://facebook.com/*",
         "https://*.pages.dev/*",
-        "https://*.run.app/*",
-        "http://localhost/*",
-        "http://127.0.0.1/*"
+        "https://*.run.app/*"
       ]
     }
   ],

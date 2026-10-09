@@ -507,7 +507,7 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
       sizeKb: 332,
       updatedAt: new Date().toISOString(),
       fileName: 'Gia_Long_FB_WebStore_latest.zip',
-      version: '1.0.2',
+      version: '1.0.3',
     });
   }
 

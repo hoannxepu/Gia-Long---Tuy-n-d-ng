@@ -1442,8 +1442,55 @@ window.closeOrderModal = function() {
   if (modal) modal.style.display = 'none';
 };
 
-// Hàm gửi đơn đặt mua tự động trực tuyến (Phương án A)
+// Hàm xác nhận chuyển khoản và gửi đơn đặt mua
 window.submitOrderOnline = async function() {
+  const pkg = window.currentSelectedPkg || { name: 'Gói 1 Tháng (30 ngày)', price: '1.000.000đ' };
+  const phoneInput = document.getElementById('orderCustomerPhone');
+  const nameInput = document.getElementById('orderCustomerName');
+  const phone = phoneInput ? phoneInput.value.trim() : '';
+  const customerName = nameInput ? nameInput.value.trim() : '';
+
+  if (!phone || phone.length < 8) {
+    alert('Vui lòng nhập Số điện thoại hoặc Zalo hợp lệ để hệ thống và Quản trị viên gửi mã kích hoạt cho bạn!');
+    phoneInput?.focus();
+    return;
+  }
+
+  const isTrial = (pkg.price === '0đ' || String(pkg.name).includes('Dùng Thử') || String(pkg.name).toLowerCase().includes('trial'));
+  
+  if (!isTrial) {
+    // Hiện hộp thoại hỏi lại về việc đã chuyển khoản chưa
+    const modalConfirm = document.getElementById('modalConfirmTransferCheck');
+    const priceEl = document.getElementById('confirmCheckPrice');
+    const memoEl = document.getElementById('confirmCheckMemo');
+    const devIdEl = document.getElementById('licCurrentDeviceId');
+    const devId = (devIdEl && devIdEl.innerText) ? devIdEl.innerText.trim() : 'AFB-PC-USER';
+    const memo = generateTransferMemo(customerName, phone, pkg.name, devId);
+
+    if (priceEl) priceEl.innerText = pkg.price;
+    if (memoEl) memoEl.innerText = memo;
+
+    if (modalConfirm) {
+      modalConfirm.style.display = 'flex';
+    } else {
+      // Fallback nếu không tìm thấy modal confirm
+      if (confirm(`Bạn đã chuyển khoản ${pkg.price} tới MBBank 0869.029.310 (Nội dung: ${memo}) chưa?\n\nBấm OK nếu đã chuyển khoản thành công để gửi lệnh mua đi!`)) {
+        window.proceedSendOrder();
+      }
+    }
+  } else {
+    // Gói dùng thử miễn phí 0đ
+    if (confirm('🎁 Xác nhận gửi yêu cầu kích hoạt Gói Dùng Thử 1 Ngày (0đ - Miễn phí 100%) lên hệ thống Quản Trị Viên?')) {
+      window.proceedSendOrder();
+    }
+  }
+};
+
+// Hàm thực thi hoàn tất quá trình mua và gửi lệnh mua lên Server
+window.proceedSendOrder = async function() {
+  const modalConfirm = document.getElementById('modalConfirmTransferCheck');
+  if (modalConfirm) modalConfirm.style.display = 'none';
+
   const devIdEl = document.getElementById('licCurrentDeviceId');
   const devId = (devIdEl && devIdEl.innerText) ? devIdEl.innerText.trim() : 'AFB-PC-USER';
   const pkg = window.currentSelectedPkg || { name: 'Gói 1 Tháng (30 ngày)', price: '1.000.000đ' };
@@ -1455,12 +1502,6 @@ window.submitOrderOnline = async function() {
   const phone = phoneInput ? phoneInput.value.trim() : '';
   const customerName = nameInput ? nameInput.value.trim() : '';
 
-  if (!phone) {
-    alert('Vui lòng nhập Số điện thoại hoặc Zalo để hệ thống và Quản trị viên kích hoạt mã cho bạn!');
-    phoneInput?.focus();
-    return;
-  }
-
   if (btnSubmit) {
     btnSubmit.disabled = true;
     btnSubmit.innerHTML = '⏳ Đang gửi đơn lên máy chủ...';
@@ -1468,6 +1509,12 @@ window.submitOrderOnline = async function() {
 
   const isTrial = (pkg.price === '0đ' || String(pkg.name).includes('Dùng Thử') || String(pkg.name).toLowerCase().includes('trial'));
   const memo = generateTransferMemo(customerName, phone, pkg.name, devId);
+
+  // Lưu thông tin SĐT và Tên để lần sau tự điền
+  try {
+    if (phone) localStorage.setItem('gialong_last_phone', phone);
+    if (customerName) localStorage.setItem('gialong_last_name', customerName);
+  } catch (e) {}
 
   const orderPayload = {
     pkgName: pkg.name,
@@ -1477,7 +1524,7 @@ window.submitOrderOnline = async function() {
     phone: phone,
     note: isTrial
       ? `Đăng ký dùng thử 1 ngày (giới hạn 20 bài đăng, 0đ) từ Extension`
-      : `Đơn mua ${pkg.name} từ Extension • Nội dung CK: ${memo}`,
+      : `Đơn mua ${pkg.name} từ Extension • Đã xác nhận CK: ${memo}`,
   };
 
   const showSuccessUI = (orderData) => {
@@ -1549,7 +1596,7 @@ window.submitOrderOnline = async function() {
     window.open('https://zalo.me/0869029310', '_blank');
     if (btnSubmit) {
       btnSubmit.disabled = false;
-      btnSubmit.innerHTML = '🚀 Gửi Đơn Đặt Mua Tự Động';
+      btnSubmit.innerHTML = '🚀 Xác Nhận Mua';
     }
   }
 };
@@ -1561,6 +1608,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnUnderstand = document.getElementById('btnUnderstandCloseOrder');
   const btnSubmit = document.getElementById('btnSubmitOrderOnline');
   const modalOrder = document.getElementById('modalOrderPackage');
+
+  const btnBackToScan = document.getElementById('btnBackToScanQr');
+  const btnConfirmedTransfer = document.getElementById('btnConfirmedTransferred');
+  const modalConfirmTransfer = document.getElementById('modalConfirmTransferCheck');
 
   btnClose?.addEventListener('click', (e) => {
     e.preventDefault();
@@ -1578,6 +1629,19 @@ document.addEventListener('DOMContentLoaded', () => {
     window.closeOrderModal();
   });
   btnSubmit?.addEventListener('click', window.submitOrderOnline);
+
+  // Nút trong hộp thoại xác nhận đã chuyển khoản
+  btnBackToScan?.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (modalConfirmTransfer) modalConfirmTransfer.style.display = 'none';
+  });
+
+  btnConfirmedTransfer?.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    window.proceedSendOrder();
+  });
 
   // Lắng nghe thay đổi SĐT & Tên để cập nhật ngay lập tức Nội dung CK và mã QR VietQR
   const inputPhone = document.getElementById('orderCustomerPhone');

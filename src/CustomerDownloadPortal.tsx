@@ -17,7 +17,10 @@ import {
   ChevronDown,
   ChevronUp,
   BookOpen,
-  ArrowDown
+  ArrowDown,
+  X,
+  Send,
+  Package
 } from 'lucide-react';
 
 interface CustomerDownloadPortalProps {
@@ -184,12 +187,54 @@ export function CustomerDownloadPortal({
   const [activationStatus, setActivationStatus] = useState<string | null>(null);
   const [showQuickActivate, setShowQuickActivate] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<PlanDetail | null>(null);
+  const [purchaseGuidePlan, setPurchaseGuidePlan] = useState<PlanDetail | null>(null);
+  const [quickOrderPhone, setQuickOrderPhone] = useState('');
+  const [quickOrderName, setQuickOrderName] = useState('');
+  const [isSubmittingQuickOrder, setIsSubmittingQuickOrder] = useState(false);
+  const [quickOrderSuccess, setQuickOrderSuccess] = useState<any>(null);
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
   const [copiedFullGuide, setCopiedFullGuide] = useState(false);
 
-  const currentVersion = packageInfo?.version || '1.0.2';
-  const fileSizeKb = packageInfo?.sizeKb || 328;
+  const currentVersion = packageInfo?.version || '1.0.3';
+  const fileSizeKb = packageInfo?.sizeKb || 335;
   const zaloUrl = adminZaloUrl || 'https://zalo.me/0869029310';
+
+  const handleQuickWebOrder = async () => {
+    if (!quickOrderPhone.trim() || quickOrderPhone.trim().length < 8) {
+      alert('Vui lòng nhập Số điện thoại hoặc Zalo hợp lệ để Quản trị viên cấp key!');
+      return;
+    }
+    setIsSubmittingQuickOrder(true);
+    try {
+      const planName = purchaseGuidePlan?.name || 'Gói Bản Quyền';
+      const planPrice = purchaseGuidePlan?.price || '1.000.000đ';
+      const isTrial = planPrice === '0đ' || planName.includes('Dùng Thử');
+      const res = await fetch('/api/orders/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pkgName: planName,
+          price: planPrice,
+          deviceId: 'WEB-CLIENT',
+          clientName: quickOrderName.trim() || `Khách ${quickOrderPhone.trim()}`,
+          phone: quickOrderPhone.trim(),
+          note: isTrial
+            ? 'Đăng ký dùng thử 1 ngày từ Web Portal'
+            : `Đơn mua ${planName} từ Web Portal (Khách: ${quickOrderName.trim() || quickOrderPhone.trim()})`,
+        }),
+      });
+      const data = await res.json();
+      if (data && data.success) {
+        setQuickOrderSuccess(data.order);
+      } else {
+        alert('Lỗi gửi đơn: ' + (data.message || 'Không thể kết nối máy chủ'));
+      }
+    } catch (e: any) {
+      alert('Lỗi kết nối máy chủ: ' + e.message);
+    } finally {
+      setIsSubmittingQuickOrder(false);
+    }
+  };
 
   const handleActivateViaBridge = (key: string) => {
     if (!key.trim()) return alert('Vui lòng nhập mã bản quyền đã được Admin cấp!');
@@ -259,7 +304,7 @@ Hỗ trợ Zalo: 0869.029.310 (Gia Long - FB)`;
             <Download className={`w-3.5 h-3.5 ${isDownloadingZip ? 'animate-bounce' : ''}`} />
             <span>{isDownloadingZip ? 'Đang Tải File ZIP...' : 'Tải Tiện Ích Cài Đặt (.ZIP)'}</span>
             <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-black/30 text-emerald-200 font-mono">
-              ~{fileSizeKb} KB
+              ZIP Cài Đặt Nhanh
             </span>
           </button>
 
@@ -467,10 +512,11 @@ Hỗ trợ Zalo: 0869.029.310 (Gia Long - FB)`;
               <div
                 key={plan.id}
                 onClick={() => {
+                  setSelectedPlan(plan);
+                  setPurchaseGuidePlan(plan);
+                  setQuickOrderSuccess(null);
                   if (onSelectPlan) {
                     onSelectPlan({ name: plan.name, price: plan.price });
-                  } else {
-                    handleSelectPlanAndScroll(plan);
                   }
                 }}
                 className={`rounded-2xl p-3.5 sm:p-4 flex flex-col justify-between transition-all cursor-pointer relative group border ${plan.theme.cardBorder} ${plan.theme.cardBg} ${isSelected ? 'ring-2 ring-emerald-400 border-emerald-500' : ''}`}
@@ -539,10 +585,11 @@ Hỗ trợ Zalo: 0869.029.310 (Gia Long - FB)`;
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
+                      setSelectedPlan(plan);
+                      setPurchaseGuidePlan(plan);
+                      setQuickOrderSuccess(null);
                       if (onSelectPlan) {
                         onSelectPlan({ name: plan.name, price: plan.price });
-                      } else {
-                        handleSelectPlanAndScroll(plan);
                       }
                     }}
                     className={`w-full py-2 px-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 ${plan.theme.btnClass}`}
@@ -702,6 +749,216 @@ Hỗ trợ Zalo: 0869.029.310 (Gia Long - FB)`;
           )}
         </div>
       </section>
+
+      {/* HỘP THOẠI HƯỚNG DẪN QUY TRÌNH ĐẶT MUA & TẢI FILE ZIP */}
+      {purchaseGuidePlan && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md overflow-y-auto"
+          onClick={() => {
+            setPurchaseGuidePlan(null);
+            setQuickOrderSuccess(null);
+          }}
+        >
+          <div
+            className="bg-slate-900 border-2 border-indigo-500/40 rounded-2xl max-w-2xl w-full p-4 sm:p-6 shadow-2xl space-y-4 my-auto animate-in fade-in zoom-in-95 text-slate-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-indigo-500/15 border border-indigo-500/30 text-indigo-400">
+                  <Package className="w-5 h-5 text-sky-400" />
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+                    <span>Quy Trình Đặt Mua &amp; Cài Đặt Bản Quyền</span>
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Gói đang chọn: <strong className="text-sky-400 font-bold">{purchaseGuidePlan.name}</strong> • Chi phí: <strong className="text-emerald-400 font-bold">{purchaseGuidePlan.price}</strong>
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setPurchaseGuidePlan(null);
+                  setQuickOrderSuccess(null);
+                }}
+                className="text-slate-400 hover:text-white p-1.5 rounded-lg text-sm font-bold hover:bg-slate-800 transition cursor-pointer"
+                title="Đóng"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* KHỐI 1: HIỆN FILE ZIP CẦN TẢI ĐỂ NGƯỜI DÙNG THAO TÁC TẢI VỀ LUÔN */}
+            <div className="bg-gradient-to-r from-emerald-950/80 via-teal-950/70 to-slate-950 border-2 border-emerald-500/50 rounded-xl p-4 shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="space-y-1">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-400">
+                  <Sparkles className="w-4 h-4 text-amber-300" />
+                  <span>File Cài Đặt Bản Quyền Chuẩn v{currentVersion}</span>
+                </div>
+                <p className="text-xs sm:text-[13px] text-white font-semibold">
+                  Tải file ZIP về máy để cài đặt trực tiếp vào trình duyệt trong 1 phút!
+                </p>
+                <p className="text-[11px] text-slate-300">
+                  Dung lượng: ~{fileSizeKb} KB • Trực tiếp từ máy chủ • Không qua Store trung gian • An toàn 100%
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={onDownloadZip}
+                disabled={isDownloadingZip}
+                className="px-5 py-2.5 bg-gradient-to-r from-emerald-600 via-teal-600 to-blue-600 hover:from-emerald-500 hover:to-blue-500 text-white rounded-xl text-xs sm:text-sm font-bold shadow-lg shadow-emerald-600/30 transition flex items-center justify-center gap-2 active:scale-95 cursor-pointer shrink-0 border border-emerald-400/40"
+              >
+                <Download className={`w-4 h-4 ${isDownloadingZip ? 'animate-bounce' : ''}`} />
+                <span>{isDownloadingZip ? 'Đang Tải File ZIP...' : '📥 Tải File ZIP Tiện Ích'}</span>
+              </button>
+            </div>
+
+            {/* KHỐI 2: 3 BƯỚC QUY TRÌNH ĐẶT MUA & CÀI ĐẶT TRỰC QUAN */}
+            <div className="space-y-2">
+              <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wide flex items-center gap-1.5">
+                <Layers className="w-3.5 h-3.5 text-sky-400" />
+                <span>3 Bước Hoàn Tất Đặt Mua &amp; Tự Động Kích Hoạt Key:</span>
+              </h4>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+                {/* Bước 1 */}
+                <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <span className="w-5 h-5 rounded bg-sky-500/20 text-sky-400 flex items-center justify-center font-bold text-[11px]">
+                      1
+                    </span>
+                    <strong className="text-white text-xs">Giải Nén File ZIP</strong>
+                  </div>
+                  <p className="text-slate-400 text-[11px] leading-relaxed">
+                    Bấm nút <strong>"Tải File ZIP"</strong> ở trên. Nhấp chuột phải vào file vừa tải về ➔ Chọn <strong>"Extract All"</strong> ra một thư mục.
+                  </p>
+                </div>
+
+                {/* Bước 2 */}
+                <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <span className="w-5 h-5 rounded bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold text-[11px]">
+                      2
+                    </span>
+                    <strong className="text-white text-xs">Cài Vào Trình Duyệt</strong>
+                  </div>
+                  <p className="text-slate-400 text-[11px] leading-relaxed">
+                    Vào <code className="text-sky-300 bg-slate-900 px-1 rounded font-mono text-[10.5px]">chrome://extensions</code> hoặc Edge ➔ Bật <strong>Developer mode</strong> ➔ Bấm <strong>"Load unpacked"</strong> ➔ Chọn thư mục vừa giải nén.
+                  </p>
+                </div>
+
+                {/* Bước 3 */}
+                <div className="p-3 rounded-xl bg-slate-950 border border-emerald-500/30 space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <span className="w-5 h-5 rounded bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-[11px]">
+                      3
+                    </span>
+                    <strong className="text-emerald-400 text-xs">Mở Extension &amp; Xác Nhận</strong>
+                  </div>
+                  <p className="text-slate-400 text-[11px] leading-relaxed">
+                    Mở tiện ích lên ➔ Chọn gói <strong>{purchaseGuidePlan.name}</strong> ➔ Quét mã QR ➔ Bấm <strong>"Xác Nhận Mua"</strong> để nhận key tự động theo máy!
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* KHỐI 3: FORM ĐẶT MUA NHANH QUA WEB (NẾU KHÁCH MUỐN ADMIN DUYỆT TRƯỚC) */}
+            {!quickOrderSuccess ? (
+              <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 space-y-2 text-xs">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                  <span className="font-bold text-slate-200">
+                    💡 Hoặc gửi thông tin đặt mua nhanh qua Web (Quản trị viên liên hệ duyệt):
+                  </span>
+                  <span className="text-[11px] text-slate-400">
+                    Hỗ trợ 24/7
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <input
+                    type="text"
+                    value={quickOrderPhone}
+                    onChange={(e) => setQuickOrderPhone(e.target.value)}
+                    placeholder="Số điện thoại / Zalo nhận key (*) "
+                    className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white placeholder-slate-500 font-mono text-xs focus:border-sky-500 focus:outline-none"
+                  />
+                  <input
+                    type="text"
+                    value={quickOrderName}
+                    onChange={(e) => setQuickOrderName(e.target.value)}
+                    placeholder="Tên bạn hoặc Đơn vị (tùy chọn)"
+                    className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white placeholder-slate-500 text-xs focus:border-sky-500 focus:outline-none"
+                  />
+                </div>
+                <div className="flex justify-end pt-1">
+                  <button
+                    type="button"
+                    onClick={handleQuickWebOrder}
+                    disabled={isSubmittingQuickOrder}
+                    className="px-4 py-1.5 bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 text-white rounded-lg font-bold text-xs shadow transition cursor-pointer flex items-center gap-1.5 active:scale-95 disabled:opacity-50"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>{isSubmittingQuickOrder ? 'Đang gửi...' : 'Gửi Yêu Cầu Đặt Mua Qua Web'}</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="bg-emerald-950/50 border border-emerald-500/40 rounded-xl p-3.5 space-y-2 text-xs text-center animate-in fade-in">
+                <div className="flex items-center justify-center gap-1.5 text-emerald-400 font-bold text-sm">
+                  <CheckCircle2 className="w-5 h-5" />
+                  <span>ĐÃ GỬI YÊU CẦU ĐẶT MUA THÀNH CÔNG!</span>
+                </div>
+                <p className="text-slate-300 text-xs">
+                  Mã đơn hàng: <strong className="text-sky-400 font-mono">#{quickOrderSuccess.id}</strong> • Gói: <strong className="text-white">{purchaseGuidePlan.name}</strong>
+                </p>
+                <p className="text-[11px] text-slate-400">
+                  Quản trị viên đã ghi nhận yêu cầu và sẽ hỗ trợ kích hoạt key bản quyền cho bạn qua SĐT/Zalo <strong>{quickOrderPhone}</strong>!
+                </p>
+                <div className="flex justify-center pt-1">
+                  <a
+                    href={`https://zalo.me/0869029310?text=${encodeURIComponent(
+                      `Chào Admin, tôi vừa gửi đơn mua ${purchaseGuidePlan.name} trên Web (SĐT: ${quickOrderPhone}, Mã đơn: #${quickOrderSuccess.id}). Nhờ Admin duyệt và cấp key giúp tôi nhé!`
+                    )}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="px-4 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded-lg font-bold text-xs transition shadow flex items-center gap-1.5"
+                  >
+                    <MessageSquare className="w-3.5 h-3.5" />
+                    <span>Mở Zalo Nhận Key Ngay (0869.029.310)</span>
+                  </a>
+                </div>
+              </div>
+            )}
+
+            {/* Footer Buttons */}
+            <div className="flex items-center justify-between pt-2 border-t border-slate-800 text-xs">
+              <a
+                href={`https://zalo.me/0869029310?text=${encodeURIComponent(
+                  `Chào Admin, tôi đang quan tâm ${purchaseGuidePlan.name} (${purchaseGuidePlan.price}). Nhờ Admin hướng dẫn và hỗ trợ cài đặt giúp tôi nhé!`
+                )}`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-sky-400 hover:text-sky-300 flex items-center gap-1 font-semibold"
+              >
+                <MessageSquare className="w-3.5 h-3.5" />
+                <span>Chat Zalo Admin: 0869.029.310 (Hỗ trợ 24/7)</span>
+              </a>
+              <button
+                type="button"
+                onClick={() => {
+                  setPurchaseGuidePlan(null);
+                  setQuickOrderSuccess(null);
+                }}
+                className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg font-semibold transition cursor-pointer"
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
