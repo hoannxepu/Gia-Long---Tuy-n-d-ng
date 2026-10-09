@@ -1,0 +1,63 @@
+name: Đóng Gói & Tự Động Đẩy Lên Chrome Web Store
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'src/extension_files/**'
+      - 'package.json'
+      - '.github/workflows/**'
+  # Cho phép kích hoạt thủ công từ giao diện GitHub Actions (Run workflow)
+  workflow_dispatch:
+
+jobs:
+  build-and-publish:
+    name: Build & Upload to Chrome Web Store
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 1. Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: ⚙️ 2. Cài Đặt Môi Trường Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: 📦 3. Cài Đặt Thư Viện (npm install)
+        run: npm ci || npm install
+
+      - name: 🔒 4. Làm Rối Mã Nguồn & Đóng Gói ZIP Extension
+        run: |
+          npx tsx scripts/build_webstore_zip.ts
+          echo "CURRENT_VER=$(node -p "require('./src/extension_files/manifest.json').version")" >> $GITHUB_ENV
+
+      - name: 🌐 5. Tự Động Đẩy Lên Microsoft Edge Add-ons Store
+        if: ${{ secrets.EDGE_CLIENT_ID != '' && secrets.EDGE_CLIENT_SECRET != '' }}
+        uses: wdzeng/edge-addon@v1
+        with:
+          product-id: ${{ secrets.EDGE_PRODUCT_ID || 'd51e5560-f786-49c3-bba8-cbf4272dfbe1' }}
+          zip-path: dist-extension/Gia_Long_FB_WebStore_latest.zip
+          client-id: ${{ secrets.EDGE_CLIENT_ID }}
+          client-secret: ${{ secrets.EDGE_CLIENT_SECRET }}
+          access-token-url: ${{ secrets.EDGE_ACCESS_TOKEN_URL }}
+
+      - name: 🚀 6. Tự Động Đẩy Lên Chrome Web Store & Yêu Cầu Duyệt
+        if: ${{ secrets.CHROME_EXTENSION_ID != '' && secrets.CHROME_CLIENT_ID != '' }}
+        uses: mnao305/chrome-extension-upload@v5.0.0
+        with:
+          file-path: dist-extension/Gia_Long_FB_WebStore_latest.zip
+          extension-id: ${{ secrets.CHROME_EXTENSION_ID }}
+          client-id: ${{ secrets.CHROME_CLIENT_ID }}
+          client-secret: ${{ secrets.CHROME_CLIENT_SECRET }}
+          refresh-token: ${{ secrets.CHROME_REFRESH_TOKEN }}
+          publish: true
+
+      - name: 📦 7. Lưu File ZIP thành Artifact để tải trực tiếp trên GitHub
+        uses: actions/upload-artifact@v4
+        with:
+          name: Gia_Long_FB_WebStore_v${{ env.CURRENT_VER || 'latest' }}
+          path: dist-extension/Gia_Long_FB_WebStore_latest.zip

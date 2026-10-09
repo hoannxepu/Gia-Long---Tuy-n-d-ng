@@ -1,0 +1,83 @@
+{
+  "manifest_version": 3,
+  "name": "Gia Long - FB",
+  "version": "1.0.2",
+  "description": "Gia Long - FB • Tự động đăng bài nhóm Facebook thông minh, hỗ trợ hẹn giờ chuẩn Alarms, đảo Spintax và chống khóa tài khoản an toàn.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "unlimitedStorage",
+    "tabs",
+    "alarms"
+  ],
+  "host_permissions": [
+    "https://*.facebook.com/*",
+    "https://facebook.com/*",
+    "https://*/*",
+    "http://localhost/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.facebook.com/*",
+        "https://facebook.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://dang-bai-fb.pages.dev/*",
+        "https://*.pages.dev/*",
+        "https://*.run.app/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+      ],
+      "js": ["web_bridge.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  },
+  "options_page": "dashboard.html",
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "dashboard.html",
+        "dashboard.js",
+        "icon.png",
+        "icon16.png",
+        "icon48.png",
+        "icon128.png",
+        "preloaded_data.json",
+        "zalo_qr.png",
+        "zalo_card.svg",
+        "logo.png",
+        "logo.svg"
+      ],
+      "matches": [
+        "https://*.facebook.com/*",
+        "https://facebook.com/*",
+        "https://*.pages.dev/*",
+        "https://*.run.app/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+      ]
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  }
+}

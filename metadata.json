@@ -1,0 +1,8 @@
+{
+  "name": "Remix Remix Remix Remix Remix Remix Remix Remix Remix Chrome Extension Developer \u0026 Modification Guide",
+  "description": "Hướng dẫn chi tiết và bộ công cụ hỗ trợ chỉnh sửa, debug và nạp Chrome Extension từ các file có sẵn.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

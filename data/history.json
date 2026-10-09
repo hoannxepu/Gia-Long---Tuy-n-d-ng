@@ -1,0 +1,49 @@
+[
+  {
+    "id": "hist_1791509358149_rc1k",
+    "createdAt": "2026-10-09T01:29:18.149Z",
+    "action": "create",
+    "actionName": "Cấp mã mới",
+    "clientName": "Khách Test History",
+    "phone": "0988776655",
+    "deviceId": "",
+    "key": "GLFB-VIP-UDRJ8",
+    "planType": "individual",
+    "pkgName": "3TH",
+    "daysAdded": 100,
+    "newExpiresAt": "2027-01-17T01:29:18.149Z",
+    "notes": "Tạo mã GLFB-VIP-UDRJ8 (100 ngày)"
+  },
+  {
+    "id": "hist_init_1",
+    "action": "create",
+    "actionName": "Cấp mã mới (Team)",
+    "clientName": "Công Ty CP Hoa Phượng ME (Team HCNS)",
+    "phone": "0869029310",
+    "deviceId": "HP-ME-PC01",
+    "key": "HCNS-HOAPHUONG-3SLOTS",
+    "planType": "team",
+    "pkgName": "1TH",
+    "daysAdded": 30,
+    "newExpiresAt": "2026-11-08T01:29:13.040Z",
+    "amount": "3.000.000đ",
+    "createdAt": "2026-10-07T01:29:13.040Z",
+    "notes": "Khởi tạo cấp phép 3 máy cho phòng tuyển dụng"
+  },
+  {
+    "id": "hist_init_2",
+    "action": "create",
+    "actionName": "Cấp mã mới (Cá nhân)",
+    "clientName": "Anh Tuấn (Recruiter Tự Do)",
+    "phone": "0912345678",
+    "deviceId": "TUAN-DELL-LAT",
+    "key": "VIP-CANHAN-2026",
+    "planType": "individual",
+    "pkgName": "1TH",
+    "daysAdded": 30,
+    "newExpiresAt": "2026-11-08T01:29:13.040Z",
+    "amount": "1.000.000đ",
+    "createdAt": "2026-10-08T01:29:13.040Z",
+    "notes": "Cấp mã bản quyền cá nhân 1 máy"
+  }
+]
