@@ -178,36 +178,36 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
     });
   }
 
-  // 2. Chế độ Proxy trung tâm: Tự động chuyển tiếp yêu cầu về Backend trung tâm
-  // Đảm bảo đơn tạo từ Extension hay web dùng thử đều lập tức xuất hiện trên Web thực tế
-  const centralBackend = (env.BACKEND_URL && env.BACKEND_URL.startsWith('http'))
-    ? env.BACKEND_URL.replace(/\/+$/, '')
-    : 'https://ais-dev-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app';
+  // 2. Chế độ Proxy (Chỉ kích hoạt khi người dùng cấu hình biến môi trường BACKEND_URL riêng biệt)
+  if (env.BACKEND_URL && env.BACKEND_URL.startsWith('http') && !env.BACKEND_URL.includes('run.app')) {
+    try {
+      const centralBackend = env.BACKEND_URL.replace(/\/+$/, '');
+      const backendTarget = `${centralBackend}${pathname}${url.search}`;
+      const proxyReqInit: RequestInit = {
+        method: request.method,
+        headers: request.headers,
+        redirect: 'follow',
+      };
 
-  try {
-    const backendTarget = `${centralBackend}${pathname}${url.search}`;
-    const proxyReqInit: RequestInit = {
-      method: request.method,
-      headers: request.headers,
-      redirect: 'follow',
-    };
+      if (['POST', 'PUT', 'PATCH'].includes(method)) {
+        proxyReqInit.body = await request.clone().arrayBuffer();
+      }
 
-    if (['POST', 'PUT', 'PATCH'].includes(method)) {
-      proxyReqInit.body = await request.clone().arrayBuffer();
+      const proxyResp = await fetch(backendTarget, proxyReqInit);
+      // Chỉ chấp nhận nếu phản hồi thành công 2xx (Tránh các lỗi 302 chuyển hướng Cookie hoặc HTML lỗi)
+      const contentType = proxyResp.headers.get('content-type') || '';
+      if (proxyResp && proxyResp.status >= 200 && proxyResp.status < 300 && !contentType.includes('text/html')) {
+        const respHeaders = new Headers(proxyResp.headers);
+        respHeaders.set('Access-Control-Allow-Origin', '*');
+        respHeaders.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+        return new Response(proxyResp.body, {
+          status: proxyResp.status,
+          headers: respHeaders,
+        });
+      }
+    } catch (proxyErr) {
+      console.warn('[Cloudflare Pages Functions] Proxy to Central Backend failed, falling back to Native Edge processing:', proxyErr);
     }
-
-    const proxyResp = await fetch(backendTarget, proxyReqInit);
-    if (proxyResp && proxyResp.status < 500) {
-      const respHeaders = new Headers(proxyResp.headers);
-      respHeaders.set('Access-Control-Allow-Origin', '*');
-      respHeaders.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-      return new Response(proxyResp.body, {
-        status: proxyResp.status,
-        headers: respHeaders,
-      });
-    }
-  } catch (proxyErr) {
-    console.warn('[Cloudflare Pages Functions] Proxy to Central Backend failed, falling back to Edge processing:', proxyErr);
   }
 
   // 3. Chế độ Xử lý Natively tại Cloudflare Edge

@@ -90,29 +90,29 @@ async function getApiBaseUrl() {
       return u.origin;
     }
   } catch (e) {}
-  return 'https://ais-dev-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app';
+  return 'https://dang-bai-fb.pages.dev';
 }
 
 function getCandidateServerUrls(primaryBase) {
   const list = [
     primaryBase,
+    'https://dang-bai-fb.pages.dev',
     'https://ais-dev-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app',
     'https://ais-pre-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app',
     'http://localhost:3000',
     'http://127.0.0.1:3000',
-    'https://dang-bai-fb.pages.dev',
   ];
   return list.filter((v, i, a) => Boolean(v) && a.indexOf(v) === i);
 }
 
 // Xử lý gửi đơn đặt mua gói bản quyền tự động lên Server
+// Đồng bộ song song tới cả Cloudflare Pages và Studio để đơn hiển thị lập tức trên cả hai hệ thống
 async function handleCreateOrder(payload) {
   const currentBase = await getApiBaseUrl();
   const urlsToTry = getCandidateServerUrls(currentBase);
 
-  let lastError = null;
-  for (const rawUrl of urlsToTry) {
-    if (!rawUrl || !rawUrl.startsWith('http')) continue;
+  const promises = urlsToTry.map(async (rawUrl) => {
+    if (!rawUrl || !rawUrl.startsWith('http')) return null;
     const base = rawUrl.replace(/\/+$/, '');
     try {
       const resp = await fetch(`${base}/api/orders/create`, {
@@ -122,21 +122,34 @@ async function handleCreateOrder(payload) {
       });
       const text = await resp.text();
       if (!text || (!text.trim().startsWith('{') && !text.trim().startsWith('['))) {
-        continue;
+        return null;
       }
       const data = JSON.parse(text);
       if (data && data.success) {
-        // Lưu server URL hoạt động tốt này vào storage
-        await chrome.storage.local.set({ customApiServerUrl: base, webapp_last_url: base });
         console.log('[Gia Long - FB Background] ✓ Đã gửi đơn hàng thành công lên:', base);
-        return { success: true, order: data.order, message: data.message };
+        return { base, order: data.order, message: data.message };
       }
     } catch (err) {
-      lastError = err;
       console.warn('[Gia Long - FB Background] Thử gửi đơn tới', base, 'thất bại:', err.message);
     }
+    return null;
+  });
+
+  const results = await Promise.allSettled(promises);
+  const successful = results
+    .filter((r) => r.status === 'fulfilled' && r.value)
+    .map((r) => r.value);
+
+  if (successful.length > 0) {
+    const primarySuccess = successful.find((s) => s.base.includes('pages.dev')) || successful[0];
+    await chrome.storage.local.set({ 
+      customApiServerUrl: primarySuccess.base, 
+      webapp_last_url: primarySuccess.base 
+    });
+    return { success: true, order: primarySuccess.order, message: primarySuccess.message };
   }
-  return { success: false, error: lastError ? lastError.message : 'Không thể kết nối đến máy chủ Quản trị viên' };
+
+  return { success: false, error: 'Không thể kết nối đến máy chủ Quản trị viên' };
 }
 
 async function checkLicenseStatus(forceRemote = false) {

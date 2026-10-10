@@ -20,9 +20,7 @@
     window.__AUTORECRUIT_EXTENSION_INSTALLED__ = true;
     window.__GIALONG_EXTENSION_INSTALLED__ = true;
     if (window.location.origin && window.location.origin.startsWith('http')) {
-      const serverUrl = window.location.origin.includes('pages.dev')
-        ? 'https://ais-dev-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app'
-        : window.location.origin;
+      const serverUrl = window.location.origin.replace(/\/+$/, '');
       chrome.runtime.sendMessage({
         action: 'SET_SERVER_URL',
         url: serverUrl,

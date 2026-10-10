@@ -1,4 +1,4 @@
-export const BACKEND_API_BASE = 'https://ais-dev-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app';
+export const BACKEND_API_BASE = 'https://dang-bai-fb.pages.dev';
 
 /**
  * Tự động xác định URL API phù hợp:

@@ -1680,18 +1680,26 @@ window.proceedSendOrder = async function() {
 
   fallbackDirectFetch();
 
-  // 2. Fallback gửi trực tiếp qua danh sách máy chủ khả dụng
+  // 2. Fallback gửi trực tiếp qua danh sách máy chủ khả dụng (Đồng bộ đa máy chủ)
   async function fallbackDirectFetch() {
+    let customSavedUrl = '';
+    try {
+      const stored = await chrome.storage.local.get(['customApiServerUrl', 'webapp_last_url']);
+      customSavedUrl = stored.customApiServerUrl || stored.webapp_last_url || '';
+    } catch (e) {}
+
     const candidates = [
+      customSavedUrl,
+      'https://dang-bai-fb.pages.dev',
+      window.location.origin.startsWith('http') ? window.location.origin : null,
       'https://ais-dev-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app',
       'https://ais-pre-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app',
       'http://localhost:3000',
       'http://127.0.0.1:3000',
-      window.location.origin.startsWith('http') ? window.location.origin : null,
-      'https://dang-bai-fb.pages.dev',
-    ].filter(Boolean);
+    ].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i);
 
-    for (const sUrl of candidates) {
+    let createdOrder = null;
+    const fetchPromises = candidates.map(async (sUrl) => {
       try {
         const res = await fetch(`${sUrl}/api/orders/create`, {
           method: 'POST',
@@ -1699,15 +1707,23 @@ window.proceedSendOrder = async function() {
           body: JSON.stringify(orderPayload),
         });
         const text = await res.text();
-        if (!text || (!text.trim().startsWith('{') && !text.trim().startsWith('['))) continue;
+        if (!text || (!text.trim().startsWith('{') && !text.trim().startsWith('['))) return null;
         const data = JSON.parse(text);
         if (data && data.success) {
-          showSuccessUI(data.order);
-          return;
+          console.log('[Gia Long - FB Extension] ✓ Đã gửi đơn thành công lên:', sUrl);
+          return data.order;
         }
       } catch (err) {
         console.warn('Lỗi kết nối tới:', sUrl, err);
       }
+      return null;
+    });
+
+    const results = await Promise.allSettled(fetchPromises);
+    const validOrders = results.filter((r) => r.status === 'fulfilled' && r.value).map((r) => r.value);
+    if (validOrders.length > 0) {
+      showSuccessUI(validOrders[0]);
+      return;
     }
 
     // Nếu không kết nối được, thông báo rõ ràng để khách không bị nhầm lẫn
