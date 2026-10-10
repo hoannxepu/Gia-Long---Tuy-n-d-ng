@@ -90,43 +90,19 @@ async function getApiBaseUrl() {
       return u.origin;
     }
   } catch (e) {}
-  return 'https://dang-bai-fb.pages.dev';
+  return 'https://ais-dev-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app';
 }
 
 function getCandidateServerUrls(primaryBase) {
   const list = [
-    'https://dang-bai-fb.pages.dev',
+    primaryBase,
     'https://ais-dev-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app',
     'https://ais-pre-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app',
-    primaryBase ? primaryBase.replace(/\/+$/, '') : null,
     'http://localhost:3000',
     'http://127.0.0.1:3000',
+    'https://dang-bai-fb.pages.dev',
   ];
   return list.filter((v, i, a) => Boolean(v) && a.indexOf(v) === i);
-}
-
-// Tự động đồng bộ các đơn hàng lưu trên máy khách lên các máy chủ quản trị (Cloudflare Pages & Cloud Run)
-async function syncLocalOrdersToAdminServer() {
-  try {
-    const st = await chrome.storage.local.get(['extension_orders_history']);
-    const history = st.extension_orders_history || [];
-    if (!history.length) return;
-
-    const currentBase = await getApiBaseUrl();
-    const urlsToTry = getCandidateServerUrls(currentBase);
-
-    for (const rawUrl of urlsToTry) {
-      if (!rawUrl || !rawUrl.startsWith('http')) continue;
-      const base = rawUrl.replace(/\/+$/, '');
-      try {
-        await fetch(`${base}/api/orders/sync`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ orders: history }),
-        });
-      } catch (e) {}
-    }
-  } catch (err) {}
 }
 
 // Xử lý gửi đơn đặt mua gói bản quyền tự động lên Server
@@ -134,29 +110,7 @@ async function handleCreateOrder(payload) {
   const currentBase = await getApiBaseUrl();
   const urlsToTry = getCandidateServerUrls(currentBase);
 
-  // Lưu ngay vào lịch sử cục bộ trên máy khách (chrome.storage.local)
-  const localOrder = {
-    id: 'ord_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
-    createdAt: new Date().toISOString(),
-    status: 'pending',
-    ...payload,
-  };
-  try {
-    const st = await chrome.storage.local.get(['extension_orders_history']);
-    const history = st.extension_orders_history || [];
-    // Kiểm tra trùng
-    const exists = history.some((o) => o.id === localOrder.id);
-    if (!exists) {
-      history.unshift(localOrder);
-      await chrome.storage.local.set({ extension_orders_history: history.slice(0, 50) });
-    }
-  } catch (e) {}
-
-  let hasDelivered = false;
-  let finalOrder = localOrder;
-  let finalMessage = '✓ Đã ghi nhận đơn đặt mua thành công!';
-
-  // Gửi đồng thời tới cả Cloudflare Pages và Cloud Run để đảm bảo 100% hai hệ thống đồng bộ
+  let lastError = null;
   for (const rawUrl of urlsToTry) {
     if (!rawUrl || !rawUrl.startsWith('http')) continue;
     const base = rawUrl.replace(/\/+$/, '');
@@ -172,18 +126,17 @@ async function handleCreateOrder(payload) {
       }
       const data = JSON.parse(text);
       if (data && data.success) {
-        hasDelivered = true;
-        if (data.order) finalOrder = data.order;
-        if (data.message) finalMessage = data.message;
+        // Lưu server URL hoạt động tốt này vào storage
         await chrome.storage.local.set({ customApiServerUrl: base, webapp_last_url: base });
         console.log('[Gia Long - FB Background] ✓ Đã gửi đơn hàng thành công lên:', base);
+        return { success: true, order: data.order, message: data.message };
       }
     } catch (err) {
+      lastError = err;
       console.warn('[Gia Long - FB Background] Thử gửi đơn tới', base, 'thất bại:', err.message);
     }
   }
-
-  return { success: true, order: finalOrder, message: finalMessage };
+  return { success: false, error: lastError ? lastError.message : 'Không thể kết nối đến máy chủ Quản trị viên' };
 }
 
 async function checkLicenseStatus(forceRemote = false) {
@@ -270,6 +223,7 @@ async function checkLicenseStatus(forceRemote = false) {
 
         const isRevoked = Boolean(result.isRevoked || result.license?.isRevoked);
         const isSuspended = Boolean(result.license?.isSuspended);
+        const isForceRevoke = Boolean(result.action === 'FORCE_REVOKE' || isRevoked || result.isDeleted);
 
         if (result.valid && result.license && !isRevoked && !isSuspended) {
           const lic = {
@@ -285,24 +239,30 @@ async function checkLicenseStatus(forceRemote = false) {
             license: lic,
           };
         } else {
-          const isDeleted = Boolean(result.isDeleted || !result.license);
-          const lic = {
-            ...(cached || {}),
-            key: isDeleted ? '' : key,
-            isExpired: result.isExpired || false,
-            isSuspended,
-            isRevoked,
-            isDeleted,
-            revokeReason: result.license?.revokeReason || result.message,
-            lastVerifiedAt: now,
-          };
+          // Khi bị xóa, thu hồi hoặc không hợp lệ: LẬP TỨC XÓA SẠCH KEY, NGẮT MỌI ALARMS & DỪNG TIẾN TRÌNH
+          if (isForceRevoke || !result.valid) {
+            await chrome.storage.local.remove(['licenseKey', 'licenseData', 'isVip', 'currentLicense', 'licenseInfo']);
+          } else {
+            const lic = {
+              ...(cached || {}),
+              key,
+              isExpired: result.isExpired || false,
+              isSuspended,
+              isRevoked,
+              revokeReason: result.license?.revokeReason || result.message,
+              lastVerifiedAt: now,
+            };
+            await chrome.storage.local.set({ licenseData: lic });
+          }
 
-          // Khi bị xóa khỏi danh sách, thu hồi hoặc khóa: Lập tức ngắt toàn bộ hẹn giờ & dừng tiến trình đang chạy
+          // Ngắt ngay toàn bộ hẹn giờ Alarms và dừng mọi tiến trình đang chạy
           chrome.alarms.clearAll(() => {});
           await chrome.storage.local.set({
             isScheduleActive: false,
-            licenseData: isDeleted ? null : lic,
-            licenseKey: isDeleted ? '' : key,
+            isRunning: false,
+            autoScheduleEnabled: false,
+            scheduledJobs: [],
+            postJobState: 'REVOKED_STOPPED',
           });
           shouldStop = true;
           isRunning = false;
@@ -312,11 +272,10 @@ async function checkLicenseStatus(forceRemote = false) {
             isValid: false,
             isActivated: false,
             isExpired: result.isExpired || false,
-            isRevoked,
+            isRevoked: true,
             isSuspended,
-            isDeleted,
-            message: result.message || (isRevoked ? 'Bản quyền đã bị thu hồi!' : 'Mã bản quyền đã bị xóa khỏi hệ thống hoặc không hợp lệ!'),
-            license: isDeleted ? null : lic,
+            message: result.message || '🚨 BẢN QUYỀN ĐÃ BỊ THU HỒI / XÓA KHỎI HỆ THỐNG: Mọi tiến trình đã bị chấm dứt ngay lập tức!',
+            license: null,
           };
         }
       } catch (err) {
@@ -324,8 +283,8 @@ async function checkLicenseStatus(forceRemote = false) {
       }
     }
 
-    // 3. Cơ chế Offline Grace Period: Chỉ áp dụng khi rớt mạng thực sự (networkError) và chưa từng bị xóa/thu hồi
-    if (networkError && cached && !cached.isRevoked && !cached.isSuspended && !cached.isDeleted && (now - (cached.lastVerifiedAt || 0) < 24 * 60 * 60 * 1000)) {
+    // 3. Cơ chế Offline Grace Period: Cho phép tiếp tục dùng trong 24 giờ nếu rớt mạng (Tuyệt đối không áp dụng nếu bị Thu hồi hoặc Tạm khóa)
+    if (cached && (now - (cached.lastVerifiedAt || 0) < 24 * 60 * 60 * 1000)) {
       const expMs = new Date(cached.expiresAt).getTime();
       if (expMs > now && !cached.isSuspended && !cached.isRevoked) {
         console.warn('[AutoRecruit License] Rớt mạng tạm thời, duy trì bản quyền trong 24h grace period.');
@@ -628,13 +587,11 @@ async function restoreScheduleOnBoot() {
 chrome.runtime.onStartup.addListener(() => {
   console.log('[AutoRecruit Background] Chrome vừa khởi động -> Nạp lại lịch hẹn giờ...');
   restoreScheduleOnBoot();
-  syncLocalOrdersToAdminServer();
 });
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('[AutoRecruit Background] Extension vừa nạp/cập nhật -> Kiểm tra lịch hẹn giờ & đồng bộ đơn hàng...');
+  console.log('[AutoRecruit Background] Extension vừa nạp/cập nhật -> Kiểm tra lịch hẹn giờ...');
   restoreScheduleOnBoot();
-  syncLocalOrdersToAdminServer();
 });
 
 // ==========================================
@@ -869,7 +826,55 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       .catch((err) => sendResponse({ success: false, error: err.message }));
     return true;
   }
+
+  // 12. TẢI LẠI & ĐỒNG BỘ QUẢN TRỊ (KÉO TRẠNG THÁI DUYỆT ĐƠN & KEY MỚI NHẤT TỪ SERVER)
+  if (request.action === 'SYNC_ADMIN_STATUS' || request.action === 'FETCH_MY_ORDERS') {
+    fetchMyOrdersAndSync()
+      .then((res) => sendResponse(res))
+      .catch((err) => sendResponse({ success: false, message: err.message }));
+    return true;
+  }
 });
+
+// Tra cứu danh sách đơn hàng của máy khách và tự động kích hoạt key nếu đã được Admin duyệt
+async function fetchMyOrdersAndSync() {
+  const deviceId = await getOrCreateDeviceId();
+  const primaryBase = await getApiBaseUrl();
+  const serverCandidates = getCandidateServerUrls(primaryBase);
+
+  for (const baseUrl of serverCandidates) {
+    try {
+      const resp = await fetch(`${baseUrl}/api/orders/my-orders?deviceId=${encodeURIComponent(deviceId)}`);
+      const text = await resp.text();
+      if (!text || (!text.trim().startsWith('{') && !text.trim().startsWith('['))) continue;
+      const data = JSON.parse(text);
+      if (data && data.success && Array.isArray(data.orders)) {
+        await chrome.storage.local.set({ myOrders: data.orders, lastOrdersSync: Date.now() });
+
+        // Tự động kích hoạt mã nếu có đơn được phê duyệt
+        const approvedOrder = data.orders.find((o) => o.status === 'approved' && o.generatedKey);
+        if (approvedOrder && approvedOrder.generatedKey) {
+          const currentData = await chrome.storage.local.get(['licenseKey']);
+          if (!currentData.licenseKey || currentData.licenseKey !== approvedOrder.generatedKey) {
+            console.log('[AutoRecruit Background] Phát hiện đơn đã được duyệt, tự động nạp key:', approvedOrder.generatedKey);
+            await activateLicenseKey(approvedOrder.generatedKey);
+          }
+        }
+
+        const licRes = await checkLicenseStatus(true);
+        return {
+          success: true,
+          orders: data.orders,
+          totalPending: data.totalPending || 0,
+          license: licRes.license,
+          isValid: licRes.isValid,
+          message: '✓ Đã đồng bộ trạng thái đơn hàng & bản quyền từ máy chủ Quản trị thành công!',
+        };
+      }
+    } catch (e) {}
+  }
+  return { success: false, message: 'Không thể kết nối đến máy chủ Quản trị!' };
+}
 
 // Chuyển URL ảnh thành DataURL trực tiếp trong Background Service Worker (Không dùng FileReader)
 async function urlToDataUrl(url) {

@@ -137,6 +137,43 @@ export interface LicenseHistoryItem {
 }
 
 const HISTORY_FILE = path.join(DATA_DIR, 'history.json');
+const REVOKED_KEYS_FILE = path.join(DATA_DIR, 'revoked-keys.json');
+
+export interface RevokedKeyItem {
+  key: string;
+  reason?: string;
+  revokedAt: string;
+}
+
+function loadRevokedKeys(): RevokedKeyItem[] {
+  try {
+    if (fs.existsSync(REVOKED_KEYS_FILE)) {
+      return JSON.parse(fs.readFileSync(REVOKED_KEYS_FILE, 'utf-8'));
+    }
+  } catch (e) {}
+  return [];
+}
+
+function addRevokedKey(key: string, reason = 'Quản trị viên xóa hoặc thu hồi bản quyền') {
+  if (!key) return;
+  const list = loadRevokedKeys();
+  const cleanKey = key.trim().toUpperCase();
+  if (!list.some((r) => r.key === cleanKey)) {
+    list.unshift({ key: cleanKey, reason, revokedAt: new Date().toISOString() });
+    try {
+      fs.writeFileSync(REVOKED_KEYS_FILE, JSON.stringify(list, null, 2), 'utf-8');
+    } catch (e) {}
+  }
+}
+
+function removeRevokedKey(key: string) {
+  if (!key) return;
+  let list = loadRevokedKeys();
+  list = list.filter((r) => r.key !== key.trim().toUpperCase());
+  try {
+    fs.writeFileSync(REVOKED_KEYS_FILE, JSON.stringify(list, null, 2), 'utf-8');
+  } catch (e) {}
+}
 
 export function normalizePkgSymbol(pkgOrDays: any): string {
   const str = String(pkgOrDays || '').trim().toLowerCase();
@@ -262,15 +299,31 @@ app.post('/api/license/verify', (req: Request, res: Response) => {
     return res.status(400).json({ valid: false, message: 'Vui lòng cung cấp mã bản quyền!' });
   }
 
+  const cleanKey = String(key).trim().toUpperCase();
+
+  // 1. Kiểm tra danh sách mã đã bị xóa / thu hồi vĩnh viễn
+  const revokedList = loadRevokedKeys();
+  const revokedRecord = revokedList.find((r) => r.key === cleanKey);
+  if (revokedRecord) {
+    return res.json({
+      valid: false,
+      isRevoked: true,
+      isDeleted: true,
+      action: 'FORCE_REVOKE',
+      message: `🚨 BẢN QUYỀN ĐÃ BỊ XÓA / THU HỒI: ${revokedRecord.reason || 'Vi phạm điều khoản hoặc bị Quản trị viên xóa'}. Mọi tính năng và tiến trình đã bị chấm dứt ngay lập tức!`,
+    });
+  }
+
   const licenses = loadLicenses();
-  const found = licenses.find((l) => l.key.trim().toUpperCase() === String(key).trim().toUpperCase());
+  const found = licenses.find((l) => l.key.trim().toUpperCase() === cleanKey);
 
   if (!found) {
     return res.json({
       valid: false,
       isRevoked: true,
       isDeleted: true,
-      message: 'Mã bản quyền không tồn tại hoặc đã bị Quản Trị Viên xóa khỏi hệ thống!',
+      action: 'FORCE_REVOKE',
+      message: '🚨 Mã bản quyền không tồn tại hoặc đã bị xóa khỏi hệ thống! Toàn bộ tính năng đã bị chấm dứt ngay lập tức.',
     });
   }
 
@@ -278,6 +331,7 @@ app.post('/api/license/verify', (req: Request, res: Response) => {
     return res.json({
       valid: false,
       isRevoked: true,
+      action: 'FORCE_REVOKE',
       message: `🚨 BẢN QUYỀN ĐÃ BỊ THU HỒI: ${found.revokeReason || 'Vi phạm điều khoản sử dụng'}. Mọi tính năng đã bị vô hiệu hóa!`,
       license: {
         key: found.key,
@@ -726,6 +780,7 @@ app.post('/api/admin/licenses/revoke', requireAdmin, (req: Request, res: Respons
   found.revokeReason = reason || 'Vi phạm điều khoản sử dụng hoặc phát hiện hành vi gian lận';
   found.devices = []; // Ngắt ngay toàn bộ thiết bị đang kết nối
   saveLicenses(licenses);
+  addRevokedKey(found.key, found.revokeReason);
 
   addHistoryEntry({
     action: 'revoke',
@@ -760,6 +815,7 @@ app.post('/api/admin/licenses/unrevoke', requireAdmin, (req: Request, res: Respo
   delete found.revokedAt;
   delete found.revokeReason;
   saveLicenses(licenses);
+  removeRevokedKey(found.key);
 
   addHistoryEntry({
     action: 'unrevoke',
@@ -797,6 +853,7 @@ app.post('/api/admin/licenses/regenerate-key', requireAdmin, (req: Request, res:
   const oldKey = found.key;
   const newKey = `${prefix}-${randomCode}`;
 
+  addRevokedKey(oldKey, `Đã cấp đổi sang mã mới ${newKey}`);
   found.key = newKey;
   found.devices = []; // Reset để khách kích hoạt trên máy với mã mới
   saveLicenses(licenses);
@@ -841,7 +898,7 @@ app.post('/api/admin/licenses/reset-devices', requireAdmin, (req: Request, res: 
   });
 });
 
-// Xóa mã bản quyền
+// Xóa mã bản quyền - Ngắt quyền ngay lập tức cho Extension
 app.post('/api/admin/licenses/delete', requireAdmin, (req: Request, res: Response) => {
   const targetId = req.body?.id || req.body?.licenseId || req.body?.key;
   if (!targetId) {
@@ -849,9 +906,29 @@ app.post('/api/admin/licenses/delete', requireAdmin, (req: Request, res: Respons
   }
   let licenses = loadLicenses();
   const before = licenses.length;
+  const toDelete = licenses.find((l) => l.id === targetId || l.key === targetId);
+
+  if (toDelete) {
+    addRevokedKey(toDelete.key, 'Quản trị viên đã xóa người dùng khỏi danh sách');
+    addHistoryEntry({
+      action: 'revoke',
+      actionName: 'Xóa người dùng',
+      clientName: toDelete.clientName,
+      phone: toDelete.phone || '',
+      deviceId: toDelete.devices?.[0]?.deviceId || '',
+      key: toDelete.key,
+      planType: toDelete.planType,
+      notes: `Quản trị viên xóa người dùng "${toDelete.clientName}" khỏi danh sách`,
+    });
+  }
+
   licenses = licenses.filter((l) => l.id !== targetId && l.key !== targetId);
   saveLicenses(licenses);
-  res.json({ success: true, message: 'Đã xóa mã bản quyền thành công!', count: before - licenses.length });
+  res.json({
+    success: true,
+    message: '✓ Đã xóa người dùng khỏi danh sách và khóa quyền vĩnh viễn trên toàn bộ thiết bị!',
+    count: before - licenses.length,
+  });
 });
 
 // ============================================================================
@@ -981,26 +1058,75 @@ app.post('/api/orders/sync', (req: Request, res: Response) => {
   }
 });
 
-// Công khai số lượng đơn chờ duyệt để biểu tượng Quả Chuông (Bell) luôn hiện thông báo gây chú ý ngay lập tức
+// Lấy số lượng đơn hàng chờ duyệt (Hoạt động ngay từ khi tải trang, phục vụ Quả Chuông thông báo)
 app.get('/api/orders/pending-count', (_req: Request, res: Response) => {
   try {
     const orders = loadOrders();
     const pendingOrders = orders.filter((o) => o.status === 'pending');
-    res.json({ success: true, count: pendingOrders.length });
+    res.json({
+      success: true,
+      pendingCount: pendingOrders.length,
+      latestPending: pendingOrders.length > 0 ? {
+        id: pendingOrders[0].id,
+        pkgName: pendingOrders[0].pkgName,
+        clientName: pendingOrders[0].clientName,
+        price: pendingOrders[0].price,
+        createdAt: pendingOrders[0].createdAt,
+      } : null,
+    });
   } catch (err: any) {
-    res.json({ success: true, count: 0 });
+    res.json({ success: false, pendingCount: 0 });
   }
 });
 
-// Khách hàng / Extension tra cứu danh sách đơn hàng theo Mã Thiết Bị (Device ID) để đồng bộ trạng thái duyệt & mã key
+// Tra cứu danh sách đơn hàng của khách (phục vụ Bảng lịch sử mua gói & đồng bộ hai chiều Extension)
 app.get('/api/orders/my-orders', (req: Request, res: Response) => {
   try {
     const deviceId = String(req.query.deviceId || '').trim();
+    const phone = String(req.query.phone || '').trim().replace(/\D/g, '');
+    const orderIds = String(req.query.orderIds || '').split(',').map((s) => s.trim()).filter(Boolean);
+
     const orders = loadOrders();
-    const matched = deviceId ? orders.filter((o) => o.deviceId === deviceId) : orders.slice(0, 50);
-    res.json({ success: true, orders: matched });
+    const licenses = loadLicenses();
+
+    let matched = orders.filter((o) => {
+      if (deviceId && o.deviceId && o.deviceId.toLowerCase() === deviceId.toLowerCase()) return true;
+      if (phone && o.phone && o.phone.replace(/\D/g, '') === phone) return true;
+      if (orderIds.length > 0 && orderIds.includes(o.id)) return true;
+      return false;
+    });
+
+    // Nếu không khớp đơn nào theo deviceId / phone, trả về tối đa 5 đơn gần nhất đã tạo từ máy này hoặc đơn mới
+    if (matched.length === 0 && (deviceId || orderIds.length > 0)) {
+      matched = orders.slice(0, 5);
+    }
+
+    // Tự động kiểm tra và gắn key nếu đơn đã được Admin phê duyệt hoặc có key gắn với deviceId
+    matched = matched.map((o) => {
+      let key = o.generatedKey;
+      if (!key && deviceId) {
+        const foundLic = licenses.find(
+          (l) => !l.isRevoked && !l.isSuspended && l.devices?.some((d) => d.deviceId.toLowerCase() === deviceId.toLowerCase())
+        );
+        if (foundLic) {
+          key = foundLic.key;
+        }
+      }
+      return {
+        ...o,
+        generatedKey: key,
+      };
+    });
+
+    const pendingCount = orders.filter((o) => o.status === 'pending').length;
+
+    res.json({
+      success: true,
+      orders: matched,
+      totalPending: pendingCount,
+    });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({ success: false, error: err.message || 'Lỗi tra cứu đơn hàng' });
   }
 });
 

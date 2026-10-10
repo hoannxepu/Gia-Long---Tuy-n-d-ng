@@ -895,15 +895,16 @@ document.addEventListener('DOMContentLoaded', async () => {
           const planLabel = res.license.planType === 'team' ? 'DOANH NGHIỆP' : (res.license.planType === 'trial' ? 'DÙNG THỬ' : 'CÁ NHÂN');
           popupLicTitle.innerText = `${res.license.clientName} (${planLabel}) - Còn ${res.license.daysLeft} ngày`;
         }
-        if (popupLicIcon) popupLicIcon.innerText = '💎';
+        if (popupLicIcon) popupLicIcon.innerText = res.license.planType === 'trial' ? '🎁' : '💎';
         if (btnPopupOpenLicense) btnPopupOpenLicense.innerText = 'VIP Hợp Lệ';
       } else {
         const isExp = res.isExpired;
+        const isRevoked = res.isRevoked;
         if (popupLicTitle) {
-          popupLicTitle.innerText = isExp ? '🚨 Bản Quyền Đã Hết Hạn' : '⚠️ Chưa Kích Hoạt Bản Quyền';
+          popupLicTitle.innerText = isRevoked ? '🚫 Bản Quyền Đã Bị Thu Hồi' : (isExp ? '🚨 Bản Quyền Đã Hết Hạn' : '⚠️ Chưa Kích Hoạt Bản Quyền');
         }
-        if (popupLicIcon) popupLicIcon.innerText = isExp ? '🚨' : '⚠️';
-        if (btnPopupOpenLicense) btnPopupOpenLicense.innerText = isExp ? 'Gia Hạn' : 'Kích Hoạt';
+        if (popupLicIcon) popupLicIcon.innerText = isRevoked ? '🚫' : (isExp ? '🚨' : '⚠️');
+        if (btnPopupOpenLicense) btnPopupOpenLicense.innerText = isRevoked ? 'Bị Khóa' : (isExp ? 'Gia Hạn' : 'Kích Hoạt');
       }
     });
   }

@@ -1,5 +1,19 @@
 [
   {
+    "id": "hist_1791549259698_zlt5",
+    "createdAt": "2026-10-09T12:34:19.698Z",
+    "action": "create",
+    "actionName": "Đơn đặt mua mới",
+    "clientName": "Khách Thử Nghiệm",
+    "phone": "0987654321",
+    "deviceId": "DEV-TEST-01",
+    "key": "698_2M3Y",
+    "planType": "individual",
+    "pkgName": "1TH",
+    "amount": "1.000.000đ",
+    "notes": "Khách gửi đơn mua: Gói 1 Tháng (30 ngày) (1.000.000đ)"
+  },
+  {
     "id": "hist_1791524547357_e2t1",
     "createdAt": "2026-10-09T05:42:27.357Z",
     "action": "update_date",

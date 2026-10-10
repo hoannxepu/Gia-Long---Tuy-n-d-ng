@@ -562,65 +562,400 @@
         <span id="licDevicesCount"></span>
       </div>
 
-      <!-- BỐ CỤC QUẢN LÝ BẢN QUYỀN GIA LONG - FB -->
-      <div class="license-grid" style="display: flex; flex-direction: column; gap: 14px;">
+      <!-- BỐ CỤC CHUẨN WEB QUẢN TRỊ (ẢNH 2): HERO BANNER + BẢNG 5 GÓI BÁO GIÁ + KHU VỰC BẢN QUYỀN & QUY TRÌNH 3 BƯỚC -->
+      <div class="license-grid">
         
-        <!-- CARD 1: TRẠNG THÁI BẢN QUYỀN HIỆN TẠI & THÔNG TIN THIẾT BỊ -->
-        <div style="background: rgba(15, 23, 42, 0.95); border: 1px solid rgba(51, 65, 85, 0.85); border-radius: 16px; padding: 18px 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); display: flex; flex-direction: column; gap: 12px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; border-bottom: 1px solid #1e293b; padding-bottom: 12px;">
-            <div style="display: flex; align-items: center; gap: 10px;">
-              <div style="width: 38px; height: 38px; border-radius: 10px; background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.35); display: flex; align-items: center; justify-content: center; font-size: 18px;">
-                💻
-              </div>
-              <div>
-                <h3 style="font-size: 14px; font-weight: 800; color: #ffffff; margin: 0;">Thông Tin Bản Quyền &amp; Mã Thiết Bị Máy Tính</h3>
-                <p style="font-size: 11px; color: #94a3b8; margin: 2px 0 0 0;">Bản quyền được xác thực và cấp phép trực tiếp theo phần cứng máy tính</p>
-              </div>
-            </div>
-            
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <button id="btnOpenBuyModalQuick" class="btn btn-emerald" style="padding: 7px 14px; font-size: 11.5px; font-weight: 700; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.25);" onclick="openOrderModal('Gói 1 Tháng (30 ngày)', '1.000.000đ')">
-                🛒 Đặt Mua Gói Mới
-              </button>
-              <button class="btn btn-sub" style="padding: 7px 12px; font-size: 11.5px;" onclick="openOrderModal('Gói Dùng Thử', '0đ')">
-                🎁 Dùng Thử 0đ
-              </button>
-            </div>
+        <!-- 1. HERO BANNER HEADER: SANG TRỌNG, ĐỒNG BỘ 100% VỚI QUẢN TRỊ (ẢNH 2) -->
+        <div style="background: linear-gradient(135deg, #0f172a 0%, rgba(30, 27, 75, 0.7) 50%, #020617 100%); border: 1px solid rgba(99, 102, 241, 0.35); border-radius: 16px; padding: 18px 20px; box-shadow: 0 10px 28px rgba(0,0,0,0.4); text-align: center; display: flex; flex-direction: column; gap: 9px; position: relative; overflow: hidden;">
+          <div style="display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 3px 12px; border-radius: 9999px; background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(96, 165, 250, 0.3); color: #93c5fd; font-size: 11px; font-weight: 700; width: fit-content; margin: 0 auto;">
+            <span>✨ Gia Long - FB Extension • V1.0.4 - Bản Store Chính Thức</span>
           </div>
 
-          <!-- Chi tiết cấu hình thiết bị -->
-          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px;">
-            <div style="background: #080d1a; border: 1px solid #1e293b; border-radius: 10px; padding: 10px 14px;">
-              <span style="font-size: 10.5px; color: #94a3b8; display: block;">Mã Thiết Bị (Device ID):</span>
-              <div style="display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 4px;">
-                <code id="licCurrentDeviceId" style="color: #38bdf8; font-family: monospace; font-size: 12px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Đang lấy...</code>
-                <button type="button" id="btnCopyDeviceId" class="btn-sub" style="padding: 2px 7px; font-size: 10px; shrink-0;" title="Sao chép Device ID">📋 Copy</button>
-              </div>
-            </div>
+          <h1 style="font-size: 17.5px; font-weight: 800; color: #ffffff; letter-spacing: -0.3px; line-height: 1.35; margin: 0;">
+            Tự Động Hóa Đăng Bài Facebook 
+            <span style="background: linear-gradient(to right, #60a5fa, #5eead4, #34d399); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 900;">
+              • Tiếp Cận Khách Hàng Mỗi Ngày
+            </span>
+          </h1>
 
-            <div style="background: #080d1a; border: 1px solid #1e293b; border-radius: 10px; padding: 10px 14px;">
-              <span style="font-size: 10.5px; color: #94a3b8; display: block;">Trạng Thái Kích Hoạt:</span>
-              <div style="display: flex; align-items: center; gap: 6px; margin-top: 4px;">
-                <span id="licCardStatusBadge" style="font-size: 11px; font-weight: 700; color: #cbd5e1; background: #1e293b; padding: 2px 8px; border-radius: 6px;">Đang kiểm tra...</span>
-                <span id="licCardDaysBadge" style="font-size: 11px; color: #94a3b8;"></span>
-              </div>
-            </div>
+          <p style="font-size: 11.5px; color: #cbd5e1; max-width: 680px; margin: 0 auto; line-height: 1.5;">
+            Đăng tự động <strong>300 – 350 bài/ngày</strong> • Chống checkpoint • Đổi mã băm PhotoDNA • Hoạt động 100% trên máy tính.
+          </p>
 
-            <div style="background: #080d1a; border: 1px solid #1e293b; border-radius: 10px; padding: 10px 14px;">
-              <span style="font-size: 10.5px; color: #94a3b8; display: block;">Hỗ Trợ Kỹ Thuật Zalo:</span>
-              <div style="margin-top: 4px;">
-                <a href="https://zalo.me/0869029310" target="_blank" rel="noopener noreferrer" style="color: #38bdf8; font-size: 12px; font-weight: 800; text-decoration: none; display: flex; align-items: center; gap: 4px;">
-                  <span>💬 Zalo: 0869.029.310 (24/7)</span>
-                </a>
-              </div>
-            </div>
+          <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 12px; font-size: 11px; color: #94a3b8; padding-top: 3px;">
+            <span style="display: flex; align-items: center; gap: 4px; color: #34d399;">
+              <span style="font-weight: 900;">✓</span> An toàn 100%
+            </span>
+            <span style="color: #475569;">•</span>
+            <span style="display: flex; align-items: center; gap: 4px; color: #fbbf24;">
+              <span style="font-weight: 900;">⚡</span> Cài đặt trong 1 phút
+            </span>
+            <span style="color: #475569;">•</span>
+            <span style="display: flex; align-items: center; gap: 4px; color: #38bdf8;">
+              <span style="font-weight: 900;">💻</span> Chrome, Edge, Cốc Cốc
+            </span>
+            <span style="color: #475569;">•</span>
+            <span style="display: flex; align-items: center; gap: 4px; color: #a78bfa;">
+              <span style="font-weight: 900;">🔒</span> Khóa theo phần cứng máy tính (Device ID)
+            </span>
           </div>
         </div>
 
-        <!-- KHU VỰC KÍCH HOẠT & LỊCH SỬ GÓI BẢN QUYỀN MÁY KHÁCH -->
-        <div style="background: rgba(15, 23, 42, 0.95); border: 1px solid rgba(51, 65, 85, 0.85); border-radius: 16px; padding: 18px 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); display: flex; flex-direction: column; gap: 14px; margin-top: 10px;">
+        <!-- 2. TIÊU ĐỀ SECTION BẢNG BÁO GIÁ GÓI BẢN QUYỀN (GIỐNG QUẢN TRỊ ẢNH 2) -->
+        <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 6px; border-bottom: 1px solid rgba(51, 65, 85, 0.7); padding-bottom: 8px; margin-top: 4px;">
+          <div>
+            <h2 style="font-size: 14.5px; font-weight: 800; color: #ffffff; display: flex; align-items: center; gap: 7px; margin: 0;">
+              <span style="color: #f59e0b;">📑</span>
+              <span>Bảng Báo Giá Gói Bản Quyền</span>
+            </h2>
+            <p style="font-size: 11px; color: #94a3b8; margin: 3px 0 0 0;">
+              Chi phí chỉ từ <strong>~70đ – 90đ/bài</strong> • Nhấp vào gói để xem quy trình đặt mua &amp; hỗ trợ bên dưới:
+            </p>
+          </div>
+          <span style="font-size: 10.5px; color: #64748b;">
+            Khóa theo phần cứng máy tính • An toàn 100%
+          </span>
+        </div>
+
+        <!-- 3. BẢNG 5 GÓI CƯỚC DÀN NGANG CHUẨN ĐỒNG BỘ 100% VỚI QUẢN TRỊ (ẢNH 2) -->
+        <div class="license-plans-grid" style="padding-top: 18px; margin-bottom: 6px;">
           
-          <!-- Khung Kích Hoạt Nhanh & Nhập Mã Bản Quyền -->
+          <!-- 0. GÓI DÙNG THỬ (0đ - GIỚI HẠN 20 BÀI) -->
+          <div class="pkg-card" data-pkg-name="Gói Dùng Thử" data-pkg-price="0đ" onclick="openOrderModal('Gói Dùng Thử', '0đ')" data-pkg-note="Dùng thử 1 ngày (giới hạn 20 bài đăng) • Miễn phí 100%, không cần chuyển khoản" style="background: rgba(15, 23, 42, 0.95); border: 1px solid rgba(51, 65, 85, 0.85); border-radius: 16px; padding: 15px; display: flex; flex-direction: column; justify-content: space-between; gap: 12px; cursor: pointer; transition: all 0.2s ease; position: relative;">
+            <div>
+              <div style="display: flex; align-items: center; justify-content: space-between; gap: 6px; min-height: 22px;">
+                <span style="background: #1e293b; color: #cbd5e1; border: 1px solid #334155; font-size: 9.5px; font-weight: 700; padding: 2.5px 8px; border-radius: 9999px; text-transform: uppercase; white-space: nowrap;">
+                  1 NGÀY (20 BÀI)
+                </span>
+                <span style="font-family: monospace; font-size: 10px; color: #94a3b8; font-weight: 600; white-space: nowrap;">
+                  1 Ngày (24h)
+                </span>
+              </div>
+              
+              <h3 style="font-size: 15px; font-weight: 800; color: #ffffff; margin: 10px 0 8px 0; letter-spacing: 0.2px;">
+                Gói Dùng Thử
+              </h3>
+
+              <div style="background: rgba(2, 6, 23, 0.85); border: 1px solid rgba(30, 41, 59, 0.85); border-radius: 12px; padding: 9px 12px; min-height: 84px; display: flex; flex-direction: column; justify-content: center; margin-bottom: 10px;">
+                <div style="height: 14px;"></div>
+                <span style="font-size: 21px; font-weight: 900; color: #f8fafc; line-height: 1.2;">0đ</span>
+                <span style="font-size: 10px; color: #94a3b8; margin-top: 3px;">1 ngày (20 bài đăng)</span>
+              </div>
+
+              <ul style="list-style: none; padding: 10px 0 0 0; margin: 0; border-top: 1px solid rgba(30, 41, 59, 0.85); display: flex; flex-direction: column; gap: 7px; font-size: 11px; color: #cbd5e1; line-height: 1.4;">
+                <li style="display: flex; align-items: flex-start; gap: 6px;">
+                  <span style="color: #94a3b8; font-weight: 800; font-size: 11px; margin-top: 1px;">✓</span>
+                  <span>Đăng tối đa <strong>20 bài</strong> tự động</span>
+                </li>
+                <li style="display: flex; align-items: flex-start; gap: 6px;">
+                  <span style="color: #94a3b8; font-weight: 800; font-size: 11px; margin-top: 1px;">✓</span>
+                  <span>Thời hạn sử dụng <strong>1 ngày (24h)</strong></span>
+                </li>
+                <li style="display: flex; align-items: flex-start; gap: 6px;">
+                  <span style="color: #94a3b8; font-weight: 800; font-size: 11px; margin-top: 1px;">✓</span>
+                  <span>Đổi mã băm PhotoDNA &amp; Salt vô hình</span>
+                </li>
+                <li style="display: flex; align-items: flex-start; gap: 6px;">
+                  <span style="color: #94a3b8; font-weight: 800; font-size: 11px; margin-top: 1px;">✓</span>
+                  <span>Hỗ trợ kỹ thuật 1-1 qua Zalo</span>
+                </li>
+                <li style="display: flex; align-items: flex-start; gap: 6px;">
+                  <span style="color: #94a3b8; font-weight: 800; font-size: 11px; margin-top: 1px;">✓</span>
+                  <span>Miễn phí 100%, không cần chuyển khoản</span>
+                </li>
+              </ul>
+            </div>
+
+            <div style="margin-top: auto; padding-top: 14px;">
+              <button type="button" class="btn" style="width: 100%; background: #1e293b; color: #f1f5f9; border: 1px solid #475569; font-size: 12px; font-weight: 700; padding: 9px 12px; border-radius: 12px; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 2px 6px rgba(0,0,0,0.3); transition: 0.15s; cursor: pointer;">
+                <span>Đăng Ký Dùng Thử</span>
+                <span style="font-size: 12px;">↓</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 1. GÓI 1 THÁNG (30 NGÀY) -->
+          <div class="pkg-card" data-pkg-name="Gói 1 Tháng" data-pkg-price="1.000.000đ" onclick="openOrderModal('Gói 1 Tháng', '1.000.000đ')" data-pkg-note="Đăng tự động ~9.000 - 10.500 bài/tháng • Kích hoạt ngay trên 1 máy tính" style="background: linear-gradient(to bottom, rgba(30, 58, 138, 0.25), #0f172a, #0f172a); border: 1px solid rgba(59, 130, 246, 0.4); border-radius: 16px; padding: 15px; display: flex; flex-direction: column; justify-content: space-between; gap: 12px; cursor: pointer; transition: all 0.2s ease; box-shadow: 0 8px 24px -4px rgba(30, 58, 138, 0.3); position: relative;">
+            <div>
+              <div style="display: flex; align-items: center; justify-content: space-between; gap: 6px; min-height: 22px;">
+                <span style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.35); font-size: 9.5px; font-weight: 700; padding: 2.5px 8px; border-radius: 9999px; text-transform: uppercase; white-space: nowrap;">
+                  30 NGÀY
+                </span>
+                <span style="font-family: monospace; font-size: 10px; color: #94a3b8; font-weight: 600; white-space: nowrap;">
+                  30 Ngày
+                </span>
+              </div>
+              
+              <h3 style="font-size: 15px; font-weight: 800; color: #ffffff; margin: 10px 0 8px 0; letter-spacing: 0.2px;">
+                Gói 1 Tháng
+              </h3>
+
+              <div style="background: rgba(2, 6, 23, 0.85); border: 1px solid rgba(30, 41, 59, 0.85); border-radius: 12px; padding: 9px 12px; min-height: 84px; display: flex; flex-direction: column; justify-content: center; margin-bottom: 10px;">
+                <div style="height: 14px;"></div>
+                <span style="font-size: 21px; font-weight: 900; color: #60a5fa; line-height: 1.2;">1.000.000đ</span>
+                <span style="font-size: 10px; color: #94a3b8; margin-top: 3px;">/ 1 máy tính sử dụng</span>
+              </div>
+
+              <ul style="list-style: none; padding: 10px 0 0 0; margin: 0; border-top: 1px solid rgba(30, 41, 59, 0.85); display: flex; flex-direction: column; gap: 7px; font-size: 11px; color: #cbd5e1; line-height: 1.4;">
+                <li style="display: flex; align-items: flex-start; gap: 6px;">
+                  <span style="color: #60a5fa; font-weight: 800; font-size: 11px; margin-top: 1px;">✓</span>
+                  <span>Đăng ~9.000 – 10.500 bài/tháng</span>
+                </li>
+                <li style="display: flex; align-items: flex-start; gap: 6px;">
+                  <span style="color: #60a5fa; font-weight: 800; font-size: 11px; margin-top: 1px;">✓</span>
+                  <span>Chống checkpoint &amp; spam Facebook</span>
+                </li>
+                <li style="display: flex; align-items: flex-start; gap: 6px;">
+                  <span style="color: #60a5fa; font-weight: 800; font-size: 11px; margin-top: 1px;">✓</span>
+                  <span>Thuật toán ngắt nghỉ ngẫu nhiên</span>
+                </li>
+                <li style="display: flex; align-items: flex-start; gap: 6px;">
+                  <span style="color: #60a5fa; font-weight: 800; font-size: 11px; margin-top: 1px;">✓</span>
+                  <span>Đổi mã băm PhotoDNA &amp; Salt vô hình</span>
+                </li>
+                <li style="display: flex; align-items: flex-start; gap: 6px;">
+                  <span style="color: #60a5fa; font-weight: 800; font-size: 11px; margin-top: 1px;">✓</span>
+                  <span>Hỗ trợ kỹ thuật 1-1 qua Zalo</span>
+                </li>
+              </ul>
+            </div>
+
+            <div style="margin-top: auto; padding-top: 14px;">
+              <button type="button" class="btn" style="width: 100%; background: #2563eb; color: #ffffff; font-size: 12px; font-weight: 700; padding: 9px 12px; border-radius: 12px; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35); border: none; transition: 0.15s; cursor: pointer;">
+                <span>Chọn Gói &amp; Đặt Mua</span>
+                <span style="font-size: 12px;">↓</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 2. GÓI 3 THÁNG (🔥 BÁN CHẠY NHẤT - NỔI BẬT NHẤT) -->
+          <div class="pkg-card" data-pkg-name="Gói 3 Tháng" data-pkg-price="2.700.000đ" onclick="openOrderModal('Gói 3 Tháng (100 ngày - TẶNG 10 NGÀY)', '2.700.000đ')" data-pkg-note="Đăng tự động ~30.000 bài • Vận hành ổn định, tiết kiệm ngân sách" style="background: linear-gradient(to bottom, rgba(120, 53, 15, 0.45), #0f172a, #0f172a); border: 2px solid #f59e0b; border-radius: 16px; padding: 15px; display: flex; flex-direction: column; justify-content: space-between; gap: 12px; cursor: pointer; transition: all 0.2s ease; box-shadow: 0 0 25px rgba(245, 158, 11, 0.25), 0 10px 30px rgba(0, 0, 0, 0.6); position: relative; transform: scale(1.02); z-index: 10;">
+            <!-- HUY HIỆU NỔI BẬT ĐỈNH THẺ (ĐẬP VÀO MẮT ĐẦU TIÊN) -->
+            <div style="position: absolute; top: -14px; left: 50%; transform: translateX(-50%); background: linear-gradient(to right, #dc2626, #e11d48, #f97316); color: white; font-size: 10.5px; font-weight: 900; padding: 2.5px 14px; border-radius: 9999px; text-transform: uppercase; letter-spacing: 0.05em; box-shadow: 0 4px 16px rgba(220, 38, 38, 0.4); border: 2px solid #fde047; white-space: nowrap; z-index: 20; display: flex; align-items: center; gap: 4px;">
+              🔥 BÁN CHẠY NHẤT
+            </div>
+
+            <div>
+              <div style="display: flex; align-items: center; justify-content: space-between; gap: 6px; min-height: 22px;">
+                <span style="background: rgba(245, 158, 11, 0.2); color: #fcd34d; border: 1px solid rgba(245, 158, 11, 0.4); font-size: 9.5px; font-weight: 700; padding: 2.5px 8px; border-radius: 9999px; text-transform: uppercase; white-space: nowrap;">
+                  🎁 TẶNG 10 NGÀY
+                </span>
+                <span style="font-family: monospace; font-size: 10px; color: #94a3b8; font-weight: 600; white-space: nowrap;">
+                  100 Ngày
+                </span>
+              </div>
+              
+              <h3 style="font-size: 15px; font-weight: 800; color: #ffffff; margin: 10px 0 8px 0; letter-spacing: 0.2px;">
+                Gói 3 Tháng
+              </h3>
+
+              <div style="background: rgba(2, 6, 23, 0.85); border: 1px solid rgba(30, 41, 59, 0.85); border-radius: 12px; padding: 9px 12px; min-height: 84px; display: flex; flex-direction: column; justify-content: center; margin-bottom: 10px;">
+                <span style="font-size: 10.5px; color: #94a3b8; text-decoration: line-through; line-height: 1;">3.000.000đ</span>
+                <span style="font-size: 21px; font-weight: 900; color: #fbbf24; line-height: 1.2;">2.700.000đ</span>
+                <span style="font-size: 10px; color: #34d399; font-weight: 600; margin-top: 3px;">Tiết kiệm 800.000đ (-10%)</span>
+              </div>
+
+              <ul style="list-style: none; padding: 10px 0 0 0; margin: 0; border-top: 1px solid rgba(30, 41, 59, 0.85); display: flex; flex-direction: column; gap: 7px; font-size: 11px; color: #cbd5e1; line-height: 1.4;">
+                <li style="display: flex; align-items: flex-start; gap: 6px;">
+                  <span style="color: #fbbf24; font-weight: 800; font-size: 11px; margin-top: 1px;">✓</span>
+                  <span>Đăng ~30.000 bài tự động</span>
+                </li>
+                <li style="display: flex; align-items: flex-start; gap: 6px;">
+                  <span style="color: #fbbf24; font-weight: 800; font-size: 11px; margin-top: 1px;">✓</span>
+                  <span>Sử dụng trọn vẹn 100 ngày (tặng 10 ngày)</span>
+                </li>
+                <li style="display: flex; align-items: flex-start; gap: 6px;">
+                  <span style="color: #fbbf24; font-weight: 800; font-size: 11px; margin-top: 1px;">✓</span>
+                  <span>Hẹn giờ Alarms theo khung giờ vàng</span>
+                </li>
+                <li style="display: flex; align-items: flex-start; gap: 6px;">
+                  <span style="color: #fbbf24; font-weight: 800; font-size: 11px; margin-top: 1px;">✓</span>
+                  <span>Bảo hành hỗ trợ đổi máy tính khi cần</span>
+                </li>
+                <li style="display: flex; align-items: flex-start; gap: 6px;">
+                  <span style="color: #fbbf24; font-weight: 800; font-size: 11px; margin-top: 1px;">✓</span>
+                  <span>Hỗ trợ kỹ thuật 1-1 qua Zalo</span>
+                </li>
+              </ul>
+            </div>
+
+            <div style="margin-top: auto; padding-top: 14px;">
+              <button type="button" class="btn" style="width: 100%; background: linear-gradient(to right, #f59e0b, #f97316); color: #020617; font-size: 12px; font-weight: 900; padding: 9px 12px; border-radius: 12px; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 4px 16px rgba(245, 158, 11, 0.4); border: none; transition: 0.15s; cursor: pointer;">
+                <span>Chọn Gói &amp; Đặt Mua</span>
+                <span style="font-size: 12px;">↓</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 3. GÓI 6 THÁNG (195 NGÀY) -->
+          <div class="pkg-card" data-pkg-name="Gói 6 Tháng" data-pkg-price="5.400.000đ" onclick="openOrderModal('Gói 6 Tháng (195 ngày - TẶNG 15 NGÀY)', '5.400.000đ')" data-pkg-note="Đăng tự động ~60.000 bài • Ưu tiên hỗ trợ & Cập nhật tính năng mới" style="background: linear-gradient(to bottom, rgba(19, 78, 74, 0.3), #0f172a, #0f172a); border: 1px solid rgba(20, 184, 166, 0.5); border-radius: 16px; padding: 15px; display: flex; flex-direction: column; justify-content: space-between; gap: 12px; cursor: pointer; transition: all 0.2s ease; box-shadow: 0 8px 24px -4px rgba(20, 184, 166, 0.15); position: relative;">
+            <div>
+              <div style="display: flex; align-items: center; justify-content: space-between; gap: 6px; min-height: 22px;">
+                <span style="background: rgba(20, 184, 166, 0.2); color: #5eead4; border: 1px solid rgba(20, 184, 166, 0.4); font-size: 9.5px; font-weight: 700; padding: 2.5px 8px; border-radius: 9999px; text-transform: uppercase; white-space: nowrap;">
+                  🎁 TẶNG 15 NGÀY
+                </span>
+                <span style="font-family: monospace; font-size: 10px; color: #94a3b8; font-weight: 600; white-space: nowrap;">
+                  195 Ngày
+                </span>
+              </div>
+              
+              <h3 style="font-size: 15px; font-weight: 800; color: #ffffff; margin: 10px 0 8px 0; letter-spacing: 0.2px;">
+                Gói 6 Tháng
+              </h3>
+
+              <div style="background: rgba(2, 6, 23, 0.85); border: 1px solid rgba(30, 41, 59, 0.85); border-radius: 12px; padding: 9px 12px; min-height: 84px; display: flex; flex-direction: column; justify-content: center; margin-bottom: 10px;">
+                <span style="font-size: 10.5px; color: #94a3b8; text-decoration: line-through; line-height: 1;">6.000.000đ</span>
+                <span style="font-size: 21px; font-weight: 900; color: #2dd4bf; line-height: 1.2;">5.400.000đ</span>
+                <span style="font-size: 10px; color: #34d399; font-weight: 600; margin-top: 3px;">Tiết kiệm 1.600.000đ</span>
+              </div>
+
+              <ul style="list-style: none; padding: 10px 0 0 0; margin: 0; border-top: 1px solid rgba(30, 41, 59, 0.85); display: flex; flex-direction: column; gap: 7px; font-size: 11px; color: #cbd5e1; line-height: 1.4;">
+                <li style="display: flex; align-items: flex-start; gap: 6px;">
+                  <span style="color: #2dd4bf; font-weight: 800; font-size: 11px; margin-top: 1px;">✓</span>
+                  <span>Đăng ~60.000 bài tự động</span>
+                </li>
+                <li style="display: flex; align-items: flex-start; gap: 6px;">
+                  <span style="color: #2dd4bf; font-weight: 800; font-size: 11px; margin-top: 1px;">✓</span>
+                  <span>Sử dụng trọn 195 ngày (tặng 15 ngày)</span>
+                </li>
+                <li style="display: flex; align-items: flex-start; gap: 6px;">
+                  <span style="color: #2dd4bf; font-weight: 800; font-size: 11px; margin-top: 1px;">✓</span>
+                  <span>Hẹn giờ đa khung giờ linh hoạt</span>
+                </li>
+                <li style="display: flex; align-items: flex-start; gap: 6px;">
+                  <span style="color: #2dd4bf; font-weight: 800; font-size: 11px; margin-top: 1px;">✓</span>
+                  <span>Bảo hành đổi máy tính trọn chu kỳ</span>
+                </li>
+                <li style="display: flex; align-items: flex-start; gap: 6px;">
+                  <span style="color: #2dd4bf; font-weight: 800; font-size: 11px; margin-top: 1px;">✓</span>
+                  <span>Hỗ trợ kỹ thuật ưu tiên qua Zalo</span>
+                </li>
+              </ul>
+            </div>
+
+            <div style="margin-top: auto; padding-top: 14px;">
+              <button type="button" class="btn" style="width: 100%; background: #0d9488; color: #ffffff; font-size: 12px; font-weight: 700; padding: 9px 12px; border-radius: 12px; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 4px 14px rgba(13, 148, 136, 0.35); border: 1px solid rgba(45, 212, 191, 0.4); transition: 0.15s; cursor: pointer;">
+                <span>Chọn Gói &amp; Đặt Mua</span>
+                <span style="font-size: 12px;">↓</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 4. GÓI 12 THÁNG (390 NGÀY) -->
+          <div class="pkg-card" data-pkg-name="Gói 12 Tháng" data-pkg-price="10.800.000đ" onclick="openOrderModal('Gói 12 Tháng (390 ngày - TẶNG 30 NGÀY)', '10.800.000đ')" data-pkg-note="Đăng tự động ~120.000 bài • Bản quyền VIP dài hạn, chăm sóc 1-1 riêng biệt" style="background: linear-gradient(to bottom, rgba(88, 28, 135, 0.35), #0f172a, #0f172a); border: 1px solid rgba(168, 85, 247, 0.5); border-radius: 16px; padding: 15px; display: flex; flex-direction: column; justify-content: space-between; gap: 12px; cursor: pointer; transition: all 0.2s ease; box-shadow: 0 8px 24px -4px rgba(168, 85, 247, 0.15); position: relative;">
+            <div>
+              <div style="display: flex; align-items: center; justify-content: space-between; gap: 6px; min-height: 22px;">
+                <span style="background: rgba(168, 85, 247, 0.2); color: #d8b4fe; border: 1px solid rgba(168, 85, 247, 0.4); font-size: 9.5px; font-weight: 700; padding: 2.5px 8px; border-radius: 9999px; text-transform: uppercase; white-space: nowrap;">
+                  🎁 TẶNG 30 NGÀY
+                </span>
+                <span style="font-family: monospace; font-size: 10px; color: #94a3b8; font-weight: 600; white-space: nowrap;">
+                  390 Ngày
+                </span>
+              </div>
+              
+              <h3 style="font-size: 15px; font-weight: 800; color: #ffffff; margin: 10px 0 8px 0; letter-spacing: 0.2px;">
+                Gói 12 Tháng
+              </h3>
+
+              <div style="background: rgba(2, 6, 23, 0.85); border: 1px solid rgba(30, 41, 59, 0.85); border-radius: 12px; padding: 9px 12px; min-height: 84px; display: flex; flex-direction: column; justify-content: center; margin-bottom: 10px;">
+                <span style="font-size: 10.5px; color: #94a3b8; text-decoration: line-through; line-height: 1;">12.000.000đ</span>
+                <span style="font-size: 21px; font-weight: 900; color: #c084fc; line-height: 1.2;">10.800.000đ</span>
+                <span style="font-size: 10px; color: #34d399; font-weight: 600; margin-top: 3px;">Tiết kiệm 3.200.000đ</span>
+              </div>
+
+              <ul style="list-style: none; padding: 10px 0 0 0; margin: 0; border-top: 1px solid rgba(30, 41, 59, 0.85); display: flex; flex-direction: column; gap: 7px; font-size: 11px; color: #cbd5e1; line-height: 1.4;">
+                <li style="display: flex; align-items: flex-start; gap: 6px;">
+                  <span style="color: #c084fc; font-weight: 800; font-size: 11px; margin-top: 1px;">✓</span>
+                  <span>Đăng ~120.000 bài tự động</span>
+                </li>
+                <li style="display: flex; align-items: flex-start; gap: 6px;">
+                  <span style="color: #c084fc; font-weight: 800; font-size: 11px; margin-top: 1px;">✓</span>
+                  <span>Sử dụng 390 ngày (tặng trọn 1 tháng)</span>
+                </li>
+                <li style="display: flex; align-items: flex-start; gap: 6px;">
+                  <span style="color: #c084fc; font-weight: 800; font-size: 11px; margin-top: 1px;">✓</span>
+                  <span>Cập nhật toàn bộ tính năng mới miễn phí</span>
+                </li>
+                <li style="display: flex; align-items: flex-start; gap: 6px;">
+                  <span style="color: #c084fc; font-weight: 800; font-size: 11px; margin-top: 1px;">✓</span>
+                  <span>Chuyển đổi thiết bị máy tính không giới hạn</span>
+                </li>
+                <li style="display: flex; align-items: flex-start; gap: 6px;">
+                  <span style="color: #c084fc; font-weight: 800; font-size: 11px; margin-top: 1px;">✓</span>
+                  <span>Hỗ trợ kỹ thuật VIP 1-1 qua Zalo</span>
+                </li>
+              </ul>
+            </div>
+
+            <div style="margin-top: auto; padding-top: 14px;">
+              <button type="button" class="btn" style="width: 100%; background: linear-gradient(to right, #4f46e5, #9333ea, #db2777); color: #ffffff; font-size: 12px; font-weight: 700; padding: 9px 12px; border-radius: 12px; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 4px 14px rgba(147, 51, 234, 0.35); border: 1px solid rgba(192, 132, 252, 0.4); transition: 0.15s; cursor: pointer;">
+                <span>Chọn Gói &amp; Đặt Mua</span>
+                <span style="font-size: 12px;">↓</span>
+              </button>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- 4. KHU VỰC BẢN QUYỀN & QUY TRÌNH ĐẶT MUA TỰ ĐỘNG (CHUẨN WEB QUẢN TRỊ ẢNH 2) -->
+        <div id="khu-vuc-ban-quyen-ho-tro" style="background: rgba(15, 23, 42, 0.95); border: 1px solid rgba(51, 65, 85, 0.85); border-radius: 16px; padding: 18px 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); display: flex; flex-direction: column; gap: 14px; position: relative;">
+          
+          <!-- Header Khu Vực Bản Quyền & Hỗ Trợ -->
+          <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; border-bottom: 1px solid rgba(51, 65, 85, 0.7); padding-bottom: 10px;">
+            <div>
+              <div style="display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 700; color: #38bdf8;">
+                <span>⚡</span>
+                <span>Cơ Chế Bản Quyền Khóa Theo Máy Tính (Device ID)</span>
+              </div>
+              <h3 style="font-size: 14.5px; font-weight: 800; color: #ffffff; margin: 3px 0 0 0;">
+                Quy Trình Đặt Mua &amp; Tự Động Kích Hoạt (Thực Hiện Trực Tiếp Trong Tiện Ích)
+              </h3>
+            </div>
+            <p style="font-size: 11px; color: #94a3b8; margin: 0;">
+              Mã thiết bị tự động cập nhật vào yêu cầu duyệt mua, không cần nhập thủ công
+            </p>
+          </div>
+
+          <!-- Banner Thông Báo Gói Đang Chọn (Đồng bộ chuẩn Quản trị) -->
+          <div id="selectedPlanBanner" style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 12px; padding: 11px 15px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 18px;">🎁</span>
+              <div style="font-size: 12px;">
+                <span style="color: #94a3b8;">Gói bạn đang chọn: </span>
+                <strong id="bannerSelectedPkgName" style="color: #ffffff; font-weight: 800;">Gói 3 Tháng</strong>
+                <span id="bannerSelectedPkgPrice" style="color: #fbbf24; font-weight: 800; margin-left: 6px;">(2.700.000đ)</span>
+                <span id="bannerSelectedPkgDiscount" style="color: #34d399; font-weight: 700; font-size: 10.5px; margin-left: 6px;">• Tiết kiệm 800.000đ (-10%)</span>
+              </div>
+            </div>
+
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span id="bannerSelectedPkgNote" style="font-size: 11px; color: #94a3b8;">Nhấp vào nút để mở hộp thoại thanh toán VietQR:</span>
+              <button type="button" id="btnBannerOpenOrderModal" onclick="openOrderModal(window.currentSelectedPkg.name, window.currentSelectedPkg.price)" style="padding: 7px 16px; border-radius: 9px; font-size: 12px; font-weight: 800; background: linear-gradient(135deg, #059669, #10b981); color: #ffffff; border: none; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.35); cursor: pointer; display: flex; align-items: center; gap: 5px;">
+                <span>🚀 Mở Hộp Thoại Đặt Mua &amp; Quét QR</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- LỊCH SỬ ĐƠN ĐẶT MUA & GÓI CƯỚC (ĐẦY ĐỦ THÔNG TIN CHI TIẾT) -->
+          <div style="background: #080d1a; border: 1px solid #1e293b; border-radius: 12px; padding: 14px 16px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; border-bottom: 1px solid #1e293b; padding-bottom: 8px;">
+              <div style="font-weight: 800; color: #f8fafc; font-size: 13px; display: flex; align-items: center; gap: 7px;">
+                <span>📜</span>
+                <span>Lịch Sử Đơn Đặt Mua &amp; Gói Cước Của Bạn (Chi Tiết Đầy Đủ)</span>
+              </div>
+              <button id="btnRefreshClientOrders" class="btn btn-sub btn-sub-primary" style="font-size: 11px; padding: 4px 10px;">🔄 Tải Lại Lịch Sử</button>
+            </div>
+
+            <div style="font-size: 11px; color: #94a3b8; margin-bottom: 8px;">
+              Danh sách các gói cước và yêu cầu mua bạn đã gửi từ thiết bị này lên hệ thống Quản Trị Viên:
+            </div>
+
+            <div id="clientOrdersHistoryList" style="max-height: 220px; overflow-y: auto; font-size: 11.5px; color: #cbd5e1; display: flex; flex-direction: column; gap: 8px;">
+              <div style="color: #64748b; text-align: center; padding: 16px; background: rgba(15,23,42,0.6); border-radius: 8px;">Chưa có lịch sử đơn đặt mua nào từ thiết bị này.</div>
+            </div>
+          </div>
+
+          <!-- Khung Kích Hoạt Nhanh & Nhập Mã Bản Quyền (Gọn gàng, chuẩn Web Quản trị) -->
           <div style="background: #080d1a; border: 1px solid #1e293b; border-radius: 12px; padding: 12px 16px;">
             <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
               <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 320px;">
@@ -633,8 +968,8 @@
                 <button class="btn btn-emerald" id="btnSubmitActivateLicense" style="padding: 7px 16px; font-size: 12px; font-weight: 700;">
                   <span>⚡ Kích Hoạt Ngay</span>
                 </button>
-                <button class="btn btn-sub" id="btnRefreshLicenseStatus" style="padding: 7px 13px; font-size: 11.5px;">
-                  <span>🔄 Kiểm Tra</span>
+                <button class="btn btn-sub" id="btnRefreshLicenseStatus" style="padding: 7px 14px; font-size: 11.5px; font-weight: 700; background: linear-gradient(135deg, #0284c7, #0369a1); color: white; border: 1px solid #38bdf8;">
+                  <span>🔄 Tải Lại &amp; Đồng Bộ Quản Trị</span>
                 </button>
               </div>
             </div>
@@ -653,25 +988,40 @@
             </div>
           </div>
 
-          <!-- LỊCH SỬ ĐƠN ĐẶT MUA & GÓI CƯỚC (ĐẦY ĐỦ THÔNG TIN CHI TIẾT) -->
-          <div style="background: #080d1a; border: 1px solid #1e293b; border-radius: 12px; padding: 14px 16px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; border-bottom: 1px solid #1e293b; padding-bottom: 8px;">
-              <div style="font-weight: 800; color: #f8fafc; font-size: 13px; display: flex; align-items: center; gap: 7px;">
+          <!-- LỊCH SỬ ĐƠN ĐẶT MUA & GÓI CƯỚC CỦA KHÁCH HÀNG -->
+          <div style="background: #080d1a; border: 1px solid #1e293b; border-radius: 12px; padding: 12px 16px; margin-top: 12px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; border-bottom: 1px solid #1e293b; padding-bottom: 6px;">
+              <div style="font-weight: 800; color: #f8fafc; font-size: 12px; display: flex; align-items: center; gap: 6px;">
                 <span>📜</span>
-                <span>Lịch Sử Đơn Đặt Mua &amp; Gói Cước Của Bạn (Đầy Đủ Chi Tiết)</span>
+                <span>Lịch Sử Đơn Đặt Mua &amp; Gói Cước Của Bạn</span>
               </div>
-              <button id="btnRefreshClientOrders" class="btn btn-sub btn-sub-primary" style="font-size: 11px; padding: 4px 10px;">🔄 Tải Lại Lịch Sử</button>
+              <button id="btnRefreshClientOrders" class="btn btn-sub" style="font-size: 11px; padding: 4px 10px; font-weight: 700; background: #0284c7; color: white;">🔄 Tải Lại &amp; Đồng Bộ Quản Trị</button>
             </div>
-
-            <div style="font-size: 11px; color: #94a3b8; margin-bottom: 8px;">
-              Danh sách các gói cước và yêu cầu mua bạn đã gửi từ thiết bị này lên hệ thống Quản Trị Viên:
-            </div>
-
-            <div id="clientOrdersHistoryList" style="max-height: 240px; overflow-y: auto; font-size: 11.5px; color: #cbd5e1; display: flex; flex-direction: column; gap: 8px;">
-              <div style="color: #64748b; text-align: center; padding: 16px; background: rgba(15,23,42,0.6); border-radius: 8px;">Chưa có lịch sử đơn đặt mua nào từ thiết bị này.</div>
+            <div id="clientOrdersHistoryList" style="max-height: 220px; overflow-y: auto; font-size: 11px; color: #cbd5e1; display: flex; flex-direction: column; gap: 8px;">
+              <div style="color: #64748b; text-align: center; padding: 8px;">Đang tải danh sách đơn đặt mua...</div>
             </div>
           </div>
 
+          <!-- 3 Cam kết nghiệp vụ chuyên nghiệp -->
+          <div style="border-top: 1px solid rgba(51, 65, 85, 0.7); padding-top: 10px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; font-size: 11px; color: #cbd5e1;">
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span style="color: #34d399; font-weight: 900;">✓</span>
+              <span><strong>Kích hoạt siêu tốc:</strong> Cấp mã bản quyền trong 30 giây ngay khi gửi đơn đặt mua trực tuyến.</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span style="color: #34d399; font-weight: 900;">✓</span>
+              <span><strong>Bảo lưu bản quyền:</strong> Hỗ trợ chuyển đổi sang máy tính mới 100% miễn phí khi đổi máy.</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span style="color: #34d399; font-weight: 900;">✓</span>
+              <span><strong>Hỗ trợ kỹ thuật qua Zalo:</strong> 0869.029.310 (24/7)</span>
+            </div>
+          </div>
+
+          <!-- FOOTER NOTE -->
+          <div style="background: #080d1a; border: 1px solid #1e293b; border-radius: 8px; padding: 7px 11px; font-size: 10.5px; color: #94a3b8; line-height: 1.45;">
+            💡 <strong>Cam kết &amp; Hỗ trợ:</strong> Kích hoạt tự động chỉ trong 1-Click. Dễ dàng nâng cấp hoặc thêm máy tính sử dụng bất kỳ lúc nào. Kỹ thuật viên ưu tiên hỗ trợ 24/7.
+          </div>
         </div>
 
       </div>
@@ -928,7 +1278,7 @@
             <h3 style="margin: 0; font-size: 15px; font-weight: 800; color: #ffffff;">
               HƯỚNG DẪN SỬ DỤNG &amp; LƯU Ý VẬN HÀNH AN TOÀN
             </h3>
-            <span style="font-size: 11px; color: #94a3b8;">Phần mềm tự động đăng bài Facebook - Gia Long FB (V1.0.4 - Bản Store Chính Thức)</span>
+            <span style="font-size: 11px; color: #94a3b8;">Phần mềm tự động đăng bài Facebook - Gia Long FB (V1.0)</span>
           </div>
         </div>
         <button id="btnCloseUserGuideModal" style="background: transparent; border: none; color: #94a3b8; font-size: 20px; cursor: pointer; padding: 4px 8px; line-height: 1;">✕</button>

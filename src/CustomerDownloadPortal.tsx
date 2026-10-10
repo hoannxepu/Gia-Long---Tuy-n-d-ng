@@ -1,5 +1,4 @@
-import React, { useState } from 'react';
-import { getApiUrl } from './apiConfig.ts';
+import React, { useState, useEffect } from 'react';
 import {
   Download,
   CheckCircle2,
@@ -21,7 +20,10 @@ import {
   ArrowDown,
   X,
   Send,
-  Package
+  Package,
+  Clock,
+  RefreshCw,
+  AlertCircle
 } from 'lucide-react';
 
 interface CustomerDownloadPortalProps {
@@ -196,13 +198,94 @@ export function CustomerDownloadPortal({
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
   const [copiedFullGuide, setCopiedFullGuide] = useState(false);
 
+  // Danh sách lịch sử đơn mua gói của khách & trạng thái duyệt
+  const [myOrders, setMyOrders] = useState<any[]>(() => {
+    try {
+      const saved = localStorage.getItem('glfb_my_orders');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      return [];
+    }
+  });
+  const [isLoadingMyOrders, setIsLoadingMyOrders] = useState(false);
+  const [copiedOrderKey, setCopiedOrderKey] = useState<string | null>(null);
+  const [activatedOrderKey, setActivatedOrderKey] = useState<string | null>(null);
+  const [portalToast, setPortalToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+    setPortalToast({ message, type });
+    setTimeout(() => setPortalToast(null), 3500);
+  };
+
+  const fetchMyOrders = async (isManual = false) => {
+    try {
+      if (isManual) setIsLoadingMyOrders(true);
+      let devId = '';
+      try {
+        devId = localStorage.getItem('autorecruit_device_id') || '';
+      } catch (e) {}
+
+      const localOrders = (() => {
+        try {
+          const s = localStorage.getItem('glfb_my_orders');
+          return s ? JSON.parse(s) : [];
+        } catch (e) {
+          return [];
+        }
+      })();
+
+      const orderIds = localOrders.map((o: any) => o.id).filter(Boolean).join(',');
+      const res = await fetch(`/api/orders/my-orders?deviceId=${encodeURIComponent(devId)}&orderIds=${encodeURIComponent(orderIds)}`);
+      const data = await res.json();
+
+      if (data && data.success && Array.isArray(data.orders)) {
+        const orderMap = new Map<string, any>();
+        localOrders.forEach((o: any) => { if (o && o.id) orderMap.set(o.id, o); });
+        data.orders.forEach((o: any) => { if (o && o.id) orderMap.set(o.id, o); });
+
+        const merged = Array.from(orderMap.values()).sort(
+          (a: any, b: any) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+        );
+
+        setMyOrders(merged);
+        try {
+          localStorage.setItem('glfb_my_orders', JSON.stringify(merged));
+        } catch (e) {}
+
+        if (isManual) {
+          showToast('✓ Đã tải lại và đồng bộ trạng thái đơn hàng mới nhất từ máy chủ Quản trị viên!', 'success');
+        }
+      }
+    } catch (err) {
+      if (isManual) showToast('Lỗi kết nối máy chủ!', 'error');
+    } finally {
+      if (isManual) setIsLoadingMyOrders(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchMyOrders(false);
+    const orderInterval = setInterval(() => {
+      fetchMyOrders(false);
+    }, 6000);
+    return () => clearInterval(orderInterval);
+  }, []);
+
+  const handleOneClickInjectKey = (key: string) => {
+    if (!key) return;
+    const cleanKey = key.trim().toUpperCase();
+    handleActivateViaBridge(cleanKey);
+    setActivatedOrderKey(cleanKey);
+    setTimeout(() => setActivatedOrderKey(null), 3500);
+  };
+
   const currentVersion = packageInfo?.version || '1.0.4';
   const fileSizeKb = packageInfo?.sizeKb || 335;
   const zaloUrl = adminZaloUrl || 'https://zalo.me/0869029310';
 
   const handleQuickWebOrder = async () => {
     if (!quickOrderPhone.trim() || quickOrderPhone.trim().length < 8) {
-      alert('Vui lòng nhập Số điện thoại hoặc Zalo hợp lệ để Quản trị viên cấp key!');
+      showToast('Vui lòng nhập Số điện thoại hoặc Zalo hợp lệ để Quản trị viên cấp key!', 'error');
       return;
     }
     setIsSubmittingQuickOrder(true);
@@ -210,7 +293,7 @@ export function CustomerDownloadPortal({
       const planName = purchaseGuidePlan?.name || 'Gói Bản Quyền';
       const planPrice = purchaseGuidePlan?.price || '1.000.000đ';
       const isTrial = planPrice === '0đ' || planName.includes('Dùng Thử');
-      const res = await fetch(getApiUrl('/api/orders/create'), {
+      const res = await fetch('/api/orders/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -227,18 +310,30 @@ export function CustomerDownloadPortal({
       const data = await res.json();
       if (data && data.success) {
         setQuickOrderSuccess(data.order);
+        if (data.order) {
+          setMyOrders((prev) => {
+            const updated = [data.order, ...prev.filter((o) => o.id !== data.order.id)];
+            try {
+              localStorage.setItem('glfb_my_orders', JSON.stringify(updated));
+            } catch (e) {}
+            return updated;
+          });
+        }
       } else {
-        alert('Lỗi gửi đơn: ' + (data.message || 'Không thể kết nối máy chủ'));
+        showToast('Lỗi gửi đơn: ' + (data.message || 'Không thể kết nối máy chủ'), 'error');
       }
     } catch (e: any) {
-      alert('Lỗi kết nối máy chủ: ' + e.message);
+      showToast('Lỗi kết nối máy chủ: ' + e.message, 'error');
     } finally {
       setIsSubmittingQuickOrder(false);
     }
   };
 
   const handleActivateViaBridge = (key: string) => {
-    if (!key.trim()) return alert('Vui lòng nhập mã bản quyền đã được Admin cấp!');
+    if (!key.trim()) {
+      showToast('Vui lòng nhập mã bản quyền đã được Admin cấp!', 'error');
+      return;
+    }
     setActivationStatus('Đang gửi lệnh kích hoạt sang Extension...');
     window.postMessage({ type: 'AUTORECRUIT_ACTIVATE_KEY', key: key.trim().toUpperCase() }, '*');
 
@@ -514,7 +609,11 @@ Hỗ trợ Zalo: 0869.029.310 (Gia Long - FB)`;
                 key={plan.id}
                 onClick={() => {
                   setSelectedPlan(plan);
+                  setPurchaseGuidePlan(plan);
                   setQuickOrderSuccess(null);
+                  if (onSelectPlan) {
+                    onSelectPlan({ name: plan.name, price: plan.price });
+                  }
                 }}
                 className={`rounded-2xl p-3.5 sm:p-4 flex flex-col justify-between transition-all cursor-pointer relative group border ${plan.theme.cardBorder} ${plan.theme.cardBg} ${isSelected ? 'ring-2 ring-emerald-400 border-emerald-500' : ''}`}
               >
@@ -583,6 +682,7 @@ Hỗ trợ Zalo: 0869.029.310 (Gia Long - FB)`;
                     onClick={(e) => {
                       e.stopPropagation();
                       setSelectedPlan(plan);
+                      setPurchaseGuidePlan(plan);
                       setQuickOrderSuccess(null);
                       if (onSelectPlan) {
                         onSelectPlan({ name: plan.name, price: plan.price });
@@ -746,6 +846,248 @@ Hỗ trợ Zalo: 0869.029.310 (Gia Long - FB)`;
         </div>
       </section>
 
+      {/* 5. BẢNG LỊCH SỬ MUA GÓI ĐẦY ĐỦ CHI TIẾT & NẠP KEY 1-CLICK */}
+      <section
+        id="bang-lich-su-mua-goi"
+        className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-lg space-y-4"
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+          <div className="space-y-1">
+            <div className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-400">
+              <Sparkles className="w-4 h-4 text-amber-400" />
+              <span>Đồng Bộ Hai Chiều Với Máy Chủ Quản Trị</span>
+            </div>
+            <h3 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
+              <span>📜 Bảng Lịch Sử Đơn Đặt Mua Gói &amp; Cấp Bản Quyền Của Bạn</span>
+              {myOrders.length > 0 && (
+                <span className="text-xs bg-slate-800 text-slate-300 px-2.5 py-0.5 rounded-full font-mono border border-slate-700">
+                  {myOrders.length} đơn
+                </span>
+              )}
+            </h3>
+            <p className="text-[11.5px] text-slate-400">
+              Theo dõi trạng thái phê duyệt từ Quản trị viên, nhận mã Key được cấp và nạp trực tiếp vào Extension chỉ với 1 click!
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => fetchMyOrders(true)}
+              disabled={isLoadingMyOrders}
+              className="px-3.5 py-1.5 bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-sky-600/20 active:scale-95 cursor-pointer disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isLoadingMyOrders ? 'animate-spin' : ''}`} />
+              <span>{isLoadingMyOrders ? 'Đang Tải...' : '🔄 Tải Lại & Kiểm Tra Duyệt Đơn'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Thông báo nạp mã thành công */}
+        {activatedOrderKey && (
+          <div className="bg-emerald-500/15 border-2 border-emerald-500/50 rounded-xl p-3 flex items-center justify-between gap-3 text-emerald-300 animate-in fade-in duration-200">
+            <div className="flex items-center gap-2 text-xs">
+              <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+              <span>
+                ✓ Đã gửi lệnh kích hoạt trực tiếp mã <strong className="font-mono text-white font-bold">{activatedOrderKey}</strong> vào Extension thành công! Mở Extension trên trình duyệt để sử dụng ngay.
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActivatedOrderKey(null)}
+              className="text-emerald-400 hover:text-white text-xs font-bold"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
+        {/* Danh Sách Đơn Hàng */}
+        {myOrders.length === 0 ? (
+          <div className="py-8 px-4 text-center space-y-3 bg-slate-950/60 rounded-xl border border-slate-800/80">
+            <div className="w-12 h-12 rounded-2xl bg-slate-900 border border-slate-800 text-slate-400 flex items-center justify-center mx-auto text-xl">
+              📦
+            </div>
+            <div className="space-y-1">
+              <h4 className="text-xs sm:text-sm font-bold text-white">Chưa Có Đơn Đặt Mua Nào Trên Thiết Bị Này</h4>
+              <p className="text-[11.5px] text-slate-400 max-w-md mx-auto">
+                Khi bạn gửi yêu cầu dùng thử 1 ngày (0đ) hoặc đặt mua gói bản quyền, đơn hàng kèm mã kích hoạt sẽ tự động xuất hiện chi tiết tại đây.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                const el = document.getElementById('khu-vuc-bao-gia');
+                if (el) el.scrollIntoView({ behavior: 'smooth' });
+              }}
+              className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-lg text-xs font-bold transition shadow-md shadow-emerald-600/20 active:scale-95 cursor-pointer"
+            >
+              <span>Xem Bảng Giá &amp; Chọn Gói Ngay</span>
+            </button>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="border-b border-slate-800 bg-slate-950/80 text-slate-400 text-[11px] uppercase tracking-wider font-semibold">
+                  <th className="py-2.5 px-3">Mã Đơn</th>
+                  <th className="py-2.5 px-3">Tên Gói</th>
+                  <th className="py-2.5 px-3">Chi Phí</th>
+                  <th className="py-2.5 px-3">Thời Gian Gửi</th>
+                  <th className="py-2.5 px-3">Trạng Thái Phê Duyệt</th>
+                  <th className="py-2.5 px-3">Mã Key &amp; Kích Hoạt (1-Click)</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/70">
+                {myOrders.map((ord: any) => {
+                  const isApproved = ord.status === 'approved';
+                  const isPending = ord.status === 'pending';
+                  const shortId = (ord.id || '').slice(-8).toUpperCase();
+                  const timeFormatted = ord.createdAt
+                    ? new Date(ord.createdAt).toLocaleString('vi-VN')
+                    : 'Vừa xong';
+                  const isTrial = (ord.price === '0đ' || String(ord.pkgName || '').toLowerCase().includes('dùng thử'));
+
+                  return (
+                    <tr
+                      key={ord.id}
+                      className="hover:bg-slate-950/50 transition-colors"
+                    >
+                      {/* 1. Mã đơn */}
+                      <td className="py-3 px-3">
+                        <div className="flex items-center gap-1.5 font-mono font-bold text-sky-400">
+                          <span>#{shortId}</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(ord.id);
+                              showToast('✓ Đã sao chép mã đơn hàng: #' + shortId, 'success');
+                            }}
+                            className="text-slate-500 hover:text-slate-300 p-0.5 rounded cursor-pointer"
+                            title="Sao chép mã đơn"
+                          >
+                            <Copy className="w-3 h-3" />
+                          </button>
+                        </div>
+                        {ord.clientName && (
+                          <div className="text-[10px] text-slate-400 truncate max-w-[130px]">
+                            {ord.clientName}
+                          </div>
+                        )}
+                      </td>
+
+                      {/* 2. Tên gói */}
+                      <td className="py-3 px-3">
+                        <div className="font-bold text-white flex items-center gap-1.5 flex-wrap">
+                          <span>{ord.pkgName || 'Gói Bản Quyền'}</span>
+                          {isTrial && (
+                            <span className="text-[9.5px] bg-purple-500/20 text-purple-300 border border-purple-500/40 px-1.5 py-0.2 rounded font-bold">
+                              DÙNG THỬ 20 BÀI
+                            </span>
+                          )}
+                        </div>
+                      </td>
+
+                      {/* 3. Chi phí */}
+                      <td className="py-3 px-3">
+                        <span className={`font-bold ${isTrial ? 'text-slate-400' : 'text-emerald-400 font-mono text-[13px]'}`}>
+                          {ord.price || (isTrial ? '0đ' : '1.000.000đ')}
+                        </span>
+                      </td>
+
+                      {/* 4. Thời gian gửi */}
+                      <td className="py-3 px-3 text-slate-400 text-[11px] whitespace-nowrap">
+                        <div className="flex items-center gap-1">
+                          <Clock className="w-3 h-3 text-slate-500" />
+                          <span>{timeFormatted}</span>
+                        </div>
+                      </td>
+
+                      {/* 5. Trạng thái phê duyệt */}
+                      <td className="py-3 px-3 whitespace-nowrap">
+                        {isApproved ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/35 shadow-sm shadow-emerald-500/10">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                            <span>Đã Duyệt &amp; Cấp Key</span>
+                          </span>
+                        ) : isPending ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/35 animate-pulse shadow-sm shadow-amber-500/10">
+                            <Clock className="w-3.5 h-3.5 text-amber-400 animate-spin" style={{ animationDuration: '4s' }} />
+                            <span>Chờ Duyệt (1-3 Phút)</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-slate-800 text-slate-400 border border-slate-700">
+                            <span>❌ Đã Hủy</span>
+                          </span>
+                        )}
+                      </td>
+
+                      {/* 6. Mã Key được cấp & Nạp 1-Click */}
+                      <td className="py-3 px-3">
+                        {isApproved && ord.generatedKey ? (
+                          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
+                            <div className="flex items-center gap-1 bg-slate-950 px-2 py-1 rounded-lg border border-sky-500/40 shadow-inner">
+                              <Key className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                              <strong className="font-mono text-sky-300 text-xs font-bold tracking-wide select-all">
+                                {ord.generatedKey}
+                              </strong>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(ord.generatedKey);
+                                  setCopiedOrderKey(ord.generatedKey);
+                                  setTimeout(() => setCopiedOrderKey(null), 2000);
+                                }}
+                                className="ml-1 p-0.5 text-slate-400 hover:text-white rounded cursor-pointer transition"
+                                title="Sao chép mã Key"
+                              >
+                                {copiedOrderKey === ord.generatedKey ? (
+                                  <span className="text-[10px] text-emerald-400 font-bold">✓</span>
+                                ) : (
+                                  <Copy className="w-3 h-3" />
+                                )}
+                              </button>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => handleOneClickInjectKey(ord.generatedKey)}
+                              className="px-3 py-1.5 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-emerald-600/30 active:scale-95 cursor-pointer whitespace-nowrap border border-emerald-400/30"
+                              title="Kích hoạt tự động vào Extension chỉ với 1 cú nhấp chuột"
+                            >
+                              <span>⚡ Nạp Mã Này Ngay</span>
+                            </button>
+                          </div>
+                        ) : isPending ? (
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-[11px] text-slate-400 italic">
+                              Đang chờ duyệt...
+                            </span>
+                            <a
+                              href={`https://zalo.me/0869029310?text=${encodeURIComponent(
+                                `Chào Admin, tôi vừa gửi đơn mua gói ${ord.pkgName} (Mã đơn: #${shortId}, SĐT: ${ord.phone || ''}). Nhờ Admin duyệt đơn và cấp key giúp tôi nhé!`
+                              )}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1 text-[11px] text-sky-400 hover:text-sky-300 font-bold underline underline-offset-2"
+                            >
+                              <MessageSquare className="w-3 h-3" />
+                              <span>Nhắn Zalo Giục Duyệt Ngay ↗</span>
+                            </a>
+                          </div>
+                        ) : (
+                          <span className="text-[11px] text-slate-500">-</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
       {/* HỘP THOẠI HƯỚNG DẪN QUY TRÌNH ĐẶT MUA & TẢI FILE ZIP */}
       {purchaseGuidePlan && (
         <div
@@ -887,6 +1229,20 @@ Hỗ trợ Zalo: 0869.029.310 (Gia Long - FB)`;
                 Đóng
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Thông báo nổi (Toast) thời gian thực */}
+      {portalToast && (
+        <div className="fixed bottom-6 right-6 z-50 animate-in fade-in slide-in-from-bottom-4 duration-200 pointer-events-none">
+          <div className={`px-4 py-2.5 rounded-xl shadow-2xl text-xs font-bold flex items-center gap-2 border pointer-events-auto ${
+            portalToast.type === 'error'
+              ? 'bg-rose-950/95 text-rose-200 border-rose-500/50 shadow-rose-950/50'
+              : 'bg-slate-900/95 text-emerald-300 border-emerald-500/50 shadow-emerald-950/50'
+          }`}>
+            <span>{portalToast.type === 'error' ? '⚠️' : '✓'}</span>
+            <span>{portalToast.message}</span>
           </div>
         </div>
       )}
