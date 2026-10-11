@@ -14,11 +14,11 @@
   "host_permissions": [
     "https://*.facebook.com/*",
     "https://facebook.com/*",
-    "https://dang-bai-fb.pages.dev/*",
     "https://*.pages.dev/*",
     "https://*.run.app/*",
     "http://localhost:*",
-    "http://127.0.0.1:*"
+    "http://127.0.0.1:*",
+    "<all_urls>"
   ],
   "content_scripts": [
     {
@@ -31,9 +31,12 @@
     },
     {
       "matches": [
-        "https://dang-bai-fb.pages.dev/*",
         "https://*.pages.dev/*",
-        "https://*.run.app/*"
+        "https://*.run.app/*",
+        "http://localhost:*",
+        "http://127.0.0.1:*",
+        "https://*/*",
+        "http://*/*"
       ],
       "js": ["web_bridge.js"],
       "run_at": "document_start"

@@ -113,6 +113,52 @@
     }
   });
 
+  // LẮNG NGHE LỆNH TỪ EXTENSION BACKGROUND: Đồng bộ đơn mới trực tiếp vào Web Quản Trị / Cloudflare Pages
+  try {
+    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
+      chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+        if (msg.action === 'DISPATCH_NEW_ORDER_TO_WEBAPP') {
+          const orderPayload = msg.payload || msg.order;
+          if (orderPayload) {
+            console.log('[Gia Long Bridge] Nhận đơn mới từ Extension, đang ghi nhận trực tiếp vào Web Cloudflare Pages:', orderPayload);
+            // 1. Gửi trực tiếp lên backend của chính tab hiện tại (Cloudflare Pages Functions)
+            fetch('/api/orders/create', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(orderPayload),
+            })
+              .then((res) => res.json())
+              .then((data) => {
+                console.log('[Gia Long Bridge] ✓ Đã ghi nhận đơn thành công trực tiếp trên Cloudflare Pages:', data);
+                // 2. Kích hoạt cập nhật giao diện Admin ngay lập tức
+                window.dispatchEvent(new CustomEvent('GIALONG_NEW_ORDER', { detail: data.order || orderPayload }));
+                window.postMessage({ type: 'GIALONG_NEW_ORDER', order: data.order || orderPayload }, '*');
+              })
+              .catch((err) => {
+                console.warn('[Gia Long Bridge] Lỗi ghi nhận đơn lên Cloudflare Pages:', err);
+                window.dispatchEvent(new CustomEvent('GIALONG_NEW_ORDER', { detail: orderPayload }));
+                window.postMessage({ type: 'GIALONG_NEW_ORDER', order: orderPayload }, '*');
+              });
+          }
+          sendResponse({ received: true });
+          return true;
+        }
+      });
+    }
+  } catch (e) {}
+
+  // Định kỳ cập nhật lại URL máy chủ cho Extension
+  window.addEventListener('focus', () => {
+    if (window.location.origin && window.location.origin.startsWith('http')) {
+      try {
+        chrome.runtime.sendMessage({
+          action: 'SET_SERVER_URL',
+          url: window.location.origin.replace(/\/+$/, ''),
+        });
+      } catch (e) {}
+    }
+  });
+
   setInterval(broadcastUpdateToExtension, 2500);
 
   setTimeout(() => {

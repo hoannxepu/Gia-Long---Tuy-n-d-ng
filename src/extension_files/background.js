@@ -90,26 +90,97 @@ async function getApiBaseUrl() {
       return u.origin;
     }
   } catch (e) {}
-  return 'https://dang-bai-fb.pages.dev';
+  return 'https://gia-long---tuy-n-d-ng.pages.dev';
+}
+
+// Tự động quét và tổng hợp TẤT CẢ các máy chủ khả dụng:
+// 1. Quét mọi tab đang mở trong Chrome (nhận diện chính xác URL Cloudflare Pages mà người dùng đang mở)
+// 2. Đọc từ chrome.storage.local (customApiServerUrl, webapp_last_url, known_server_urls)
+// 3. Fallback mặc định (Cloudflare Pages, AI Studio dev, localhost)
+async function getAllServerCandidates(primaryBase = null) {
+  const candidates = new Set();
+  if (primaryBase && primaryBase.startsWith('http')) {
+    candidates.add(primaryBase.replace(/\/+$/, ''));
+  }
+
+  // 1. Quét các tab đang mở trong trình duyệt Chrome của người dùng
+  try {
+    if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.query) {
+      const tabs = await chrome.tabs.query({});
+      for (const tab of tabs) {
+        if (tab.url && tab.url.startsWith('http')) {
+          try {
+            const u = new URL(tab.url);
+            if (
+              u.hostname.includes('pages.dev') ||
+              u.hostname.includes('run.app') ||
+              u.hostname === 'localhost' ||
+              u.hostname === '127.0.0.1' ||
+              tab.title?.includes('AutoRecruit') ||
+              tab.title?.includes('Gia Long')
+            ) {
+              candidates.add(u.origin);
+              console.log('[Gia Long - FB] Phát hiện Tab Quản Trị đang mở:', u.origin);
+            }
+          } catch (e) {}
+        }
+      }
+    }
+  } catch (e) {}
+
+  // 2. Lấy các URL đã lưu trong storage
+  try {
+    const data = await chrome.storage.local.get([
+      'customApiServerUrl',
+      'webapp_last_url',
+      'lastSyncedFromUrl',
+      'known_server_urls',
+    ]);
+    if (data.customApiServerUrl && data.customApiServerUrl.startsWith('http')) {
+      candidates.add(data.customApiServerUrl.trim().replace(/\/+$/, ''));
+    }
+    if (data.webapp_last_url && data.webapp_last_url.startsWith('http')) {
+      candidates.add(data.webapp_last_url.trim().replace(/\/+$/, ''));
+    }
+    if (data.lastSyncedFromUrl && data.lastSyncedFromUrl.startsWith('http')) {
+      candidates.add(data.lastSyncedFromUrl.trim().replace(/\/+$/, ''));
+    }
+    if (Array.isArray(data.known_server_urls)) {
+      data.known_server_urls.forEach((u) => {
+        if (u && u.startsWith('http')) candidates.add(u.trim().replace(/\/+$/, ''));
+      });
+    }
+  } catch (e) {}
+
+  // 3. Danh sách máy chủ dự phòng
+  candidates.add('https://gia-long---tuy-n-d-ng.pages.dev');
+  candidates.add('https://dang-bai-fb.pages.dev');
+  candidates.add('https://ais-dev-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app');
+  candidates.add('https://ais-pre-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app');
+  candidates.add('http://localhost:3000');
+  candidates.add('http://127.0.0.1:3000');
+
+  return Array.from(candidates).filter(Boolean);
 }
 
 function getCandidateServerUrls(primaryBase) {
-  const list = [
+  return [
     primaryBase,
+    'https://gia-long---tuy-n-d-ng.pages.dev',
     'https://dang-bai-fb.pages.dev',
     'https://ais-dev-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app',
     'https://ais-pre-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app',
     'http://localhost:3000',
     'http://127.0.0.1:3000',
-  ];
-  return list.filter((v, i, a) => Boolean(v) && a.indexOf(v) === i);
+  ].filter((v, i, a) => Boolean(v) && a.indexOf(v) === i);
 }
 
 // Xử lý gửi đơn đặt mua gói bản quyền tự động lên Server
 // Đồng bộ song song tới cả Cloudflare Pages và Studio để đơn hiển thị lập tức trên cả hai hệ thống
 async function handleCreateOrder(payload) {
   const currentBase = await getApiBaseUrl();
-  const urlsToTry = getCandidateServerUrls(currentBase);
+  const urlsToTry = await getAllServerCandidates(currentBase);
+  console.log('[Gia Long - FB Background] Bắt đầu phát đơn hàng đồng thời tới:', urlsToTry);
 
   const promises = urlsToTry.map(async (rawUrl) => {
     if (!rawUrl || !rawUrl.startsWith('http')) return null;
@@ -139,6 +210,22 @@ async function handleCreateOrder(payload) {
   const successful = results
     .filter((r) => r.status === 'fulfilled' && r.value)
     .map((r) => r.value);
+
+  // Phát trực tiếp vào DOM của tất cả các Tab Web Quản Trị đang mở (Cloudflare Pages tab)
+  try {
+    if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.query) {
+      const openTabs = await chrome.tabs.query({});
+      for (const tab of openTabs) {
+        if (tab.id && tab.url && tab.url.startsWith('http')) {
+          chrome.tabs.sendMessage(tab.id, {
+            action: 'DISPATCH_NEW_ORDER_TO_WEBAPP',
+            payload: payload,
+            order: successful.length > 0 ? successful[0].order : null,
+          }).catch(() => {});
+        }
+      }
+    }
+  } catch (e) {}
 
   if (successful.length > 0) {
     const primarySuccess = successful.find((s) => s.base.includes('pages.dev')) || successful[0];
@@ -759,12 +846,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   // 4.2 Thiết lập URL máy chủ hiện hành
   if (request.action === 'SET_SERVER_URL' && request.url) {
-    chrome.storage.local.set({
-      customApiServerUrl: request.url,
-      webapp_last_url: request.url,
-      lastSyncedFromUrl: request.url,
+    const cleanUrl = String(request.url).trim().replace(/\/+$/, '');
+    chrome.storage.local.get(['known_server_urls'], (res) => {
+      const list = Array.isArray(res.known_server_urls) ? res.known_server_urls : [];
+      if (!list.includes(cleanUrl)) list.push(cleanUrl);
+      chrome.storage.local.set({
+        customApiServerUrl: cleanUrl,
+        webapp_last_url: cleanUrl,
+        lastSyncedFromUrl: cleanUrl,
+        known_server_urls: list,
+      });
+      console.log('[Gia Long - FB] ✓ Đã nhận và kết nối với máy chủ Web App:', cleanUrl);
     });
-    sendResponse({ success: true });
+    sendResponse({ success: true, url: cleanUrl });
     return true;
   }
 
@@ -783,7 +877,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         attachedImages: (targetPost?.images || []).slice(0, 3),
         customPostText: targetPost?.content || '',
         isAttachImageEnabled: hasImage,
-        lastSyncedFromUrl: url || 'dang-bai-fb.pages.dev',
+        lastSyncedFromUrl: url || 'https://gia-long---tuy-n-d-ng.pages.dev',
         lastSyncTimestamp: Date.now(),
       });
       console.log('[AutoRecruit Background] ✓ Đã nhận dữ liệu đồng bộ từ Web App');

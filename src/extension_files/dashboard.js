@@ -1271,7 +1271,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   chrome.storage.local.get(['customApiServerUrl'], (res) => {
     if (inputCustomServerUrl) {
-      inputCustomServerUrl.value = res.customApiServerUrl || 'https://dang-bai-fb.pages.dev';
+      inputCustomServerUrl.value = res.customApiServerUrl || 'https://gia-long---tuy-n-d-ng.pages.dev';
     }
   });
 
@@ -1285,7 +1285,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   btnResetDefaultServerUrl?.addEventListener('click', () => {
-    const defaultUrl = 'https://dang-bai-fb.pages.dev';
+    const defaultUrl = 'https://gia-long---tuy-n-d-ng.pages.dev';
     if (inputCustomServerUrl) inputCustomServerUrl.value = defaultUrl;
     chrome.storage.local.set({ customApiServerUrl: defaultUrl }, () => {
       showToast('✓ Đã khôi phục máy chủ mặc định!');
@@ -1682,23 +1682,50 @@ window.proceedSendOrder = async function() {
 
   // 2. Fallback gửi trực tiếp qua danh sách máy chủ khả dụng (Đồng bộ đa máy chủ)
   async function fallbackDirectFetch() {
-    let customSavedUrl = '';
+    const list = new Set();
+
+    // 1. Quét các tab đang mở trong trình duyệt Chrome
     try {
-      const stored = await chrome.storage.local.get(['customApiServerUrl', 'webapp_last_url']);
-      customSavedUrl = stored.customApiServerUrl || stored.webapp_last_url || '';
+      if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.query) {
+        const tabs = await chrome.tabs.query({});
+        for (const t of tabs) {
+          if (t.url && t.url.startsWith('http')) {
+            try {
+              const u = new URL(t.url);
+              if (
+                u.hostname.includes('pages.dev') ||
+                u.hostname.includes('run.app') ||
+                u.hostname === 'localhost' ||
+                u.hostname === '127.0.0.1' ||
+                t.title?.includes('AutoRecruit') ||
+                t.title?.includes('Gia Long')
+              ) {
+                list.add(u.origin);
+              }
+            } catch (e) {}
+          }
+        }
+      }
     } catch (e) {}
 
-    const candidates = [
-      customSavedUrl,
-      'https://dang-bai-fb.pages.dev',
-      window.location.origin.startsWith('http') ? window.location.origin : null,
-      'https://ais-dev-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app',
-      'https://ais-pre-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app',
-      'http://localhost:3000',
-      'http://127.0.0.1:3000',
-    ].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i);
+    // 2. Đọc từ Chrome Storage
+    try {
+      const stored = await chrome.storage.local.get(['customApiServerUrl', 'webapp_last_url', 'lastSyncedFromUrl', 'known_server_urls']);
+      if (stored.customApiServerUrl) list.add(stored.customApiServerUrl.replace(/\/+$/, ''));
+      if (stored.webapp_last_url) list.add(stored.webapp_last_url.replace(/\/+$/, ''));
+      if (stored.lastSyncedFromUrl && stored.lastSyncedFromUrl.startsWith('http')) list.add(stored.lastSyncedFromUrl.replace(/\/+$/, ''));
+      if (Array.isArray(stored.known_server_urls)) stored.known_server_urls.forEach((u) => { if (u) list.add(u.replace(/\/+$/, '')); });
+    } catch (e) {}
 
-    let createdOrder = null;
+    list.add('https://gia-long---tuy-n-d-ng.pages.dev');
+    list.add('https://dang-bai-fb.pages.dev');
+    list.add('https://ais-dev-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app');
+    list.add('https://ais-pre-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app');
+    list.add('http://localhost:3000');
+    list.add('http://127.0.0.1:3000');
+
+    const candidates = Array.from(list).filter(Boolean);
+
     const fetchPromises = candidates.map(async (sUrl) => {
       try {
         const res = await fetch(`${sUrl}/api/orders/create`, {
@@ -1721,6 +1748,23 @@ window.proceedSendOrder = async function() {
 
     const results = await Promise.allSettled(fetchPromises);
     const validOrders = results.filter((r) => r.status === 'fulfilled' && r.value).map((r) => r.value);
+
+    // Gửi thông báo trực tiếp vào các tab Web App đang mở
+    try {
+      if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.query) {
+        const tabs = await chrome.tabs.query({});
+        for (const t of tabs) {
+          if (t.id && t.url && t.url.startsWith('http')) {
+            chrome.tabs.sendMessage(t.id, {
+              action: 'DISPATCH_NEW_ORDER_TO_WEBAPP',
+              payload: orderPayload,
+              order: validOrders.length > 0 ? validOrders[0] : null,
+            }).catch(() => {});
+          }
+        }
+      }
+    } catch (e) {}
+
     if (validOrders.length > 0) {
       showSuccessUI(validOrders[0]);
       return;

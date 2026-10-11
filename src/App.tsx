@@ -189,7 +189,7 @@ const EXTENSION_FILES_DOC: FileInfo[] = [
   {
     name: 'web_bridge.js',
     type: 'Cầu Nối Đồng Bộ 2 Chiều',
-    role: 'Đồng bộ thời gian thực giữa Web App (dang-bai-fb.pages.dev) và Chrome Extension.',
+    role: 'Đồng bộ thời gian thực giữa Web App (gia-long---tuy-n-d-ng.pages.dev) và Chrome Extension.',
     whenToEdit: 'Khi có thay đổi về domain Web App hoặc format dữ liệu đồng bộ.',
     howToDebug: 'Mở F12 trên trang Web App > Tab Console xem log của bridge.',
     color: 'from-rose-500/20 to-red-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400',
@@ -295,7 +295,13 @@ export default function App() {
   const [orderSuccessData, setOrderSuccessData] = useState<{ order: any; messageText: string } | null>(null);
   const [isSubmittingOrder, setIsSubmittingOrder] = useState<boolean>(false);
   const [copiedOrderMsg, setCopiedOrderMsg] = useState<boolean>(false);
-  const [adminOrders, setAdminOrders] = useState<any[]>([]);
+  const [adminOrders, setAdminOrders] = useState<any[]>(() => {
+    try {
+      const cached = localStorage.getItem('glfb_admin_orders');
+      if (cached) return JSON.parse(cached);
+    } catch (e) {}
+    return [];
+  });
   const [isLoadingOrders, setIsLoadingOrders] = useState<boolean>(false);
   const [adminZaloUrl, setAdminZaloUrl] = useState<string>('https://zalo.me/0869029310');
   const [isUploadingQr, setIsUploadingQr] = useState<boolean>(false);
@@ -626,15 +632,24 @@ export default function App() {
       const data = await res.json();
       if (data.success && Array.isArray(data.orders)) {
         setAdminOrders((prev) => {
-          if (areArraysEqual(prev, data.orders)) return prev;
+          const map = new Map<string, any>();
+          prev.forEach((o) => { if (o && o.id) map.set(o.id, o); });
+          data.orders.forEach((o: any) => { if (o && o.id) map.set(o.id, o); });
+          const merged = Array.from(map.values()).sort(
+            (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+          );
+          try {
+            localStorage.setItem('glfb_admin_orders', JSON.stringify(merged));
+          } catch (e) {}
+          if (areArraysEqual(prev, merged)) return prev;
           const prevPending = prev.filter((o) => o.status === 'pending');
-          const newPending = data.orders.filter((o: any) => o.status === 'pending');
+          const newPending = merged.filter((o: any) => o.status === 'pending');
           setPendingOrderCount(newPending.length);
           if (newPending.length > prevPending.length && prev.length > 0) {
             const latest = newPending[0];
             triggerToast(`🔔 Có đơn đặt mua mới: ${latest.pkgName} từ ${latest.clientName || 'Khách'} (${latest.phone || ''})!`);
           }
-          return data.orders;
+          return merged;
         });
       }
     } catch (e) {
@@ -658,8 +673,46 @@ export default function App() {
   useEffect(() => {
     fetchPendingCount();
     const timer = setInterval(fetchPendingCount, 5000);
-    return () => clearInterval(timer);
-  }, []);
+
+    const onOrderFromExtension = (e: any) => {
+      const order = e.detail || e.data?.order;
+      if (order && order.id) {
+        setAdminOrders((prev) => {
+          const map = new Map<string, any>();
+          prev.forEach((o) => { if (o && o.id) map.set(o.id, o); });
+          map.set(order.id, order);
+          const merged = Array.from(map.values()).sort(
+            (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+          );
+          try {
+            localStorage.setItem('glfb_admin_orders', JSON.stringify(merged));
+          } catch (err) {}
+          return merged;
+        });
+      }
+      fetchPendingCount();
+      if (isAdminUnlocked) {
+        fetchOrders(adminPin, true);
+      }
+      if (order) {
+        triggerToast(`🔔 Có đơn đặt mua mới từ Extension: ${order.pkgName || 'Gói Bản Quyền'} (${order.clientName || 'Khách'})!`);
+      }
+    };
+
+    window.addEventListener('GIALONG_NEW_ORDER', onOrderFromExtension);
+    const onWindowMessage = (e: MessageEvent) => {
+      if (e.data && e.data.type === 'GIALONG_NEW_ORDER') {
+        onOrderFromExtension(e);
+      }
+    };
+    window.addEventListener('message', onWindowMessage);
+
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('GIALONG_NEW_ORDER', onOrderFromExtension);
+      window.removeEventListener('message', onWindowMessage);
+    };
+  }, [adminPin, isAdminUnlocked]);
 
   // Chuyển tab an toàn: Tự động đóng mọi modal mua hàng để tách biệt hoàn toàn trạng thái
   const handleTabChange = (newTab: 'client-portal' | 'workspace' | 'quickstart' | 'files' | 'devtools' | 'license-admin' | 'privacy') => {

@@ -311,6 +311,10 @@ export function CustomerDownloadPortal({
       if (data && data.success) {
         setQuickOrderSuccess(data.order);
         if (data.order) {
+          try {
+            window.dispatchEvent(new CustomEvent('GIALONG_NEW_ORDER', { detail: data.order }));
+            window.postMessage({ type: 'GIALONG_NEW_ORDER', order: data.order }, '*');
+          } catch (e) {}
           setMyOrders((prev) => {
             const updated = [data.order, ...prev.filter((o) => o.id !== data.order.id)];
             try {
