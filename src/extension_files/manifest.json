@@ -16,9 +16,8 @@
     "https://facebook.com/*",
     "https://*.pages.dev/*",
     "https://*.run.app/*",
-    "http://localhost:*",
-    "http://127.0.0.1:*",
-    "<all_urls>"
+    "http://localhost/*",
+    "http://127.0.0.1/*"
   ],
   "content_scripts": [
     {
@@ -33,10 +32,8 @@
       "matches": [
         "https://*.pages.dev/*",
         "https://*.run.app/*",
-        "http://localhost:*",
-        "http://127.0.0.1:*",
-        "https://*/*",
-        "http://*/*"
+        "http://localhost/*",
+        "http://127.0.0.1/*"
       ],
       "js": ["web_bridge.js"],
       "run_at": "document_start"
