@@ -69,7 +69,7 @@ let edgeOrders: OrderItem[] = [];
 let edgeHistory: LicenseHistoryItem[] = [];
 let edgeRevokedKeys: string[] = [];
 
-const GLOBAL_STORE_URL = 'https://api.restful-api.dev/objects/ff808181a09d98f701a12e4db8ee4513';
+const GLOBAL_STORE_URL = 'https://crudcrud.com/api/7ff89e6eca9a45d5a49a9cbc9ecdc3f7/orders';
 
 // Xác định số ngày thời hạn theo tên gói & mức giá (kèm ngày tặng theo chính sách mới)
 function getOrderDurationDays(pkgName?: string, price?: string): number {
@@ -313,23 +313,37 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
       const kvSet = await env.GLFB_KV.get('settings', 'json');
       if (kvSet) edgeSettings = kvSet;
     } catch (e) {}
-  } else {
-    // Luôn đồng bộ dữ liệu thời gian thực giữa mọi Cloudflare Edge Isolate & các máy khác nhau
-    try {
-      const resp = await fetch(GLOBAL_STORE_URL, { headers: { 'Accept': 'application/json' } });
-      if (resp.ok) {
-        const json = await resp.json();
-        if (json && json.data) {
-          if (Array.isArray(json.data.licenses)) edgeLicenses = json.data.licenses;
-          if (Array.isArray(json.data.orders)) edgeOrders = json.data.orders;
-          if (Array.isArray(json.data.history)) edgeHistory = json.data.history;
-          if (Array.isArray(json.data.revokedKeys)) edgeRevokedKeys = json.data.revokedKeys;
-          if (json.data.settings) edgeSettings = json.data.settings;
-          if (json.data.adminPin) adminPin = json.data.adminPin;
-        }
-      }
-    } catch (e) {}
   }
+
+  // Luôn đồng bộ dữ liệu đơn hàng từ CrudCrud Cloud Store
+  try {
+    const resp = await fetch(GLOBAL_STORE_URL, { headers: { 'Accept': 'application/json' } });
+    if (resp.ok) {
+      const remoteOrders = await resp.json();
+      if (Array.isArray(remoteOrders)) {
+        const orderMap = new Map<string, OrderItem>();
+        edgeOrders.forEach((o) => { if (o && o.id) orderMap.set(o.id, o); });
+        remoteOrders.forEach((ro: any) => {
+          if (ro && ro.id && !orderMap.has(ro.id)) {
+            orderMap.set(ro.id, {
+              id: ro.id,
+              pkgName: ro.pkgName || 'Gói Bản Quyền',
+              price: ro.price || '0đ',
+              clientName: ro.clientName || 'Khách Đặt Mua',
+              phone: ro.phone || '',
+              deviceId: ro.deviceId || '',
+              createdAt: ro.createdAt || new Date().toISOString(),
+              status: ro.status || 'pending',
+              note: ro.note || '',
+            });
+          }
+        });
+        edgeOrders = Array.from(orderMap.values()).sort(
+          (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+        );
+      }
+    }
+  } catch (e) {}
 
   const syncKV = async () => {
     if (env.GLFB_KV) {
@@ -342,23 +356,17 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
       } catch (e) {}
     }
     try {
-      const payload = {
-        name: 'GiaLongFB_Global_State_2026',
-        data: {
-          licenses: edgeLicenses,
-          orders: edgeOrders,
-          history: edgeHistory,
-          revokedKeys: edgeRevokedKeys,
-          settings: edgeSettings,
-          adminPin,
-          updatedAt: Date.now(),
-        },
-      };
-      await fetch(GLOBAL_STORE_URL, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+      for (const ord of edgeOrders) {
+        if (ord && ord.id) {
+          try {
+            await fetch(GLOBAL_STORE_URL, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(ord),
+            });
+          } catch (e) {}
+        }
+      }
     } catch (e) {}
   };
 

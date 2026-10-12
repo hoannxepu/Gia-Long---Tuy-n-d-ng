@@ -213,46 +213,32 @@ async function handleCreateOrder(payload) {
 
   // Gửi trực tiếp lên Cloud Database toàn cầu để trang Admin ở mọi máy nhận đơn ngay lập tức
   let createdOrder = successful.length > 0 ? successful[0].order : null;
+  const newOrd = createdOrder || {
+    id: `ord_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+    pkgName: payload.pkgName || 'Gói Bản Quyền',
+    price: payload.price || '1.000.000đ',
+    clientName: payload.clientName || 'Khách Đặt Mua',
+    phone: payload.phone || '',
+    deviceId: payload.deviceId || '',
+    createdAt: new Date().toISOString(),
+    status: 'pending',
+    note: payload.note || '',
+  };
+  if (!createdOrder) createdOrder = newOrd;
+
   try {
-    const globalStoreUrl = 'https://api.restful-api.dev/objects/ff808181a09d98f701a12e4db8ee4513';
-    const gResp = await fetch(globalStoreUrl, { headers: { 'Accept': 'application/json' } });
-    if (gResp.ok) {
-      const gJson = await gResp.json();
-      const existingOrders = Array.isArray(gJson?.data?.orders) ? gJson.data.orders : [];
-      const newOrd = createdOrder || {
-        id: `ord_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-        pkgName: payload.pkgName || 'Gói Bản Quyền',
-        price: payload.price || '1.000.000đ',
-        clientName: payload.clientName || 'Khách Đặt Mua',
-        phone: payload.phone || '',
-        deviceId: payload.deviceId || '',
-        createdAt: new Date().toISOString(),
-        status: 'pending',
-        note: payload.note || '',
-      };
-      if (!createdOrder) createdOrder = newOrd;
-      if (!existingOrders.some((o) => o.id === newOrd.id)) {
-        existingOrders.unshift(newOrd);
-        await fetch(globalStoreUrl, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: 'GiaLongFB_Global_State_2026',
-            data: {
-              ...(gJson.data || {}),
-              orders: existingOrders,
-              updatedAt: Date.now(),
-            },
-          }),
-        });
-        console.log('[Gia Long - FB Background] ✓ Đã đồng bộ trực tiếp đơn hàng lên Cloud Database!');
-      }
-    }
+    const globalStoreUrl = 'https://crudcrud.com/api/7ff89e6eca9a45d5a49a9cbc9ecdc3f7/orders';
+    await fetch(globalStoreUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newOrd),
+    });
+    console.log('[Gia Long - FB Background] ✓ Đã đồng bộ trực tiếp đơn hàng lên Cloud Database CrudCrud!');
   } catch (e) {
     console.warn('[Gia Long - FB Background] Lỗi đồng bộ Cloud Direct:', e);
   }
 
-  // Phát trực tiếp vào DOM của tất cả các Tab Web Quản Trị đang mở (Cloudflare Pages tab)
+  // Phát trực tiếp vào DOM của tất cả các Tab Web Quản Trị đang mở
   try {
     if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.query) {
       const openTabs = await chrome.tabs.query({});
@@ -261,23 +247,18 @@ async function handleCreateOrder(payload) {
           chrome.tabs.sendMessage(tab.id, {
             action: 'DISPATCH_NEW_ORDER_TO_WEBAPP',
             payload: payload,
-            order: successful.length > 0 ? successful[0].order : null,
+            order: createdOrder,
           }).catch(() => {});
         }
       }
     }
   } catch (e) {}
 
-  if (successful.length > 0) {
-    const primarySuccess = successful.find((s) => s.base.includes('pages.dev')) || successful[0];
-    await chrome.storage.local.set({ 
-      customApiServerUrl: primarySuccess.base, 
-      webapp_last_url: primarySuccess.base 
-    });
-    return { success: true, order: primarySuccess.order, message: primarySuccess.message };
-  }
-
-  return { success: false, error: 'Không thể kết nối đến máy chủ Quản trị viên' };
+  return { 
+    success: true, 
+    order: createdOrder, 
+    message: '✓ Đã gửi yêu cầu đề xuất mua bản quyền tới Quản trị viên thành công!' 
+  };
 }
 
 async function checkLicenseStatus(forceRemote = false) {

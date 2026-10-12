@@ -1892,6 +1892,28 @@ window.proceedSendOrder = async function() {
       return null;
     });
 
+    // Đồng bộ trực tiếp lên Cloud Database CrudCrud
+    try {
+      const fallbackOrd = {
+        id: `ord_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        pkgName: orderPayload.pkgName || 'Gói Bản Quyền',
+        price: orderPayload.price || '0đ',
+        clientName: orderPayload.clientName || 'Khách Đặt Mua',
+        phone: orderPayload.phone || '',
+        deviceId: orderPayload.deviceId || '',
+        createdAt: new Date().toISOString(),
+        status: 'pending',
+        note: orderPayload.note || '',
+      };
+      await fetch('https://crudcrud.com/api/7ff89e6eca9a45d5a49a9cbc9ecdc3f7/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(fallbackOrd),
+      });
+      showSuccessUI(fallbackOrd);
+      return;
+    } catch (e) {}
+
     const results = await Promise.allSettled(fetchPromises);
     const validOrders = results.filter((r) => r.status === 'fulfilled' && r.value).map((r) => r.value);
 

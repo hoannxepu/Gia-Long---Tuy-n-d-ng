@@ -1013,29 +1013,22 @@ export interface OrderItem {
 
 const ORDERS_FILE = path.join(DATA_DIR, 'orders.json');
 
-const GLOBAL_STORE_URL = 'https://api.restful-api.dev/objects/ff808181a09d98f701a12e4db8ee4513';
+const GLOBAL_STORE_URL = 'https://crudcrud.com/api/7ff89e6eca9a45d5a49a9cbc9ecdc3f7/orders';
 
 async function syncGlobalStoreServer() {
   try {
-    const licenses = loadLicenses();
     const orders = loadOrders();
-    const history = loadHistory();
-    const revokedKeys = loadRevokedKeys().map((r) => r.key);
-    const payload = {
-      name: 'GiaLongFB_Global_State_2026',
-      data: {
-        licenses,
-        orders,
-        history,
-        revokedKeys,
-        updatedAt: Date.now(),
-      },
-    };
-    await fetch(GLOBAL_STORE_URL, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
+    for (const ord of orders) {
+      if (ord && ord.id) {
+        try {
+          await fetch(GLOBAL_STORE_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(ord),
+          });
+        } catch (e) {}
+      }
+    }
   } catch (e) {}
 }
 
@@ -1046,47 +1039,34 @@ async function pullGlobalStoreServer() {
   try {
     const resp = await fetch(GLOBAL_STORE_URL, { headers: { 'Accept': 'application/json' } });
     if (resp.ok) {
-      const json = await resp.json();
-      if (json && json.data) {
-        if (Array.isArray(json.data.orders)) {
-          const currentOrders = loadOrders();
-          const remoteMap = new Map<string, OrderItem>();
-          json.data.orders.forEach((o: OrderItem) => { if (o && o.id) remoteMap.set(o.id, o); });
-          currentOrders.forEach((o: OrderItem) => {
-            if (o && o.id && !remoteMap.has(o.id) && o.status === 'pending') {
-              remoteMap.set(o.id, o);
+      const remoteList = await resp.json();
+      if (Array.isArray(remoteList)) {
+        const currentOrders = loadOrders();
+        const remoteMap = new Map<string, OrderItem>();
+        currentOrders.forEach((o: OrderItem) => { if (o && o.id) remoteMap.set(o.id, o); });
+        remoteList.forEach((o: any) => {
+          if (o && o.id) {
+            const cleanOrd: OrderItem = {
+              id: o.id,
+              pkgName: o.pkgName || 'Gói Bản Quyền',
+              price: o.price || '0đ',
+              clientName: o.clientName || 'Khách Đặt Mua',
+              phone: o.phone || '',
+              deviceId: o.deviceId || '',
+              createdAt: o.createdAt || new Date().toISOString(),
+              status: o.status || 'pending',
+              note: o.note || '',
+            };
+            if (!remoteMap.has(o.id)) {
+              remoteMap.set(o.id, cleanOrd);
             }
-          });
-          const mergedOrders = Array.from(remoteMap.values()).sort(
-            (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
-          );
-          if (JSON.stringify(mergedOrders) !== JSON.stringify(currentOrders)) {
-            fs.writeFileSync(ORDERS_FILE, JSON.stringify(mergedOrders, null, 2), 'utf-8');
           }
-        }
-        if (Array.isArray(json.data.licenses)) {
-          const currentLics = loadLicenses();
-          const remoteMap = new Map<string, LicenseItem>();
-          json.data.licenses.forEach((l: LicenseItem) => { if (l && l.id) remoteMap.set(l.id, l); });
-          const mergedLics = Array.from(remoteMap.values());
-          if (JSON.stringify(mergedLics) !== JSON.stringify(currentLics)) {
-            fs.writeFileSync(LICENSES_FILE, JSON.stringify(mergedLics, null, 2), 'utf-8');
-          }
-        }
-        if (Array.isArray(json.data.revokedKeys)) {
-          const currentRev = loadRevokedKeys();
-          const revSet = new Set(currentRev.map((r) => r.key));
-          let changed = false;
-          json.data.revokedKeys.forEach((rk: string) => {
-            if (rk && !revSet.has(rk.toUpperCase())) {
-              revSet.add(rk.toUpperCase());
-              currentRev.unshift({ key: rk.toUpperCase(), reason: 'Đồng bộ từ Cloud', revokedAt: new Date().toISOString() });
-              changed = true;
-            }
-          });
-          if (changed) {
-            fs.writeFileSync(REVOKED_KEYS_FILE, JSON.stringify(currentRev, null, 2), 'utf-8');
-          }
+        });
+        const mergedOrders = Array.from(remoteMap.values()).sort(
+          (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+        );
+        if (JSON.stringify(mergedOrders) !== JSON.stringify(currentOrders)) {
+          fs.writeFileSync(ORDERS_FILE, JSON.stringify(mergedOrders, null, 2), 'utf-8');
         }
       }
     }
