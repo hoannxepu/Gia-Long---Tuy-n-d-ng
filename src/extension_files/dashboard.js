@@ -1031,6 +1031,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     switchTab('license');
   });
 
+  const btnQuickRenewModal = document.getElementById('btnQuickRenewModal');
+  btnQuickRenewModal?.addEventListener('click', () => {
+    switchTab('license');
+    const plansGrid = document.querySelector('.license-plans-grid');
+    if (plansGrid) {
+      plansGrid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  });
+
   async function loadLicenseDetails(forceRemote = false) {
     chrome.runtime.sendMessage({ action: 'GET_DEVICE_ID' }, (devRes) => {
       if (licCurrentDeviceId && devRes?.deviceId) {
@@ -1041,40 +1050,54 @@ document.addEventListener('DOMContentLoaded', async () => {
     chrome.runtime.sendMessage({ action: 'CHECK_LICENSE', forceRemote }, (res) => {
       if (!res) return;
 
+      const expiryAlertCard = document.getElementById('licenseExpiryAlertCard');
+      const expiryAlertBadge = document.getElementById('expiryAlertBadge');
+      const expiryAlertDesc = document.getElementById('expiryAlertDesc');
       const lic = res.license;
-      if (res.isValid && lic) {
+
+      if (res.isValid && lic && !res.isRevoked && !lic.isRevoked && !lic.isSuspended) {
         const isTrialPlan = lic.planType === 'trial';
+        const daysLeft = typeof lic.daysLeft === 'number' ? lic.daysLeft : parseInt(lic.daysLeft || '0', 10);
+        const isExpiringSoon = daysLeft <= 3 && daysLeft >= 0;
 
         // Cập nhật Header Pill
         if (licenseHeaderPill) {
-          licenseHeaderPill.style.background = isTrialPlan ? 'rgba(88, 28, 135, 0.35)' : 'rgba(6, 78, 59, 0.35)';
-          licenseHeaderPill.style.borderColor = isTrialPlan ? 'rgba(168, 85, 247, 0.45)' : 'rgba(16, 185, 129, 0.45)';
+          licenseHeaderPill.style.background = isExpiringSoon
+            ? 'rgba(234, 88, 12, 0.35)'
+            : (isTrialPlan ? 'rgba(88, 28, 135, 0.35)' : 'rgba(6, 78, 59, 0.35)');
+          licenseHeaderPill.style.borderColor = isExpiringSoon
+            ? 'rgba(249, 115, 22, 0.5)'
+            : (isTrialPlan ? 'rgba(168, 85, 247, 0.45)' : 'rgba(16, 185, 129, 0.45)');
         }
         if (licenseHeaderTitle) {
           const deviceText = lic.maxDevices > 1 ? `${lic.maxDevices} máy` : '1 máy';
-          licenseHeaderTitle.innerText = isTrialPlan
-            ? `${lic.clientName} (DÙNG THỬ 1N • 20 BÀI)`
-            : `${lic.clientName} (${deviceText}) • ${lic.daysLeft} ngày`;
-          licenseHeaderTitle.style.color = isTrialPlan ? '#d8b4fe' : '#6ee7b7';
+          licenseHeaderTitle.innerText = isExpiringSoon
+            ? `${lic.clientName} • Còn ${daysLeft} ngày (Sắp Hết Hạn)`
+            : (isTrialPlan
+                ? `${lic.clientName} (DÙNG THỬ 1N • 20 BÀI)`
+                : `${lic.clientName} (${deviceText}) • ${daysLeft} ngày`);
+          licenseHeaderTitle.style.color = isExpiringSoon ? '#fbbf24' : (isTrialPlan ? '#d8b4fe' : '#6ee7b7');
         }
-        if (licenseHeaderIcon) licenseHeaderIcon.innerText = isTrialPlan ? '🎁' : '💎';
+        if (licenseHeaderIcon) licenseHeaderIcon.innerText = isExpiringSoon ? '⏰' : (isTrialPlan ? '🎁' : '💎');
         if (btnHeaderLicenseAction) {
-          btnHeaderLicenseAction.innerText = isTrialPlan ? 'DÙNG THỬ' : 'VIP';
-          btnHeaderLicenseAction.className = isTrialPlan ? 'btn btn-sub' : 'btn btn-emerald';
+          btnHeaderLicenseAction.innerText = isExpiringSoon ? 'Gia Hạn' : (isTrialPlan ? 'DÙNG THỬ' : 'VIP');
+          btnHeaderLicenseAction.className = isExpiringSoon ? 'btn btn-amber' : (isTrialPlan ? 'btn btn-sub' : 'btn btn-emerald');
         }
 
         // Cập nhật Trang License
         if (licClientName) licClientName.innerText = lic.clientName || (isTrialPlan ? 'Khách Hàng Dùng Thử' : 'Khách Hàng VIP');
         if (licKeyDisplay) licKeyDisplay.innerText = `Mã Bản Quyền: ${lic.key}`;
         if (licBadgeStatus) {
-          licBadgeStatus.innerText = isTrialPlan ? '🎁 GÓI DÙNG THỬ (20 BÀI ĐĂNG)' : '✓ BẢN QUYỀN HỢP LỆ';
-          licBadgeStatus.className = 'badge-success';
+          licBadgeStatus.innerText = isExpiringSoon
+            ? `⚠️ SẮP HẾT HẠN (CÒN ${daysLeft} NGÀY)`
+            : (isTrialPlan ? '🎁 GÓI DÙNG THỬ (20 BÀI ĐĂNG)' : '✓ BẢN QUYỀN HỢP LỆ');
+          licBadgeStatus.className = isExpiringSoon ? 'badge-failed' : 'badge-success';
         }
         if (licDaysLeftText) {
           const expDate = new Date(lic.expiresAt).toLocaleDateString('vi-VN');
           licDaysLeftText.innerText = isTrialPlan
             ? `Dùng thử 1 ngày (Hết hạn: ${expDate}) • Giới hạn 20 bài`
-            : `Còn ${lic.daysLeft} ngày (Hết hạn: ${expDate})`;
+            : `Còn ${daysLeft} ngày (Hết hạn: ${expDate})`;
         }
         if (licPlanTypeText) {
           licPlanTypeText.innerText = isTrialPlan
@@ -1084,19 +1107,39 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (licDevicesCount) {
           licDevicesCount.innerText = `${lic.activeDevicesCount || 1} / ${lic.maxDevices || 1} máy tính`;
         }
+
+        // 3. KHỐI NHẮC KHÁCH MUA GÓI MỚI KHI CÁCH NGÀY HẾT HẠN <= 3 NGÀY (ẢNH 2)
+        if (expiryAlertCard) {
+          if (isExpiringSoon) {
+            expiryAlertCard.style.display = 'block';
+            if (expiryAlertBadge) {
+              expiryAlertBadge.innerText = daysLeft === 0 ? 'HẾT HẠN HÔM NAY' : `CÒN ${daysLeft} NGÀY`;
+              expiryAlertBadge.style.background = daysLeft <= 1 ? '#dc2626' : '#ea580c';
+            }
+            if (expiryAlertDesc) {
+              const expDate = lic.expiresAt ? new Date(lic.expiresAt).toLocaleDateString('vi-VN') : 'sắp tới';
+              expiryAlertDesc.innerHTML = `Gói cước của máy tính này sẽ hết hạn vào ngày <strong style="color: #fbbf24;">${expDate}</strong> (chỉ còn ${daysLeft} ngày). Vui lòng đặt mua thêm gói bên dưới để được <strong style="color: #34d399;">cộng dồn thời hạn sử dụng</strong> ngay lập tức, không làm gián đoạn lịch đăng bài tự động!`;
+            }
+          } else {
+            expiryAlertCard.style.display = 'none';
+          }
+        }
       } else {
-        // Chưa kích hoạt, hết hạn hoặc bị thu hồi
-        const isRevoked = res.isRevoked || lic?.isRevoked;
-        const isExp = res.isExpired;
+        // Chưa kích hoạt, hết hạn hoặc bị thu hồi (Ngắt máy)
+        if (expiryAlertCard) expiryAlertCard.style.display = 'none';
+
+        const isRevoked = Boolean(res.isRevoked || lic?.isRevoked);
+        const isExp = Boolean(res.isExpired || lic?.isExpired);
+
         if (licenseHeaderPill) {
-          licenseHeaderPill.style.background = isRevoked || isExp ? 'rgba(136, 19, 55, 0.3)' : 'rgba(120, 53, 15, 0.25)';
-          licenseHeaderPill.style.borderColor = isRevoked || isExp ? 'rgba(244, 63, 94, 0.4)' : 'rgba(245, 158, 11, 0.4)';
+          licenseHeaderPill.style.background = isRevoked || isExp ? 'rgba(136, 19, 55, 0.4)' : 'rgba(120, 53, 15, 0.25)';
+          licenseHeaderPill.style.borderColor = isRevoked || isExp ? 'rgba(244, 63, 94, 0.5)' : 'rgba(245, 158, 11, 0.4)';
         }
         if (licenseHeaderTitle) {
           licenseHeaderTitle.innerText = isRevoked
-            ? 'Bản Quyền Đã Thu Hồi'
+            ? '🚫 Bản Quyền Đã Thu Hồi (Bị Khóa)'
             : isExp
-            ? 'Bản Quyền Đã Hết Hạn'
+            ? '🚨 Bản Quyền Đã Hết Hạn'
             : 'Chưa Kích Hoạt Bản Quyền';
           licenseHeaderTitle.style.color = isRevoked || isExp ? '#fda4af' : '#fbbf24';
         }
@@ -1106,55 +1149,31 @@ document.addEventListener('DOMContentLoaded', async () => {
           btnHeaderLicenseAction.className = isRevoked ? 'btn btn-danger' : 'btn btn-amber';
         }
 
-        if (licClientName) licClientName.innerText = lic?.clientName ? `${lic.clientName} (${isRevoked ? 'Đã Thu Hồi' : 'Hết Hạn'})` : 'Chưa Kích Hoạt';
-        if (licKeyDisplay) licKeyDisplay.innerText = lic?.key ? `Mã: ${lic.key}` : 'Vui lòng nhập mã kích hoạt bên dưới';
+        if (licClientName) licClientName.innerText = lic?.clientName ? `${lic.clientName} (${isRevoked ? 'Đã Thu Hồi' : 'Hết Hạn'})` : (isRevoked ? 'Bản Quyền Bị Thu Hồi' : 'Chưa Kích Hoạt');
+        if (licKeyDisplay) licKeyDisplay.innerText = lic?.key ? `Mã: ${lic.key}` : 'Vui lòng đặt mua gói bên dưới';
         if (licBadgeStatus) {
-          licBadgeStatus.innerText = isRevoked ? 'ĐÃ THU HỒI' : isExp ? 'HẾT HẠN' : 'CHƯA KÍCH HOẠT';
+          licBadgeStatus.innerText = isRevoked ? '🚫 ĐÃ THU HỒI (NGẮT MÁY)' : isExp ? '🚨 HẾT HẠN' : 'CHƯA KÍCH HOẠT';
           licBadgeStatus.className = 'badge-failed';
         }
-        if (licDaysLeftText) licDaysLeftText.innerText = res.message || 'Cần kích hoạt bản quyền';
-        if (licPlanTypeText) licPlanTypeText.innerText = 'Chưa xác định';
+        if (licDaysLeftText) {
+          licDaysLeftText.innerText = isRevoked
+            ? (res.message || '🚨 Bản quyền của máy tính này đã bị Quản trị viên thu hồi và ngắt kết nối!')
+            : (res.message || 'Cần kích hoạt hoặc mua gói bản quyền');
+        }
+        if (licPlanTypeText) licPlanTypeText.innerText = isRevoked ? 'Bị ngắt kết nối' : 'Chưa xác định';
         if (licDevicesCount) licDevicesCount.innerText = '0 / 0 máy';
       }
     });
   }
 
-  btnSubmitActivateLicense?.addEventListener('click', () => {
-    const raw = inputNewLicenseKey?.value.trim();
-    if (!raw) return alert('Vui lòng nhập mã bản quyền (License Key)!');
-
-    btnSubmitActivateLicense.disabled = true;
-    btnSubmitActivateLicense.innerText = 'Đang kích hoạt...';
-
-    chrome.runtime.sendMessage({ action: 'ACTIVATE_LICENSE', key: raw }, (res) => {
-      btnSubmitActivateLicense.disabled = false;
-      btnSubmitActivateLicense.innerText = '⚡ Kích Hoạt Ngay';
-
-      if (res && res.success) {
-        showToast('✓ ' + res.message);
-        loadLicenseDetails(true);
-        if (inputNewLicenseKey) inputNewLicenseKey.value = '';
-      } else {
-        alert('❌ Kích hoạt thất bại: ' + (res?.message || 'Mã không tồn tại hoặc đã hết hạn.'));
-      }
-    });
-  });
-
-  btnRefreshLicenseStatus?.addEventListener('click', () => {
-    loadLicenseDetails(true);
-    loadAndRenderClientOrders(true);
-    showToast('🔄 Đã tải lại và đồng bộ trạng thái Quản trị thành công!');
-  });
-
   // ==========================================
-  // LỊCH SỬ ĐƠN ĐẶT MUA & ĐỒNG BỘ HAI CHIỀU VỚI QUẢN TRỊ
+  // LỊCH SỬ ĐƠN ĐẶT MUA & ĐỒNG BỘ HAI CHIỀU VỚI QUẢN TRỊ (ẨN & TỰ ĐỘNG KÍCH HOẠT)
   // ==========================================
   const clientOrdersHistoryList = document.getElementById('clientOrdersHistoryList');
-  const btnRefreshClientOrders = document.getElementById('btnRefreshClientOrders');
 
   async function loadAndRenderClientOrders(forceRemote = false) {
     if (!clientOrdersHistoryList) return;
-    if (forceRemote) {
+    if (forceRemote && !clientOrdersHistoryList.children.length) {
       clientOrdersHistoryList.innerHTML = '<div style="color: #38bdf8; text-align: center; padding: 10px;">⏳ Đang đồng bộ với máy chủ Quản trị viên...</div>';
     }
 
@@ -1166,6 +1185,36 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
 
       let html = '';
+      const approvedOrders = orders.filter((o) => o.status === 'approved');
+
+      // Banner thông báo cộng dồn tất cả các gói đã mua thành công
+      if (approvedOrders.length > 1) {
+        let totalDays = 0;
+        approvedOrders.forEach((ao) => {
+          const p = (ao.pkgName || '').toLowerCase();
+          if (p.includes('3 tháng') || p.includes('90 ngày') || p.includes('100 ngày')) totalDays += 100;
+          else if (p.includes('6 tháng') || p.includes('180 ngày') || p.includes('195 ngày')) totalDays += 195;
+          else if (p.includes('1 năm') || p.includes('12 tháng') || p.includes('360 ngày') || p.includes('390 ngày')) totalDays += 390;
+          else if (p.includes('dùng thử') || p.includes('1 ngày')) totalDays += 1;
+          else totalDays += 30;
+        });
+
+        html += `
+          <div style="background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(6, 78, 59, 0.35)); border: 1.5px solid rgba(16, 185, 129, 0.6); border-radius: 10px; padding: 10px 14px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 12px rgba(16,185,129,0.15);">
+            <div style="display: flex; align-items: center; gap: 9px;">
+              <span style="font-size: 20px;">💎</span>
+              <div>
+                <div style="color: #34d399; font-weight: 800; font-size: 12.5px;">✓ ĐÃ CỘNG DỒN TẤT CẢ ${approvedOrders.length} GÓI MUA THÀNH CÔNG</div>
+                <div style="color: #cbd5e1; font-size: 11px; margin-top: 1px;">Toàn bộ ${approvedOrders.length} gói mua đã được hợp nhất thành một bản quyền VIP duy nhất cho máy này.</div>
+              </div>
+            </div>
+            <div style="text-align: right;">
+              <span style="background: #10b981; color: #042f2e; font-weight: 900; padding: 3px 10px; border-radius: 999px; font-size: 11px; letter-spacing: 0.3px;">TỔNG ${totalDays} NGÀY</span>
+            </div>
+          </div>
+        `;
+      }
+
       orders.forEach((o) => {
         const isApproved = o.status === 'approved';
         const isPending = o.status === 'pending';
@@ -1176,43 +1225,57 @@ document.addEventListener('DOMContentLoaded', async () => {
         const shortId = (o.id || '').slice(-8).toUpperCase();
         const dateStr = o.createdAt ? new Date(o.createdAt).toLocaleString('vi-VN') : '';
 
-        let keyActionHtml = '';
+        // Tự động kích hoạt ngầm trực tuyến nếu đơn đã duyệt mà máy chưa nhận
         if (isApproved && o.generatedKey) {
+          chrome.storage.local.get(['licenseKey', 'licenseData'], (st) => {
+            if (!st.licenseKey || !st.licenseData?.isValid || st.licenseKey !== o.generatedKey) {
+              chrome.runtime.sendMessage({ action: 'ACTIVATE_LICENSE', key: o.generatedKey }, (actRes) => {
+                if (actRes?.success) {
+                  loadLicenseDetails(false);
+                }
+              });
+            }
+          });
+        }
+
+        let keyActionHtml = '';
+        if (isApproved) {
           keyActionHtml = `
-            <div style="margin-top: 6px; padding-top: 6px; border-top: 1px dashed #1e293b; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px;">
-              <div style="display: flex; align-items: center; gap: 6px;">
-                <span style="color: #94a3b8; font-size: 10.5px;">Mã Key Được Cấp:</span>
-                <strong style="color: #38bdf8; font-family: monospace; font-size: 12px; background: rgba(56, 189, 248, 0.1); padding: 2px 7px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.3);">${o.generatedKey}</strong>
-              </div>
-              <div style="display: flex; gap: 5px;">
-                <button class="btn btn-emerald btn-activate-order-key" data-key="${o.generatedKey}" style="padding: 3px 9px; font-size: 10.5px; font-weight: 700;">
-                  ⚡ Nạp Mã Này Ngay
-                </button>
-                <button class="btn btn-sub btn-copy-order-key" data-key="${o.generatedKey}" style="padding: 3px 7px; font-size: 10.5px;">
-                  📋 Copy
-                </button>
-              </div>
+            <div style="margin-top: 5px; padding: 5px 8px; background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 6px; display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: #34d399;">
+              <span>⚡ Gói này đã được cộng dồn vào thời hạn bản quyền VIP của máy!</span>
+              <span style="font-weight: 800;">✓ Hoạt Động</span>
             </div>
           `;
         } else if (isPending) {
           keyActionHtml = `
             <div style="margin-top: 4px; color: #94a3b8; font-size: 10px;">
-              💡 <em>Đang chờ Admin duyệt (thường 1-3 phút). Hoặc liên hệ Zalo 0869.029.310 để kích hoạt ngay!</em>
+              💡 <em>Đang chờ Quản trị viên duyệt (khoảng 1-3 phút). Tiện ích sẽ tự động nhận bản quyền ngay khi được duyệt!</em>
             </div>
           `;
         }
 
+        const isTrial = (o.price === '0đ' || String(o.pkgName).includes('Dùng Thử'));
+        const pkgIcon = isTrial ? '🎁' : '💎';
+
         html += `
-          <div style="background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column;">
-            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px;">
-              <div style="display: flex; align-items: center; gap: 6px;">
-                <strong style="color: #f8fafc; font-size: 11.5px;">${o.pkgName || 'Gói Bản Quyền'}</strong>
-                <span style="color: #38bdf8; font-weight: bold; font-size: 11px;">(${o.price || '0đ'})</span>
-                <span style="color: #64748b; font-size: 10px; font-family: monospace;">#${shortId}</span>
+          <div style="background: #0f172a; border: 1px solid ${isApproved ? 'rgba(16, 185, 129, 0.4)' : '#1e293b'}; border-radius: 9px; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.3);">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 14px;">${pkgIcon}</span>
+                <div>
+                  <div style="display: flex; align-items: center; gap: 6px;">
+                    <strong style="color: #ffffff; font-size: 12px;">${o.pkgName || 'Gói Bản Quyền'}</strong>
+                    <span style="color: #34d399; font-weight: 800; font-size: 12px;">${o.price || '0đ'}</span>
+                  </div>
+                  <div style="font-size: 10.5px; color: #94a3b8; display: flex; align-items: center; gap: 6px; margin-top: 1px;">
+                    <span>Mã đơn: <code style="color: #38bdf8; font-family: monospace;">#${shortId}</code></span>
+                    ${o.deviceId ? `<span>• Máy: <code style="color: #cbd5e1; font-family: monospace;">${o.deviceId}</code></span>` : ''}
+                  </div>
+                </div>
               </div>
-              <div style="display: flex; align-items: center; gap: 6px;">
-                <span style="color: #64748b; font-size: 10px;">${dateStr}</span>
+              <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 2px;">
                 ${statusBadge}
+                <span style="color: #64748b; font-size: 10px; margin-top: 2px;">${dateStr}</span>
               </div>
             </div>
             ${keyActionHtml}
@@ -1221,45 +1284,14 @@ document.addEventListener('DOMContentLoaded', async () => {
       });
 
       clientOrdersHistoryList.innerHTML = html;
-
-      // Gắn sự kiện nạp mã 1-Click
-      clientOrdersHistoryList.querySelectorAll('.btn-activate-order-key').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          const keyToActivate = btn.getAttribute('data-key');
-          if (keyToActivate) {
-            btn.innerText = 'Đang nạp...';
-            chrome.runtime.sendMessage({ action: 'ACTIVATE_LICENSE', key: keyToActivate }, (actRes) => {
-              if (actRes && actRes.success) {
-                showToast('✓ ' + actRes.message);
-                loadLicenseDetails(true);
-                loadAndRenderClientOrders(false);
-              } else {
-                alert('Lỗi kích hoạt: ' + (actRes?.message || 'Mã không hợp lệ'));
-                btn.innerText = '⚡ Nạp Mã Này Ngay';
-              }
-            });
-          }
-        });
-      });
-
-      // Gắn sự kiện copy
-      clientOrdersHistoryList.querySelectorAll('.btn-copy-order-key').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          const keyToCopy = btn.getAttribute('data-key');
-          if (keyToCopy) {
-            navigator.clipboard.writeText(keyToCopy);
-            showToast('✓ Đã sao chép mã: ' + keyToCopy);
-          }
-        });
-      });
     });
   }
 
-  btnRefreshClientOrders?.addEventListener('click', () => {
-    loadLicenseDetails(true);
-    loadAndRenderClientOrders(true);
-    showToast('🔄 Đã tải lại và đồng bộ danh sách đơn đặt mua!');
-  });
+  // Cơ chế đồng bộ ẩn: Tự động chạy định kỳ 3 giây để cập nhật tức thì hai chiều giữa Quản trị và Extension
+  setInterval(() => {
+    loadLicenseDetails(false);
+    loadAndRenderClientOrders(false);
+  }, 3000);
 
   // Tự động tải danh sách đơn hàng của khách
   loadAndRenderClientOrders(false);
@@ -1440,10 +1472,10 @@ window.updateOrderTransferMemoAndQr = function(immediateQr = false) {
   if (qrImg) {
     clearTimeout(qrDebounceTimer);
     if (immediateQr) {
-      qrImg.src = `https://img.vietqr.io/image/970422-0869029310-compact2.png?amount=${rawNum}&addInfo=${encodeURIComponent(memo)}&accountName=GIA%20LONG%20FB`;
+      qrImg.src = `https://img.vietqr.io/image/tpbank-10005959864-compact2.png?amount=${rawNum}&addInfo=${encodeURIComponent(memo)}&accountName=NGUYEN%20VAN%20HIEU`;
     } else {
       qrDebounceTimer = setTimeout(() => {
-        qrImg.src = `https://img.vietqr.io/image/970422-0869029310-compact2.png?amount=${rawNum}&addInfo=${encodeURIComponent(memo)}&accountName=GIA%20LONG%20FB`;
+        qrImg.src = `https://img.vietqr.io/image/tpbank-10005959864-compact2.png?amount=${rawNum}&addInfo=${encodeURIComponent(memo)}&accountName=NGUYEN%20VAN%20HIEU`;
       }, 180);
     }
   }
@@ -1593,7 +1625,7 @@ window.submitOrderOnline = async function() {
       modalConfirm.style.display = 'flex';
     } else {
       // Fallback nếu không tìm thấy modal confirm
-      if (confirm(`Bạn đã chuyển khoản ${pkg.price} tới MBBank 0869.029.310 (Nội dung: ${memo}) chưa?\n\nBấm OK nếu đã chuyển khoản thành công để gửi lệnh mua đi!`)) {
+      if (confirm(`Bạn đã chuyển khoản ${pkg.price} tới TPBank 1000 5959 864 (Chủ TK: Nguyễn Văn Hiệu - Nội dung: ${memo}) chưa?\n\nBấm OK nếu đã chuyển khoản thành công để gửi lệnh mua đi!`)) {
         window.proceedSendOrder();
       }
     }

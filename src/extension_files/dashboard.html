@@ -916,89 +916,70 @@
             </p>
           </div>
 
-          <!-- Banner Thông Báo Gói Đang Chọn (Đồng bộ chuẩn Quản trị) -->
-          <div id="selectedPlanBanner" style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 12px; padding: 11px 15px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px;">
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <span style="font-size: 18px;">🎁</span>
-              <div style="font-size: 12px;">
-                <span style="color: #94a3b8;">Gói bạn đang chọn: </span>
-                <strong id="bannerSelectedPkgName" style="color: #ffffff; font-weight: 800;">Gói 3 Tháng</strong>
-                <span id="bannerSelectedPkgPrice" style="color: #fbbf24; font-weight: 800; margin-left: 6px;">(2.700.000đ)</span>
-                <span id="bannerSelectedPkgDiscount" style="color: #34d399; font-weight: 700; font-size: 10.5px; margin-left: 6px;">• Tiết kiệm 800.000đ (-10%)</span>
-              </div>
-            </div>
-
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <span id="bannerSelectedPkgNote" style="font-size: 11px; color: #94a3b8;">Nhấp vào nút để mở hộp thoại thanh toán VietQR:</span>
-              <button type="button" id="btnBannerOpenOrderModal" onclick="openOrderModal(window.currentSelectedPkg.name, window.currentSelectedPkg.price)" style="padding: 7px 16px; border-radius: 9px; font-size: 12px; font-weight: 800; background: linear-gradient(135deg, #059669, #10b981); color: #ffffff; border: none; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.35); cursor: pointer; display: flex; align-items: center; gap: 5px;">
-                <span>🚀 Mở Hộp Thoại Đặt Mua &amp; Quét QR</span>
-              </button>
-            </div>
-          </div>
-
-          <!-- LỊCH SỬ ĐƠN ĐẶT MUA & GÓI CƯỚC (ĐẦY ĐỦ THÔNG TIN CHI TIẾT) -->
-          <div style="background: #080d1a; border: 1px solid #1e293b; border-radius: 12px; padding: 14px 16px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; border-bottom: 1px solid #1e293b; padding-bottom: 8px;">
-              <div style="font-weight: 800; color: #f8fafc; font-size: 13px; display: flex; align-items: center; gap: 7px;">
-                <span>📜</span>
-                <span>Lịch Sử Đơn Đặt Mua &amp; Gói Cước Của Bạn (Chi Tiết Đầy Đủ)</span>
-              </div>
-              <button id="btnRefreshClientOrders" class="btn btn-sub btn-sub-primary" style="font-size: 11px; padding: 4px 10px;">🔄 Tải Lại Lịch Sử</button>
-            </div>
-
-            <div style="font-size: 11px; color: #94a3b8; margin-bottom: 8px;">
-              Danh sách các gói cước và yêu cầu mua bạn đã gửi từ thiết bị này lên hệ thống Quản Trị Viên:
-            </div>
-
-            <div id="clientOrdersHistoryList" style="max-height: 220px; overflow-y: auto; font-size: 11.5px; color: #cbd5e1; display: flex; flex-direction: column; gap: 8px;">
-              <div style="color: #64748b; text-align: center; padding: 16px; background: rgba(15,23,42,0.6); border-radius: 8px;">Chưa có lịch sử đơn đặt mua nào từ thiết bị này.</div>
-            </div>
-          </div>
-
-          <!-- Khung Kích Hoạt Nhanh & Nhập Mã Bản Quyền (Gọn gàng, chuẩn Web Quản trị) -->
+          <!-- KHỐI THÔNG TIN THIẾT BỊ & TRẠNG THÁI ĐỒNG BỘ QUẢN TRỊ (KÍCH HOẠT TRỰC TUYẾN 100%) -->
           <div style="background: #080d1a; border: 1px solid #1e293b; border-radius: 12px; padding: 12px 16px;">
             <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
-              <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 320px;">
-                <label for="inputNewLicenseKey" style="font-size: 12.5px; font-weight: 700; color: #f1f5f9; white-space: nowrap; margin-bottom: 0;">
-                  🔑 Nhập Mã Bản Quyền:
-                </label>
-                <input type="text" id="inputNewLicenseKey" placeholder="Dán mã kích hoạt đã cấp (VD: GLFB-VIP-XXXX)..." style="flex: 1; font-family: monospace; font-size: 12.5px; font-weight: bold; letter-spacing: 0.5px; padding: 7px 11px; text-transform: uppercase;" />
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="color: #94a3b8; font-size: 12px; font-weight: 600;">Mã máy của bạn (Device ID):</span>
+                <strong id="licCurrentDeviceId" style="color: #38bdf8; font-family: monospace; font-size: 12px; background: rgba(56, 189, 248, 0.1); padding: 3px 9px; border-radius: 6px; border: 1px solid rgba(56, 189, 248, 0.3);">Đang lấy...</strong>
               </div>
-              <div style="display: flex; gap: 8px;">
-                <button class="btn btn-emerald" id="btnSubmitActivateLicense" style="padding: 7px 16px; font-size: 12px; font-weight: 700;">
-                  <span>⚡ Kích Hoạt Ngay</span>
-                </button>
-                <button class="btn btn-sub" id="btnRefreshLicenseStatus" style="padding: 7px 14px; font-size: 11.5px; font-weight: 700; background: linear-gradient(135deg, #0284c7, #0369a1); color: white; border: 1px solid #38bdf8;">
-                  <span>🔄 Tải Lại &amp; Đồng Bộ Quản Trị</span>
-                </button>
-              </div>
-            </div>
-
-            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-top: 9px; padding-top: 8px; border-top: 1px dashed #1e293b; font-size: 11px; color: #94a3b8;">
-              <div style="display: flex; align-items: center; gap: 6px;">
-                <span>Mã máy của bạn (Device ID): </span>
-                <strong id="licCurrentDeviceId" style="color: #38bdf8; font-family: monospace; font-size: 11.5px; background: rgba(56, 189, 248, 0.1); padding: 2px 7px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.2);">Đang lấy...</strong>
-              </div>
-              <div style="display: flex; align-items: center; gap: 6px;">
-                <span style="color: #cbd5e1;">💡 Hỗ trợ &amp; Kích hoạt 24/7:</span>
-                <a href="https://zalo.me/0869029310" target="_blank" rel="noopener noreferrer" style="color: #38bdf8; font-weight: 800; text-decoration: none; display: flex; align-items: center; gap: 4px;">
+              <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 700; color: #34d399; background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); padding: 4px 11px; border-radius: 999px;">
+                  <span style="width: 7px; height: 7px; border-radius: 50%; background: #10b981; box-shadow: 0 0 8px #10b981; display: inline-block;"></span>
+                  <span>Đã đồng bộ quản trị</span>
+                </div>
+                <a href="https://zalo.me/0869029310" target="_blank" rel="noopener noreferrer" style="color: #38bdf8; font-size: 11.5px; font-weight: 800; text-decoration: none; display: flex; align-items: center; gap: 4px;">
                   <span>Zalo: 0869.029.310 ↗</span>
                 </a>
               </div>
             </div>
           </div>
 
-          <!-- LỊCH SỬ ĐƠN ĐẶT MUA & GÓI CƯỚC CỦA KHÁCH HÀNG -->
-          <div style="background: #080d1a; border: 1px solid #1e293b; border-radius: 12px; padding: 12px 16px; margin-top: 12px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; border-bottom: 1px solid #1e293b; padding-bottom: 6px;">
-              <div style="font-weight: 800; color: #f8fafc; font-size: 12px; display: flex; align-items: center; gap: 6px;">
+          <!-- KHỐI NHẮC KHÁCH MUA GÓI MỚI KHI CÁCH NGÀY HẾT HẠN <= 3 NGÀY (ẢNH 2) -->
+          <div id="licenseExpiryAlertCard" style="display: none; background: linear-gradient(135deg, rgba(234, 88, 12, 0.22) 0%, rgba(220, 38, 38, 0.25) 100%); border: 1.5px solid #f97316; border-radius: 14px; padding: 13px 18px; box-shadow: 0 6px 24px rgba(234, 88, 12, 0.3); transition: all 0.3s ease;">
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;">
+              <div style="display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1;">
+                <div style="width: 40px; height: 40px; border-radius: 10px; background: rgba(249, 115, 22, 0.25); border: 1.5px solid rgba(249, 115, 22, 0.6); display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0; box-shadow: 0 0 12px rgba(249, 115, 22, 0.35);">
+                  ⏰
+                </div>
+                <div style="min-width: 0;">
+                  <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                    <h4 style="margin: 0; font-size: 13.5px; font-weight: 800; color: #fbbf24; letter-spacing: 0.2px;">
+                      NHẮC NHỞ GIA HẠN GÓI BẢN QUYỀN
+                    </h4>
+                    <span id="expiryAlertBadge" style="background: #ef4444; color: #ffffff; font-size: 10px; font-weight: 900; padding: 2.5px 8px; border-radius: 999px; text-transform: uppercase; box-shadow: 0 2px 8px rgba(239, 68, 68, 0.4);">
+                      CÒN 3 NGÀY
+                    </span>
+                  </div>
+                  <p id="expiryAlertDesc" style="margin: 4px 0 0 0; font-size: 11.5px; color: #f1f5f9; line-height: 1.45;">
+                    Gói cước của máy tính này sắp hết hạn. Vui lòng đặt mua thêm gói bên dưới để được <strong>cộng dồn thời hạn sử dụng</strong>, tránh gián đoạn tiến trình đăng bài tự động!
+                  </p>
+                </div>
+              </div>
+              <button type="button" id="btnQuickRenewModal" class="btn" style="background: linear-gradient(135deg, #f59e0b, #ea580c); color: #020617; font-weight: 900; font-size: 12px; padding: 8px 16px; border-radius: 10px; border: none; box-shadow: 0 4px 14px rgba(245, 158, 11, 0.4); cursor: pointer; display: flex; align-items: center; gap: 6px; flex-shrink: 0; transition: all 0.2s ease;">
+                <span>⚡ Mua Gia Hạn Ngay</span>
+                <span style="font-size: 13px;">↓</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- LỊCH SỬ ĐƠN ĐẶT MUA & GÓI CƯỚC CỦA KHÁCH HÀNG (DUY NHẤT 1 BẢNG RÕ RÀNG) -->
+          <div style="background: #080d1a; border: 1px solid #1e293b; border-radius: 12px; padding: 14px 16px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; border-bottom: 1px solid #1e293b; padding-bottom: 8px;">
+              <div style="font-weight: 800; color: #f8fafc; font-size: 13px; display: flex; align-items: center; gap: 7px;">
                 <span>📜</span>
                 <span>Lịch Sử Đơn Đặt Mua &amp; Gói Cước Của Bạn</span>
               </div>
-              <button id="btnRefreshClientOrders" class="btn btn-sub" style="font-size: 11px; padding: 4px 10px; font-weight: 700; background: #0284c7; color: white;">🔄 Tải Lại &amp; Đồng Bộ Quản Trị</button>
+              <span style="display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: #34d399; font-weight: 700; background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); padding: 3px 9px; border-radius: 999px;">
+                <span style="width: 6px; height: 6px; border-radius: 50%; background: #10b981; box-shadow: 0 0 6px #10b981; display: inline-block;"></span>
+                <span>Đã đồng bộ quản trị</span>
+              </span>
             </div>
-            <div id="clientOrdersHistoryList" style="max-height: 220px; overflow-y: auto; font-size: 11px; color: #cbd5e1; display: flex; flex-direction: column; gap: 8px;">
-              <div style="color: #64748b; text-align: center; padding: 8px;">Đang tải danh sách đơn đặt mua...</div>
+            <div style="font-size: 11px; color: #94a3b8; margin-bottom: 8px;">
+              Danh sách các gói cước và yêu cầu mua bạn đã gửi từ thiết bị này lên hệ thống Quản Trị Viên:
+            </div>
+            <div id="clientOrdersHistoryList" style="max-height: 250px; overflow-y: auto; font-size: 11.5px; color: #cbd5e1; display: flex; flex-direction: column; gap: 8px;">
+              <div style="color: #64748b; text-align: center; padding: 14px; background: rgba(15,23,42,0.6); border-radius: 8px;">Chưa có đơn đặt mua nào. Chọn một trong các gói bên dưới để gửi yêu cầu duyệt tự động!</div>
             </div>
           </div>
 
@@ -1095,23 +1076,23 @@
         </div>
 
         <!-- CỘT PHẢI: MÃ QR THANH TOÁN (VIETQR) & NỘI DUNG CHUYỂN KHOẢN -->
-        <div id="modalPaidQrBox" style="background: #080d1a; border: 1.5px solid #1e3a5f; border-radius: 14px; padding: 14px; text-align: center; display: flex; flex-direction: column; gap: 8px; align-items: center; justify-content: space-between; box-sizing: border-box;">
-          <div style="font-size: 12.5px; font-weight: 800; color: #38bdf8;">
-            📲 Quét QR bằng app ngân hàng:
+        <div id="modalPaidQrBox" style="background: #080d1a; border: 1.5px solid #1e3a5f; border-radius: 14px; padding: 14px 18px; text-align: center; display: flex; flex-direction: column; gap: 8px; align-items: center; justify-content: space-between; box-sizing: border-box;">
+          <div style="font-size: 13px; font-weight: 800; color: #38bdf8;">
+            📲 Quét QR bằng app ngân hàng (VietQR):
           </div>
           
-          <div style="background: #ffffff; padding: 7px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); display: inline-block;">
-            <img id="modalQrCodeImg" src="https://img.vietqr.io/image/970422-0869029310-compact2.png?amount=1000000&addInfo=1TH%20AFB-PC&accountName=GIA%20LONG%20FB" alt="Mã QR Chuyển Khoản VietQR" style="width: 170px; height: 170px; display: block; object-fit: contain;" />
+          <div style="background: #ffffff; padding: 9px; border-radius: 14px; box-shadow: 0 6px 22px rgba(0,0,0,0.6); display: inline-block;">
+            <img id="modalQrCodeImg" src="https://img.vietqr.io/image/tpbank-10005959864-compact2.png?amount=1000000&addInfo=1TH%20AFB-PC&accountName=NGUYEN%20VAN%20HIEU" alt="Mã QR Chuyển Khoản VietQR" style="width: 220px; height: 220px; display: block; object-fit: contain;" />
           </div>
 
-          <div style="display: flex; flex-direction: column; gap: 3.5px; font-size: 11.5px; color: #cbd5e1; width: 100%;">
-            <div style="display: flex; justify-content: space-between; padding: 1px 4px;">
-              <span style="color: #94a3b8;">MBBank:</span>
-              <strong style="color: #38bdf8; font-family: monospace; font-size: 12.5px;">0869.029.310</strong>
+          <div style="display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #cbd5e1; width: 100%;">
+            <div style="display: flex; justify-content: space-between; padding: 2px 4px;">
+              <span style="color: #94a3b8;">TPBank:</span>
+              <strong style="color: #38bdf8; font-family: monospace; font-size: 13.5px; letter-spacing: 0.5px;">1000 5959 864</strong>
             </div>
-            <div style="display: flex; justify-content: space-between; padding: 1px 4px;">
+            <div style="display: flex; justify-content: space-between; padding: 2px 4px;">
               <span style="color: #94a3b8;">Chủ TK:</span>
-              <strong style="color: #ffffff; font-size: 12px;">GIA LONG - FB</strong>
+              <strong style="color: #ffffff; font-size: 13px; font-weight: 700;">Nguyễn Văn Hiệu</strong>
             </div>
             
             <!-- CẤU TRÚC THÔNG TIN: TÊN, SĐT, GÓI CƯỚC (1TH, 3TH, 6TH, 1N..), MÃ MÁY -->
@@ -1209,7 +1190,7 @@
         </div>
         
         <div style="background: rgba(15, 23, 42, 0.85); border: 1px dashed #0284c7; border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 5px; font-size: 12px;">
-          <div>• Ngân hàng: <strong style="color: #38bdf8;">MBBank</strong> (STK: <strong style="color: #ffffff; font-family: monospace;">0869.029.310</strong> - GIA LONG FB)</div>
+          <div>• Ngân hàng: <strong style="color: #38bdf8;">TPBank (Tiên Phong)</strong> (STK: <strong style="color: #ffffff; font-family: monospace;">1000 5959 864</strong> - Nguyễn Văn Hiệu)</div>
           <div>• Số tiền: <strong id="confirmCheckPrice" style="color: #10b981; font-size: 14.5px; font-weight: 900;">1.000.000đ</strong></div>
           <div>• Nội dung CK: <strong id="confirmCheckMemo" style="color: #34d399; font-family: monospace; font-size: 12.5px;">1TH AFB-PC</strong></div>
         </div>

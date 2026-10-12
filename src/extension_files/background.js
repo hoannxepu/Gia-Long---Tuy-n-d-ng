@@ -255,6 +255,23 @@ async function checkLicenseStatus(forceRemote = false) {
           const text = await resp.text();
           if (!text || (!text.trim().startsWith('{') && !text.trim().startsWith('['))) continue;
           const devResult = JSON.parse(text);
+
+          if (devResult.isRevoked || devResult.action === 'FORCE_REVOKE') {
+            await chrome.storage.local.set({
+              isRevoked: true,
+              revokeReason: devResult.message,
+            });
+            await chrome.storage.local.remove(['licenseKey', 'licenseData', 'isVip']);
+            chrome.alarms.clearAll(() => {});
+            return {
+              isValid: false,
+              isActivated: false,
+              isRevoked: true,
+              message: devResult.message || '🚨 Thiết bị đã bị Quản trị viên thu hồi bản quyền và ngắt máy!',
+              license: null,
+            };
+          }
+
           if (devResult.success && devResult.license && devResult.license.key) {
             const autoLic = {
               ...devResult.license,
@@ -264,6 +281,7 @@ async function checkLicenseStatus(forceRemote = false) {
               licenseKey: devResult.license.key,
               licenseData: autoLic,
               customApiServerUrl: baseUrl,
+              isRevoked: false,
             });
             return {
               isValid: true,
@@ -286,8 +304,8 @@ async function checkLicenseStatus(forceRemote = false) {
     const cached = data.licenseData;
     const now = Date.now();
 
-    // 1. Dùng Cache an toàn nếu mới kiểm tra gần đây (< 3 phút) và không bị khóa/thu hồi
-    if (!forceRemote && cached && cached.lastVerifiedAt && (now - cached.lastVerifiedAt < 3 * 60 * 1000)) {
+    // 1. Dùng Cache an toàn ngắn (10 giây) để đảm bảo đồng bộ tức thì khi Quản trị viên Duyệt hoặc Thu Hồi
+    if (!forceRemote && cached && cached.lastVerifiedAt && (now - cached.lastVerifiedAt < 10 * 1000)) {
       const expMs = new Date(cached.expiresAt).getTime();
       const isExpired = expMs < now;
       const daysLeft = Math.max(0, Math.ceil((expMs - now) / (24 * 60 * 60 * 1000)));

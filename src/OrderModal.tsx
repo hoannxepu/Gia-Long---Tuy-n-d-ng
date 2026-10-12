@@ -527,23 +527,43 @@ export function OrderModal({
                   submittedOrder.deviceId || deviceId
                 );
                 const rawPrice = parseInt((submittedOrder.price || '1.000.000đ').replace(/\D/g, ''), 10) || 1000000;
-                const qrUrl = `https://img.vietqr.io/image/970422-0869029310-compact2.png?amount=${rawPrice}&addInfo=${encodeURIComponent(memo)}&accountName=GIA%20LONG%20FB`;
+                const qrUrl = `https://img.vietqr.io/image/tpbank-10005959864-compact2.png?amount=${rawPrice}&addInfo=${encodeURIComponent(memo)}&accountName=NGUYEN%20VAN%20HIEU`;
 
                 return (
-                  <div className="bg-slate-950 p-3.5 rounded-xl border border-sky-500/30 text-left text-xs space-y-2.5 max-w-md mx-auto">
-                    <div className="flex flex-col sm:flex-row items-center gap-3">
-                      <div className="bg-white p-1 rounded-lg shrink-0 shadow-md">
+                  <div className="bg-slate-950 p-4 rounded-2xl border border-sky-500/40 text-left text-xs space-y-3 max-w-lg mx-auto shadow-2xl">
+                    <div className="flex flex-col sm:flex-row items-center gap-4">
+                      <div className="bg-white p-2 rounded-xl shrink-0 shadow-xl border border-slate-700">
                         <img
                           src={qrUrl}
-                          alt="VietQR MBBank"
-                          className="w-28 h-28 object-contain block"
+                          alt="VietQR TPBank"
+                          className="w-48 h-48 sm:w-52 sm:h-52 object-contain block"
                         />
                       </div>
-                      <div className="space-y-1 text-slate-300 flex-1">
-                        <div className="text-[11px] text-sky-400 font-bold">📲 Quét QR Thanh Toán (MBBank):</div>
-                        <div className="text-[11.5px]">• STK: <strong className="text-white font-mono font-bold">0869.029.310</strong></div>
-                        <div className="text-[11.5px]">• Chủ TK: <strong className="text-white">GIA LONG - FB</strong></div>
-                        <div className="text-[11.5px]">• Số tiền: <strong className="text-emerald-400 font-bold">{submittedOrder.price}</strong></div>
+                      <div className="space-y-2 text-slate-300 flex-1 w-full">
+                        <div className="text-xs text-sky-400 font-bold flex items-center gap-1.5">
+                          <span>📲 Quét QR Chuyển Khoản (TPBank):</span>
+                        </div>
+                        <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3 space-y-1.5">
+                          <div className="text-[12px] flex justify-between">
+                            <span className="text-slate-400">Ngân hàng:</span>
+                            <strong className="text-white font-bold">TPBank (Tiên Phong)</strong>
+                          </div>
+                          <div className="text-[12.5px] flex justify-between">
+                            <span className="text-slate-400">Số tài khoản:</span>
+                            <strong className="text-sky-300 font-mono font-bold tracking-wider text-sm select-all">1000 5959 864</strong>
+                          </div>
+                          <div className="text-[12px] flex justify-between">
+                            <span className="text-slate-400">Chủ tài khoản:</span>
+                            <strong className="text-white font-bold">Nguyễn Văn Hiệu</strong>
+                          </div>
+                          <div className="text-[12.5px] flex justify-between pt-1 border-t border-slate-800">
+                            <span className="text-slate-400">Số tiền:</span>
+                            <strong className="text-emerald-400 font-black text-sm">{submittedOrder.price}</strong>
+                          </div>
+                        </div>
+                        <p className="text-[10.5px] text-slate-400 italic">
+                          ✓ Quét mã QR tự động điền đúng Số tài khoản, Số tiền và Nội dung chuyển khoản
+                        </p>
                       </div>
                     </div>
 

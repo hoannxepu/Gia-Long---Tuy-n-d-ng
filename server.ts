@@ -56,6 +56,7 @@ export interface LicenseItem {
   revokeReason?: string;
   revokedAt?: string;
   notes?: string;
+  aliasKeys?: string[];
 }
 
 // Khởi tạo dữ liệu mẫu nếu chưa có file
@@ -300,22 +301,42 @@ app.post('/api/license/verify', (req: Request, res: Response) => {
   }
 
   const cleanKey = String(key).trim().toUpperCase();
+  const cleanDevId = deviceId ? String(deviceId).trim() : '';
 
-  // 1. Kiểm tra danh sách mã đã bị xóa / thu hồi vĩnh viễn
+  // 1. Kiểm tra danh sách mã & thiết bị đã bị xóa / thu hồi vĩnh viễn (Ngắt máy)
   const revokedList = loadRevokedKeys();
-  const revokedRecord = revokedList.find((r) => r.key === cleanKey);
+  const revokedRecord = revokedList.find((r) => {
+    const rk = r.key.trim().toUpperCase();
+    if (rk === cleanKey) return true;
+    if (cleanDevId && (rk === cleanDevId.toUpperCase() || rk === `DEV:${cleanDevId.toUpperCase()}`)) return true;
+    return false;
+  });
+
   if (revokedRecord) {
     return res.json({
       valid: false,
       isRevoked: true,
       isDeleted: true,
       action: 'FORCE_REVOKE',
-      message: `🚨 BẢN QUYỀN ĐÃ BỊ XÓA / THU HỒI: ${revokedRecord.reason || 'Vi phạm điều khoản hoặc bị Quản trị viên xóa'}. Mọi tính năng và tiến trình đã bị chấm dứt ngay lập tức!`,
+      message: `🚨 BẢN QUYỀN ĐÃ BỊ THU HỒI / NGẮT MÁY: ${revokedRecord.reason || 'Vi phạm điều khoản hoặc bị Quản trị viên ngắt kết nối'}. Mọi tính năng và tiến trình đã bị chấm dứt ngay lập tức!`,
     });
   }
 
-  const licenses = loadLicenses();
-  const found = licenses.find((l) => l.key.trim().toUpperCase() === cleanKey);
+  // Tự động kiểm tra và cộng dồn các gói mua cho máy khách
+  const { licenses } = autoConsolidateLicensesAndOrders();
+
+  let found = licenses.find((l) => {
+    if (l.key.trim().toUpperCase() === cleanKey) return true;
+    if (l.aliasKeys && l.aliasKeys.some((ak) => ak.trim().toUpperCase() === cleanKey)) return true;
+    return false;
+  });
+
+  // Nếu không khớp mã nhưng có thiết bị gắn với bản quyền hợp lệ -> Tự động ánh xạ về bản quyền cộng dồn của máy
+  if (!found && cleanDevId && cleanDevId !== 'chưa gắn' && cleanDevId !== 'chuagan') {
+    found = licenses.find(
+      (l) => !l.isRevoked && l.devices?.some((d) => d.deviceId.toLowerCase() === cleanDevId.toLowerCase())
+    );
+  }
 
   if (!found) {
     return res.json({
@@ -412,14 +433,44 @@ app.get('/api/license/check-by-device', (req: Request, res: Response) => {
     return res.status(400).json({ success: false, message: 'Thiếu mã thiết bị!' });
   }
 
-  const licenses = loadLicenses();
+  // 1. Kiểm tra nếu thiết bị này đã bị Quản trị viên Thu Hồi (Ngắt Máy)
+  const revokedList = loadRevokedKeys();
+  const cleanDevUpper = deviceId.toUpperCase();
+  const isRevokedDev = revokedList.find((r) => {
+    const k = r.key.trim().toUpperCase();
+    return k === cleanDevUpper || k === `DEV:${cleanDevUpper}`;
+  });
+  if (isRevokedDev) {
+    return res.json({
+      success: false,
+      isRevoked: true,
+      action: 'FORCE_REVOKE',
+      message: `🚨 THIẾT BỊ ĐÃ BỊ THU HỒI / NGẮT MÁY: ${isRevokedDev.reason || 'Quản trị viên đã ngắt kết nối thiết bị này'}!`,
+    });
+  }
+
+  const { licenses } = autoConsolidateLicensesAndOrders();
   const now = Date.now();
+
+  // Kiểm tra nếu có mã bản quyền gắn với thiết bị này mà đang bị thu hồi
+  const foundRevokedLic = licenses.find((l) => {
+    return l.isRevoked && l.devices && l.devices.some((d) => d.deviceId.toLowerCase() === deviceId.toLowerCase());
+  });
+  if (foundRevokedLic) {
+    return res.json({
+      success: false,
+      isRevoked: true,
+      action: 'FORCE_REVOKE',
+      message: `🚨 BẢN QUYỀN ĐÃ BỊ THU HỒI (NGẮT MÁY): ${foundRevokedLic.revokeReason || 'Vi phạm điều khoản hoặc bị Quản trị viên ngắt'}!`,
+    });
+  }
+
   // Tìm mã bản quyền còn hạn, không bị khóa, gắn với deviceId này
   const found = licenses.find((l) => {
     if (l.isRevoked || l.isSuspended) return false;
     const expMs = new Date(l.expiresAt).getTime();
     if (expMs < now) return false;
-    return l.devices && l.devices.some((d) => d.deviceId === deviceId);
+    return l.devices && l.devices.some((d) => d.deviceId.toLowerCase() === deviceId.toLowerCase());
   });
 
   if (found) {
@@ -452,8 +503,13 @@ app.post('/api/license/activate', (req: Request, res: Response) => {
     return res.status(400).json({ success: false, message: 'Thiếu mã bản quyền hoặc mã định danh thiết bị!' });
   }
 
-  const licenses = loadLicenses();
-  const found = licenses.find((l) => l.key.trim().toUpperCase() === String(key).trim().toUpperCase());
+  const { licenses } = autoConsolidateLicensesAndOrders();
+  const cleanKey = String(key).trim().toUpperCase();
+  let found = licenses.find((l) => l.key.trim().toUpperCase() === cleanKey || l.aliasKeys?.some((ak) => ak.trim().toUpperCase() === cleanKey));
+
+  if (!found && deviceId) {
+    found = licenses.find((l) => !l.isRevoked && l.devices?.some((d) => d.deviceId.toLowerCase() === String(deviceId).toLowerCase()));
+  }
 
   if (!found) {
     return res.status(404).json({ success: false, message: 'Mã bản quyền không tồn tại!' });
@@ -575,7 +631,7 @@ app.post('/api/admin/change-pin', requireAdmin, (req: Request, res: Response) =>
 
 // Lấy danh sách tất cả các License
 app.get('/api/admin/licenses', requireAdmin, (_req: Request, res: Response) => {
-  const licenses = loadLicenses();
+  const { licenses } = autoConsolidateLicensesAndOrders();
   const now = Date.now();
 
   const formatted = licenses.map((l) => {
@@ -777,17 +833,26 @@ app.post('/api/admin/licenses/revoke', requireAdmin, (req: Request, res: Respons
   found.isRevoked = true;
   found.isSuspended = true;
   found.revokedAt = new Date().toISOString();
-  found.revokeReason = reason || 'Vi phạm điều khoản sử dụng hoặc phát hiện hành vi gian lận';
+  found.revokeReason = reason || 'Vi phạm điều khoản sử dụng hoặc Quản trị viên ngắt máy';
+  const disconnectedDevices = (found.devices || []).map((d) => d.deviceId);
   found.devices = []; // Ngắt ngay toàn bộ thiết bị đang kết nối
   saveLicenses(licenses);
+
+  // Ghi nhận key và toàn bộ deviceId bị thu hồi để ngắt kết nối lập tức
   addRevokedKey(found.key, found.revokeReason);
+  for (const dId of disconnectedDevices) {
+    if (dId) {
+      addRevokedKey(dId, found.revokeReason);
+      addRevokedKey(`DEV:${dId}`, found.revokeReason);
+    }
+  }
 
   addHistoryEntry({
     action: 'revoke',
     actionName: 'Thu hồi quyền',
     clientName: found.clientName,
     phone: found.phone || '',
-    deviceId: '',
+    deviceId: disconnectedDevices.join(', '),
     key: found.key,
     planType: found.planType,
     notes: reason || 'Thu hồi giấy phép & ngắt thiết bị',
@@ -795,8 +860,10 @@ app.post('/api/admin/licenses/revoke', requireAdmin, (req: Request, res: Respons
 
   res.json({
     success: true,
-    message: `🚫 Đã thu hồi bản quyền của "${found.clientName}" và ngắt kết nối toàn bộ máy tính!`,
+    message: `🚫 Đã thu hồi bản quyền của "${found.clientName}" và ngắt kết nối toàn bộ máy tính (${disconnectedDevices.length} máy)!`,
     license: found,
+    licenses: loadLicenses(),
+    history: loadHistory(),
   });
 });
 
@@ -832,6 +899,8 @@ app.post('/api/admin/licenses/unrevoke', requireAdmin, (req: Request, res: Respo
     success: true,
     message: `✓ Đã khôi phục trạng thái hoạt động bình thường cho khách "${found.clientName}"!`,
     license: found,
+    licenses: loadLicenses(),
+    history: loadHistory(),
   });
 });
 
@@ -966,6 +1035,179 @@ function saveOrders(items: OrderItem[]) {
   }
 }
 
+// Xác định số ngày thời hạn theo tên gói & mức giá (kèm ngày tặng theo chính sách mới)
+export function getOrderDurationDays(pkgName?: string, price?: string): number {
+  const p = (pkgName || '').toLowerCase();
+  const pr = (price || '').toLowerCase();
+  if (p.includes('dùng thử') || p.includes('trial') || pr === '0đ' || p.includes('1 ngày')) return 1;
+  if (p.includes('3 tháng') || p.includes('90 ngày') || p.includes('100 ngày') || p.includes('105 ngày')) return 100;
+  if (p.includes('6 tháng') || p.includes('180 ngày') || p.includes('195 ngày') || p.includes('210 ngày')) return 195;
+  if (p.includes('1 năm') || p.includes('12 tháng') || p.includes('360 ngày') || p.includes('365 ngày') || p.includes('390 ngày') || p.includes('420 ngày')) return 390;
+  if (p.includes('1 tháng') || p.includes('30 ngày')) return 30;
+  return 30;
+}
+
+// TỰ ĐỘNG CỘNG DỒN VÀ HỢP NHẤT TOÀN BỘ CÁC GÓI ĐÃ MUA CHO CÙNG 1 MÁY / KHÁCH HÀNG
+export function autoConsolidateLicensesAndOrders(): { licenses: LicenseItem[]; orders: OrderItem[] } {
+  let orders = loadOrders();
+  let licenses = loadLicenses();
+  let licensesModified = false;
+  let ordersModified = false;
+
+  const approvedOrders = orders.filter((o) => o.status === 'approved');
+
+  // Nhóm theo deviceId hoặc theo phone
+  const grouped = new Map<string, OrderItem[]>();
+  for (const ord of approvedOrders) {
+    const devId = (ord.deviceId || '').trim().toLowerCase();
+    const phone = (ord.phone || '').trim().replace(/\D/g, '');
+    let groupKey = '';
+    if (devId && devId !== 'chưa gắn' && devId !== 'chuagan') {
+      groupKey = `dev:${devId}`;
+    } else if (phone && phone.length >= 8) {
+      groupKey = `phone:${phone}`;
+    }
+    if (groupKey) {
+      if (!grouped.has(groupKey)) grouped.set(groupKey, []);
+      grouped.get(groupKey)!.push(ord);
+    }
+  }
+
+  for (const [groupKey, ords] of grouped.entries()) {
+    if (ords.length === 0) continue;
+
+    const devId = groupKey.startsWith('dev:') ? groupKey.replace('dev:', '') : '';
+    const phone = groupKey.startsWith('phone:') ? groupKey.replace('phone:', '') : '';
+
+    // Tính tổng số ngày được hưởng từ tất cả các gói đã mua
+    let totalDays = 0;
+    let earliestOrderMs = Date.now();
+    for (const o of ords) {
+      const d = getOrderDurationDays(o.pkgName, o.price);
+      totalDays += d;
+      const t = new Date(o.createdAt).getTime();
+      if (!isNaN(t) && t < earliestOrderMs) {
+        earliestOrderMs = t;
+      }
+    }
+
+    // Tìm tất cả các license liên quan
+    const matchedLics = licenses.filter((l) => {
+      if (l.isRevoked) return false;
+      if (devId && l.devices?.some((d) => d.deviceId.toLowerCase() === devId)) return true;
+      if (phone && l.phone && l.phone.replace(/\D/g, '') === phone) return true;
+      if (ords.some((o) => o.generatedKey && l.key.toUpperCase() === o.generatedKey.toUpperCase())) return true;
+      return false;
+    });
+
+    let primaryLic: LicenseItem;
+    if (matchedLics.length > 0) {
+      primaryLic = matchedLics[0];
+    } else {
+      const randomCode = Math.random().toString(36).substring(2, 7).toUpperCase();
+      const newKey = `GLFB-VIP-${randomCode}`;
+      primaryLic = {
+        id: `lic_${Date.now()}_${randomCode}`,
+        key: newKey,
+        clientName: ords[0].clientName || 'Khách Đặt Mua Gói',
+        phone: ords[0].phone || '',
+        planType: 'individual',
+        maxDevices: 1,
+        devices: devId && devId !== 'chưa gắn' && devId !== 'chuagan' ? [{
+          deviceId: ords[0].deviceId || devId,
+          deviceName: ords[0].clientName || 'Thiết bị đặt mua',
+          activatedAt: new Date().toISOString(),
+          lastSeenAt: new Date().toISOString(),
+        }] : [],
+        createdAt: new Date(earliestOrderMs).toISOString(),
+        expiresAt: new Date().toISOString(),
+        isSuspended: false,
+        aliasKeys: [],
+      };
+      licenses.unshift(primaryLic);
+      licensesModified = true;
+    }
+
+    const aliasSet = new Set<string>(primaryLic.aliasKeys || []);
+
+    // Gom các license phụ vào primaryLic và xóa license trùng lặp
+    if (matchedLics.length > 1) {
+      for (const lic of matchedLics) {
+        if (lic.id !== primaryLic.id) {
+          aliasSet.add(lic.key);
+          if (lic.aliasKeys) lic.aliasKeys.forEach((k) => aliasSet.add(k));
+          if (lic.devices) {
+            for (const d of lic.devices) {
+              if (!primaryLic.devices.some((pd) => pd.deviceId.toLowerCase() === d.deviceId.toLowerCase())) {
+                primaryLic.devices.push(d);
+              }
+            }
+          }
+        }
+      }
+      licenses = licenses.filter((l) => !matchedLics.some((ml) => ml.id === l.id && l.id !== primaryLic.id));
+      licensesModified = true;
+    }
+
+    for (const o of ords) {
+      if (o.generatedKey && o.generatedKey !== primaryLic.key) {
+        aliasSet.add(o.generatedKey);
+      }
+    }
+
+    // Đảm bảo thiết bị đã được gắn vào primaryLic
+    if (devId && devId !== 'chưa gắn' && devId !== 'chuagan') {
+      const hasDev = primaryLic.devices.some((d) => d.deviceId.toLowerCase() === devId);
+      if (!hasDev) {
+        primaryLic.devices.push({
+          deviceId: ords[0].deviceId || devId,
+          deviceName: ords[0].clientName || primaryLic.clientName || 'Thiết bị đặt mua',
+          activatedAt: new Date().toISOString(),
+          lastSeenAt: new Date().toISOString(),
+        });
+        licensesModified = true;
+      }
+    }
+
+    // Tính ngày hết hạn chuẩn xác cộng dồn từ ngày đặt đơn đầu tiên
+    const licCreatedMs = new Date(primaryLic.createdAt).getTime();
+    const baseMs = !isNaN(licCreatedMs) && licCreatedMs < earliestOrderMs ? licCreatedMs : earliestOrderMs;
+    const finalExpMs = baseMs + totalDays * 24 * 60 * 60 * 1000;
+    const finalExpIso = new Date(finalExpMs).toISOString();
+
+    const pkgListStr = ords.map((o) => `${o.pkgName} (+${getOrderDurationDays(o.pkgName, o.price)}n)`).join(' + ');
+    const newNotes = `Bản quyền VIP cộng dồn ${ords.length} gói: ${pkgListStr} = Tổng ${totalDays} ngày (Hạn dùng đến ${new Date(finalExpIso).toLocaleDateString('vi-VN')})`;
+
+    if (primaryLic.expiresAt !== finalExpIso || primaryLic.notes !== newNotes) {
+      primaryLic.expiresAt = finalExpIso;
+      primaryLic.isSuspended = false;
+      primaryLic.aliasKeys = Array.from(aliasSet);
+      if (primaryLic.planType === 'trial' && ords.some((o) => getOrderDurationDays(o.pkgName, o.price) > 1)) {
+        primaryLic.planType = 'individual';
+      }
+      primaryLic.notes = newNotes;
+      licensesModified = true;
+    }
+
+    // Đồng bộ toàn bộ các đơn hàng đã duyệt dùng chung primaryLic.key
+    for (const o of ords) {
+      if (o.generatedKey !== primaryLic.key) {
+        o.generatedKey = primaryLic.key;
+        ordersModified = true;
+      }
+    }
+  }
+
+  if (licensesModified) {
+    saveLicenses(licenses);
+  }
+  if (ordersModified) {
+    saveOrders(orders);
+  }
+
+  return { licenses, orders };
+}
+
 // Khách hàng bấm gửi đơn mua (Tự động ghi nhận lên server)
 app.post('/api/orders/create', (req: Request, res: Response) => {
   try {
@@ -1086,8 +1328,8 @@ app.get('/api/orders/my-orders', (req: Request, res: Response) => {
     const phone = String(req.query.phone || '').trim().replace(/\D/g, '');
     const orderIds = String(req.query.orderIds || '').split(',').map((s) => s.trim()).filter(Boolean);
 
-    const orders = loadOrders();
-    const licenses = loadLicenses();
+    // Tự động cộng dồn và hợp nhất toàn bộ dữ liệu trước khi trả về
+    const { licenses, orders } = autoConsolidateLicensesAndOrders();
 
     let matched = orders.filter((o) => {
       if (deviceId && o.deviceId && o.deviceId.toLowerCase() === deviceId.toLowerCase()) return true;
@@ -1101,21 +1343,25 @@ app.get('/api/orders/my-orders', (req: Request, res: Response) => {
       matched = orders.slice(0, 5);
     }
 
-    // Tự động kiểm tra và gắn key nếu đơn đã được Admin phê duyệt hoặc có key gắn với deviceId
-    matched = matched.map((o) => {
-      let key = o.generatedKey;
-      if (!key && deviceId) {
-        const foundLic = licenses.find(
-          (l) => !l.isRevoked && !l.isSuspended && l.devices?.some((d) => d.deviceId.toLowerCase() === deviceId.toLowerCase())
-        );
-        if (foundLic) {
-          key = foundLic.key;
-        }
-      }
-      return {
+    // Tìm license đại diện gắn với deviceId hoặc phone
+    let activeLic = licenses.find(
+      (l) => !l.isRevoked && !l.isSuspended && (
+        (deviceId && l.devices?.some((d) => d.deviceId.toLowerCase() === deviceId.toLowerCase())) ||
+        (phone && l.phone && l.phone.replace(/\D/g, '') === phone)
+      )
+    );
+
+    if (activeLic) {
+      matched = matched.map((o) => ({
         ...o,
-        generatedKey: key,
-      };
+        generatedKey: activeLic!.key,
+      }));
+    }
+
+    const approvedCount = matched.filter((o) => o.status === 'approved').length;
+    let totalPurchasedDays = 0;
+    matched.filter((o) => o.status === 'approved').forEach((o) => {
+      totalPurchasedDays += getOrderDurationDays(o.pkgName, o.price);
     });
 
     const pendingCount = orders.filter((o) => o.status === 'pending').length;
@@ -1124,6 +1370,10 @@ app.get('/api/orders/my-orders', (req: Request, res: Response) => {
       success: true,
       orders: matched,
       totalPending: pendingCount,
+      activeLicense: activeLic || null,
+      isCumulative: approvedCount > 1,
+      totalApprovedCount: approvedCount,
+      totalPurchasedDays,
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message || 'Lỗi tra cứu đơn hàng' });
@@ -1132,7 +1382,7 @@ app.get('/api/orders/my-orders', (req: Request, res: Response) => {
 
 // Admin xem danh sách đơn hàng
 app.get('/api/admin/orders', requireAdmin, (_req: Request, res: Response) => {
-  const orders = loadOrders();
+  const { orders } = autoConsolidateLicensesAndOrders();
   res.json({ success: true, orders });
 });
 
@@ -1211,79 +1461,54 @@ app.post('/api/admin/orders/approve', requireAdmin, (req: Request, res: Response
     return res.status(404).json({ success: false, error: 'Không tìm thấy đơn hàng!' });
   }
 
-  // Xác định số ngày tương ứng với gói (kèm ngày tặng theo chính sách mới: 3T +10n = 100n, 6T +15n = 195n, 12T +30n = 390n, Dùng thử = 1n)
-  let days = 30;
-  const isTrial = order.pkgName.includes('Dùng Thử') || order.pkgName.includes('Trial') || order.price === '0đ' || order.pkgName.includes('1 ngày');
-  if (isTrial) days = 1;
-  else if (order.pkgName.includes('3 Tháng') || order.pkgName.includes('90 ngày') || order.pkgName.includes('100 ngày') || order.pkgName.includes('105 ngày')) days = 100;
-  else if (order.pkgName.includes('6 Tháng') || order.pkgName.includes('180 ngày') || order.pkgName.includes('195 ngày') || order.pkgName.includes('210 ngày')) days = 195;
-  else if (order.pkgName.includes('1 Năm') || order.pkgName.includes('12 Tháng') || order.pkgName.includes('360 ngày') || order.pkgName.includes('365 ngày') || order.pkgName.includes('390 ngày') || order.pkgName.includes('420 ngày')) days = 390;
+  const days = getOrderDurationDays(order.pkgName, order.price);
+  const isTrial = days === 1;
 
-  // Tự động sinh mã Key mới
-  const licenses = loadLicenses();
-  const randomCode = Math.random().toString(36).substring(2, 7).toUpperCase();
-  const prefix = isTrial ? 'GLFB-TRIAL' : 'GLFB-VIP';
-  const newKey = `${prefix}-${randomCode}`;
-  const now = Date.now();
-  const expiresAt = new Date(now + days * 24 * 60 * 60 * 1000).toISOString();
-
-  const newLicense: LicenseItem = {
-    id: `lic_${Date.now()}_${randomCode}`,
-    key: newKey,
-    clientName: order.clientName || (isTrial ? 'Khách Dùng Thử 1 Ngày' : 'Khách Đặt Mua Gói'),
-    phone: order.phone || '',
-    planType: isTrial ? 'trial' : 'individual',
-    maxDevices: 1,
-    devices: order.deviceId
-      ? [
-          {
-            deviceId: order.deviceId,
-            deviceName: order.clientName || (isTrial ? 'Thiết bị dùng thử' : 'Thiết bị đặt mua tự động'),
-            activatedAt: new Date().toISOString(),
-            lastSeenAt: new Date().toISOString(),
-          },
-        ]
-      : [],
-    createdAt: new Date().toISOString(),
-    expiresAt,
-    isSuspended: false,
-    notes: isTrial
-      ? `Cấp tự động Gói Dùng Thử 1 Ngày (20 bài đăng, 0đ)${order.deviceId ? ` - Máy: ${order.deviceId}` : ''}`
-      : `Cấp tự động từ đơn đặt mua: ${order.pkgName} (${order.price})${order.deviceId ? ` - Máy: ${order.deviceId}` : ''}`,
-  };
-
-  licenses.unshift(newLicense);
-  saveLicenses(licenses);
-
-  // Cập nhật trạng thái đơn hàng
+  // 1. Đánh dấu đơn là đã phê duyệt
   order.status = 'approved';
-  order.generatedKey = newKey;
   saveOrders(orders);
+
+  // 2. Tự động hợp nhất và cộng dồn tất cả các gói cho máy này
+  const { licenses: updatedLicenses, orders: updatedOrders } = autoConsolidateLicensesAndOrders();
+
+  const cleanDeviceId = (order.deviceId || '').trim().toLowerCase();
+  const cleanPhone = (order.phone || '').trim().replace(/\D/g, '');
+
+  let returnedLicense = updatedLicenses.find((l) => {
+    if (l.isRevoked) return false;
+    if (cleanDeviceId && cleanDeviceId !== 'chưa gắn' && cleanDeviceId !== 'chuagan' && l.devices?.some((d) => d.deviceId.toLowerCase() === cleanDeviceId)) return true;
+    if (cleanPhone && l.phone && l.phone.replace(/\D/g, '') === cleanPhone) return true;
+    if (order.generatedKey && (l.key.toUpperCase() === order.generatedKey.toUpperCase() || l.aliasKeys?.includes(order.generatedKey.toUpperCase()))) return true;
+    return false;
+  }) || updatedLicenses[0];
+
+  const assignedKey = returnedLicense.key;
+  order.generatedKey = assignedKey;
+  saveOrders(updatedOrders);
+
+  const finalExpiresAt = returnedLicense.expiresAt;
+  const expFormatted = new Date(finalExpiresAt).toLocaleDateString('vi-VN');
 
   addHistoryEntry({
     action: 'approve',
-    actionName: isTrial ? 'Duyệt cấp dùng thử 1N' : 'Duyệt đơn 1-Click',
+    actionName: isTrial ? 'Duyệt cấp dùng thử 1N' : `Duyệt cộng dồn (+${days}N)`,
     clientName: order.clientName || 'Khách đặt mua',
     phone: order.phone || '',
     deviceId: order.deviceId || '',
-    key: newKey,
-    planType: isTrial ? 'trial' : 'individual',
+    key: assignedKey,
+    planType: returnedLicense.planType,
     pkgName: isTrial ? 'TRIAL' : normalizePkgSymbol(order.pkgName || days),
     daysAdded: days,
-    newExpiresAt: expiresAt,
+    newExpiresAt: finalExpiresAt,
     amount: order.price,
-    notes: isTrial
-      ? `Duyệt cấp dùng thử 1 ngày (20 bài đăng) cho đơn ${order.id.slice(-6).toUpperCase()}`
-      : `Duyệt đơn ${order.id.slice(-6).toUpperCase()} (${order.pkgName})`,
+    notes: `Duyệt đơn ${order.pkgName} (+${days} ngày). Hạn mới: ${expFormatted} (Mã: ${assignedKey})`,
   });
 
   res.json({
     success: true,
-    message: isTrial
-      ? `✓ Đã phê duyệt và cấp mã dùng thử: ${newKey} (1 ngày, 20 bài đăng)!`
-      : `✓ Đã phê duyệt đơn và cấp mã mới: ${newKey} (Thời hạn ${days} ngày)!`,
+    message: `✓ Đã phê duyệt và CỘNG DỒN THÀNH CÔNG ${days} ngày cho máy! Hạn mới: ${expFormatted} (Mã: ${assignedKey})`,
     order,
-    license: newLicense,
+    license: returnedLicense,
     orders: loadOrders(),
     licenses: loadLicenses(),
     history: loadHistory(),
@@ -1632,6 +1857,13 @@ app.post('/api/admin/package/rebuild', requireAdmin, async (req: Request, res: R
 // 3. TÍCH HỢP VITE DEV SERVER & STATIC PROD
 // ============================================================================
 async function startServer() {
+  try {
+    autoConsolidateLicensesAndOrders();
+    console.log('[AutoRecruit Server] ✓ Đã tự động kiểm tra và hợp nhất cộng dồn toàn bộ gói mua cho máy khách!');
+  } catch (e) {
+    console.error('[AutoRecruit Server] Lỗi khởi tạo hợp nhất cộng dồn:', e);
+  }
+
   const isProd = process.env.NODE_ENV === 'production';
   const distPath = path.join(__dirname, 'dist');
   const indexHtml = path.join(distPath, 'index.html');

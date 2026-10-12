@@ -289,12 +289,6 @@ export default function App() {
   const [autoActivateLic, setAutoActivateLic] = useState<any>(null);
   const [extensionDetected, setExtensionDetected] = useState<boolean>(false);
   const [pendingOrderCount, setPendingOrderCount] = useState<number>(0);
-  const [orderModalPkg, setOrderModalPkg] = useState<{ name: string; price: string } | null>(null);
-  const [orderCustomerName, setOrderCustomerName] = useState<string>('');
-  const [orderCustomerPhone, setOrderCustomerPhone] = useState<string>('');
-  const [orderSuccessData, setOrderSuccessData] = useState<{ order: any; messageText: string } | null>(null);
-  const [isSubmittingOrder, setIsSubmittingOrder] = useState<boolean>(false);
-  const [copiedOrderMsg, setCopiedOrderMsg] = useState<boolean>(false);
   const [adminOrders, setAdminOrders] = useState<any[]>(() => {
     try {
       const cached = localStorage.getItem('glfb_admin_orders');
@@ -352,6 +346,16 @@ export default function App() {
   } | null>(null);
   const [isUpdatingOrder, setIsUpdatingOrder] = useState<boolean>(false);
   const [actionToast, setActionToast] = useState<string | null>(null);
+  const [revokeConfirmItem, setRevokeConfirmItem] = useState<{
+    id: string;
+    clientName: string;
+    key: string;
+    devicesCount: number;
+  } | null>(null);
+  const [revokeReasonInput, setRevokeReasonInput] = useState<string>(
+    'Khách hàng vi phạm điều khoản / Quản trị viên ngắt kết nối'
+  );
+  const [isRevoking, setIsRevoking] = useState<boolean>(false);
 
   const triggerToast = (msg: string) => {
     setActionToast(msg);
@@ -659,8 +663,12 @@ export default function App() {
     }
   };
 
-  // Tra cứu số lượng đơn chờ duyệt cho Quả Chuông thông báo (Hoạt động ngay từ khi tải trang, kể cả khi chưa đăng nhập PIN)
+  // Tra cứu số lượng đơn chờ duyệt (Chỉ kích hoạt khi Quản trị viên đã đăng nhập PIN)
   const fetchPendingCount = async () => {
+    if (!isAdminUnlocked) {
+      setPendingOrderCount(0);
+      return;
+    }
     try {
       const res = await fetch('/api/orders/pending-count');
       const data = await res.json();
@@ -671,8 +679,16 @@ export default function App() {
   };
 
   useEffect(() => {
-    fetchPendingCount();
-    const timer = setInterval(fetchPendingCount, 5000);
+    if (isAdminUnlocked) {
+      fetchPendingCount();
+    } else {
+      setPendingOrderCount(0);
+    }
+    const timer = setInterval(() => {
+      if (isAdminUnlocked) {
+        fetchPendingCount();
+      }
+    }, 5000);
 
     const onOrderFromExtension = (e: any) => {
       const order = e.detail || e.data?.order;
@@ -690,12 +706,12 @@ export default function App() {
           return merged;
         });
       }
-      fetchPendingCount();
       if (isAdminUnlocked) {
+        fetchPendingCount();
         fetchOrders(adminPin, true);
-      }
-      if (order) {
-        triggerToast(`🔔 Có đơn đặt mua mới từ Extension: ${order.pkgName || 'Gói Bản Quyền'} (${order.clientName || 'Khách'})!`);
+        if (order) {
+          triggerToast(`🔔 Có đơn đặt mua mới từ Extension: ${order.pkgName || 'Gói Bản Quyền'} (${order.clientName || 'Khách'})!`);
+        }
       }
     };
 
@@ -714,10 +730,8 @@ export default function App() {
     };
   }, [adminPin, isAdminUnlocked]);
 
-  // Chuyển tab an toàn: Tự động đóng mọi modal mua hàng để tách biệt hoàn toàn trạng thái
+  // Chuyển tab an toàn: Tách biệt hoàn toàn trạng thái giữa các tab
   const handleTabChange = (newTab: 'client-portal' | 'workspace' | 'quickstart' | 'files' | 'devtools' | 'license-admin' | 'privacy') => {
-    setOrderModalPkg(null);
-    setOrderSuccessData(null);
     setActiveTab(newTab);
     if (newTab === 'license-admin' && isAdminUnlocked) {
       fetchLicenses();
@@ -892,53 +906,6 @@ export default function App() {
 
   const handleDeleteOrder = (orderId: string, clientName = 'Khách đặt mua') => {
     handleOpenDeleteModal({ id: orderId, type: 'order', name: clientName, keyOrCode: 'Đơn đặt mua' });
-  };
-
-  const handleSubmitCustomerOrder = async () => {
-    if (!orderModalPkg) return;
-    setIsSubmittingOrder(true);
-    const isTrial = orderModalPkg.price === '0đ' || orderModalPkg.name.includes('Dùng Thử');
-    const msg = isTrial
-      ? `Tôi muốn đăng ký Gói Dùng Thử 1 Ngày (20 bài đăng, 0đ) (Khách: ${orderCustomerName || 'Khách Web'}, SĐT: ${orderCustomerPhone || 'Chưa cung cấp'})`
-      : `Tôi muốn mua ${orderModalPkg.name} - Giá ${orderModalPkg.price} (Khách: ${orderCustomerName || 'Khách Web'}, SĐT: ${orderCustomerPhone || 'Chưa cung cấp'})`;
-
-    // 1. Sao chép vào clipboard an toàn
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(msg);
-      }
-    } catch (e) {}
-
-    // 2. Gửi API lên Server tự động
-    try {
-      const res = await fetch('/api/orders/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          pkgName: orderModalPkg.name,
-          price: orderModalPkg.price,
-          clientName: orderCustomerName || 'Khách Web',
-          phone: orderCustomerPhone || '',
-          note: msg,
-        }),
-      });
-      const data = await res.json();
-      setOrderSuccessData({
-        order: data.order || { id: `ord_${Date.now()}` },
-        messageText: msg,
-      });
-      if (isAdminUnlocked) {
-        fetchOrders(adminPin, true);
-        fetchHistory(adminPin, true);
-      }
-    } catch (err) {
-      setOrderSuccessData({
-        order: { id: `ord_${Date.now()}` },
-        messageText: msg,
-      });
-    } finally {
-      setIsSubmittingOrder(false);
-    }
   };
 
   const fetchLicenses = async (pin = adminPin, isSilent = false) => {
@@ -1154,13 +1121,19 @@ export default function App() {
     }
   };
 
-  const handleRevokeLicense = async (id: string, clientName: string) => {
-    const reason = prompt(
-      `🚫 XÁC NHẬN THU HỒI BẢN QUYỀN KHẨN CẤP\n\nBạn muốn thu hồi mã của khách: "${clientName}"?\nSau khi thu hồi, toàn bộ máy tính của khách này sẽ bị ngắt kết nối ngay lập tức!\n\nNhập lý do thu hồi:`,
-      'Khách hàng vi phạm điều khoản / Có hành vi gian lận'
-    );
-    if (reason === null) return;
+  const handleOpenRevokeModal = (lic: AdminLicenseItem) => {
+    setRevokeConfirmItem({
+      id: lic.id,
+      clientName: lic.clientName,
+      key: lic.key,
+      devicesCount: lic.devices?.length || 0,
+    });
+    setRevokeReasonInput('Khách hàng vi phạm điều khoản / Quản trị viên ngắt kết nối');
+  };
 
+  const handleExecuteRevoke = async () => {
+    if (!revokeConfirmItem) return;
+    setIsRevoking(true);
     try {
       const res = await fetch('/api/admin/licenses/revoke', {
         method: 'POST',
@@ -1168,25 +1141,30 @@ export default function App() {
           'Content-Type': 'application/json',
           'x-admin-pin': adminPin,
         },
-        body: JSON.stringify({ id, reason }),
+        body: JSON.stringify({ id: revokeConfirmItem.id, reason: revokeReasonInput }),
       });
       const data = await res.json();
       if (data.success) {
-        fetchLicenses();
-        if (actionModalLicense && actionModalLicense.id === id && data.license) {
-          setActionModalLicense((prev) => (prev ? { ...prev, ...data.license } : null));
+        if (data.licenses) setLicenses(data.licenses);
+        if (data.history) setHistoryList(data.history);
+        fetchLicenses(adminPin, true);
+        fetchHistory(adminPin, true);
+        if (actionModalLicense && actionModalLicense.id === revokeConfirmItem.id) {
+          setActionModalLicense((prev) => (prev ? { ...prev, isRevoked: true, isSuspended: true, devices: [] } : null));
         }
-        alert(`🚫 ĐÃ THU HỒI THÀNH CÔNG!\n\n${data.message}`);
+        triggerToast(`🚫 ĐÃ THU HỒI & NGẮT KẾT NỐI TOÀN BỘ MÁY TÍNH CỦA KHÁCH THÀNH CÔNG!`);
+        setRevokeConfirmItem(null);
       } else {
-        alert('Lỗi: ' + data.error);
+        triggerToast('Lỗi: ' + (data.error || 'Không thể thu hồi'));
       }
     } catch (err: any) {
-      alert('Lỗi: ' + err.message);
+      triggerToast('Lỗi: ' + err.message);
+    } finally {
+      setIsRevoking(false);
     }
   };
 
   const handleUnrevokeLicense = async (id: string, clientName: string) => {
-    if (!confirm(`Khôi phục quyền sử dụng lại cho khách "${clientName}"?`)) return;
     try {
       const res = await fetch('/api/admin/licenses/unrevoke', {
         method: 'POST',
@@ -1198,27 +1176,23 @@ export default function App() {
       });
       const data = await res.json();
       if (data.success) {
-        fetchLicenses();
-        if (actionModalLicense && actionModalLicense.id === id && data.license) {
-          setActionModalLicense((prev) => (prev ? { ...prev, ...data.license } : null));
+        if (data.licenses) setLicenses(data.licenses);
+        if (data.history) setHistoryList(data.history);
+        fetchLicenses(adminPin, true);
+        fetchHistory(adminPin, true);
+        if (actionModalLicense && actionModalLicense.id === id) {
+          setActionModalLicense((prev) => (prev ? { ...prev, isRevoked: false, isSuspended: false } : null));
         }
-        alert(`✓ ĐÃ KHÔI PHỤC BẢN QUYỀN!\n\n${data.message}`);
+        triggerToast(`✓ ĐÃ KHÔI PHỤC BẢN QUYỀN CHO KHÁCH "${clientName}" THÀNH CÔNG!`);
       } else {
-        alert('Lỗi: ' + data.error);
+        triggerToast('Lỗi: ' + (data.error || 'Không thể khôi phục'));
       }
     } catch (err: any) {
-      alert('Lỗi: ' + err.message);
+      triggerToast('Lỗi: ' + err.message);
     }
   };
 
-  const handleRegenerateKey = async (id: string, clientName: string, currentKey: string) => {
-    if (
-      !confirm(
-        `🔄 CẤP ĐỔI SANG MÃ MỚI TOANH?\n\nKhách hàng: "${clientName}"\nMã hiện tại: ${currentKey}\n\nKhi cấp đổi:\n• Hệ thống sẽ sinh một mã mới hoàn toàn.\n• Giữ nguyên toàn bộ số ngày sử dụng còn lại của khách.\n• Hủy bỏ mã cũ và ngắt máy cũ để khách nạp mã mới.\n\nBạn có muốn thực hiện?`
-      )
-    )
-      return;
-
+  const handleRegenerateKey = async (id: string, _clientName: string, _currentKey: string) => {
     try {
       const res = await fetch('/api/admin/licenses/regenerate-key', {
         method: 'POST',
@@ -1230,26 +1204,23 @@ export default function App() {
       });
       const data = await res.json();
       if (data.success) {
-        fetchLicenses();
+        fetchLicenses(adminPin, true);
         if (actionModalLicense && actionModalLicense.id === id && data.license) {
           setActionModalLicense((prev) => (prev ? { ...prev, ...data.license } : null));
         }
         if (navigator.clipboard?.writeText) {
           navigator.clipboard.writeText(data.newKey);
         }
-        alert(
-          `✓ ĐÃ CẤP ĐỔI MÃ MỚI THÀNH CÔNG!\n\n• Mã mới: ${data.newKey}\n• Đã tự động sao chép mã mới vào Clipboard.\n• Hãy gửi mã mới này cho khách hàng nhé!`
-        );
+        triggerToast(`✓ ĐÃ CẤP ĐỔI MÃ MỚI: ${data.newKey} (Đã copy vào Clipboard)`);
       } else {
-        alert('Lỗi: ' + data.error);
+        triggerToast('Lỗi: ' + (data.error || 'Lỗi cấp đổi mã'));
       }
     } catch (err: any) {
-      alert('Lỗi: ' + err.message);
+      triggerToast('Lỗi: ' + err.message);
     }
   };
 
   const handleResetDevices = async (id: string) => {
-    if (!confirm('Bạn có chắc muốn Reset thiết bị cho mã này? (Khách có thể kích hoạt lại trên máy tính mới)')) return;
     try {
       const res = await fetch('/api/admin/licenses/reset-devices', {
         method: 'POST',
@@ -1261,14 +1232,16 @@ export default function App() {
       });
       const data = await res.json();
       if (data.success) {
-        fetchLicenses();
+        fetchLicenses(adminPin, true);
         if (actionModalLicense && actionModalLicense.id === id) {
           setActionModalLicense((prev) => (prev ? { ...prev, devices: [] } : null));
         }
-        alert(data.message);
+        triggerToast(data.message || '✓ Đã reset danh sách máy tính thành công!');
+      } else {
+        triggerToast('Lỗi: ' + (data.error || 'Lỗi reset thiết bị'));
       }
     } catch (err: any) {
-      alert('Lỗi: ' + err.message);
+      triggerToast('Lỗi: ' + err.message);
     }
   };
 
@@ -1305,9 +1278,9 @@ Bản quyền phần mềm Gia Long - FB (${devices} máy tính) của anh/chị
 • 🚀 Gói 6 Tháng (195 ngày - 🎁 TẶNG 15 NGÀY): ${price6m} (Tiết kiệm 1.600.000đ + VIP Support 1-1)
 • 👑 Gói 12 Tháng (390 ngày - 🎁 TẶNG 30 NGÀY): ${price12m} (Tiết kiệm 3.200.000đ + Đặc quyền)
 
-🏦 Thông tin chuyển khoản (MBBank):
-• Số tài khoản: 0869.029.310 (MBBank - Ngân hàng Quân Đội)
-• Chủ tài khoản: GIA LONG - FB
+🏦 Thông tin chuyển khoản (TPBank):
+• Số tài khoản: 1000 5959 864 (TPBank - Ngân hàng Tiên Phong)
+• Chủ tài khoản: Nguyễn Văn Hiệu
 • Cấu trúc nội dung CK: Tên, SĐT, Gói (1TH/3TH/6TH/1N), Mã máy
 • Ví dụ nội dung CK: ${sampleMemo}
 
@@ -1834,7 +1807,7 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
               title="Dành riêng cho Quản trị viên quản lý và cấp key"
             >
               <span>{isAdminUnlocked ? 'Bảng Quản Trị (Admin)' : 'Quản Trị Cấp Key'}</span>
-              {pendingOrderCount > 0 && (
+              {isAdminUnlocked && pendingOrderCount > 0 && (
                 <span className="inline-flex items-center gap-1 bg-red-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-lg shadow-red-600/50 animate-bounce border border-amber-300 ml-0.5">
                   <Bell className="w-3 h-3 text-amber-200" />
                   <span>🔔 {pendingOrderCount} Chờ Duyệt!</span>
@@ -1896,215 +1869,18 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
 
         {/* CỔNG KHÁCH HÀNG: TẢI TIỆN ÍCH EXTENSION (.ZIP) & ĐẶT MUA BẢN QUYỀN */}
         {activeTab === 'client-portal' && (
-          <>
-            <CustomerDownloadPortal
-              packageInfo={packageInfo}
-              onDownloadZip={handleDownloadStoreZip}
-              isDownloadingZip={isDownloadingZip}
-              edgeStoreUrl={edgeStoreUrl}
-              chromeStoreUrl={chromeStoreUrl}
-              adminZaloUrl={adminZaloUrl}
-              onSelectPlan={(plan) => {
-                setOrderModalPkg(plan);
-                setOrderCustomerName('');
-                setOrderCustomerPhone('');
-                setOrderSuccessData(null);
-              }}
-              onGoToAdmin={() => {
-                handleTabChange('license-admin');
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-              }}
-            />
-
-            {/* MODAL XÁC NHẬN MUA GÓI BẢN QUYỀN - CHỈ HIỂN THỊ KHI Ở CỔNG KHÁCH HÀNG & KHÁCH CHỦ ĐỘNG BẤM CHỌN GÓI */}
-            {orderModalPkg && (
-              <div
-                className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/80 backdrop-blur-sm overflow-y-auto"
-                onClick={() => {
-                  setOrderModalPkg(null);
-                  setOrderSuccessData(null);
-                }}
-              >
-                <div
-                  className="bg-slate-900 border border-blue-500/40 rounded-2xl max-w-md w-full p-4 sm:p-5 shadow-2xl space-y-3.5 my-auto"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  {/* Header */}
-                  <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
-                    <h3 className="text-sm font-bold text-white flex items-center gap-1.5">
-                      <Key className="w-4 h-4 text-sky-400" />
-                      <span>
-                        {(orderModalPkg.price === '0đ' || orderModalPkg.name.includes('Dùng Thử'))
-                          ? 'Kích Hoạt Gói Dùng Thử 1 Ngày'
-                          : 'Đặt Mua Gói Bản Quyền'}
-                      </span>
-                    </h3>
-                    <button
-                      onClick={() => {
-                        setOrderModalPkg(null);
-                        setOrderSuccessData(null);
-                      }}
-                      className="text-slate-400 hover:text-white p-1 rounded-lg text-xs font-bold hover:bg-slate-800"
-                    >
-                      ✕
-                    </button>
-                  </div>
-
-                  {!orderSuccessData ? (
-                    /* BƯỚC 1: NHẬP THÔNG TIN VÀ BẤM GỬI */
-                    <div className="space-y-3 text-xs">
-                      <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-1.5">
-                        <div className="flex justify-between items-center">
-                          <span className="text-slate-400">Gói đã chọn:</span>
-                          <strong className="text-sky-400 font-bold">{orderModalPkg.name}</strong>
-                        </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-slate-400">Chi phí:</span>
-                          <strong className="text-emerald-400 text-sm font-black">
-                            {(orderModalPkg.price === '0đ' || orderModalPkg.name.includes('Dùng Thử'))
-                              ? '0đ (Miễn phí 100% • Không cần chuyển khoản)'
-                              : `${orderModalPkg.price} / 1 máy`}
-                          </strong>
-                        </div>
-                      </div>
-
-                      <div className="space-y-2">
-                        <div>
-                          <label className="block text-slate-300 font-semibold mb-1 text-[11px]">
-                            Tên của bạn hoặc Tên đơn vị (Tùy chọn):
-                          </label>
-                          <input
-                            type="text"
-                            value={orderCustomerName}
-                            onChange={(e) => setOrderCustomerName(e.target.value)}
-                            placeholder="VD: Anh Long (hoặc Cty Hoa Phượng)"
-                            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-sky-400"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-slate-300 font-semibold mb-1 text-[11px]">
-                            Số Điện Thoại / Zalo để nhận mã kích hoạt: <span className="text-rose-400">*</span>
-                          </label>
-                          <input
-                            type="text"
-                            value={orderCustomerPhone}
-                            onChange={(e) => setOrderCustomerPhone(e.target.value)}
-                            placeholder="VD: 0869029310"
-                            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-sky-400 font-mono"
-                          />
-                        </div>
-                      </div>
-
-                      <div className={`p-2.5 rounded-xl text-[11px] flex items-start gap-2 ${
-                        orderModalPkg.price === '0đ' || orderModalPkg.name.includes('Dùng Thử')
-                          ? 'bg-purple-950/40 border border-purple-500/30 text-purple-200'
-                          : 'bg-blue-950/30 border border-blue-500/25 text-slate-300'
-                      }`}>
-                        <Zap className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
-                        <span>
-                          {(orderModalPkg.price === '0đ' || orderModalPkg.name.includes('Dùng Thử')) ? (
-                            <>
-                              🎁 <strong>Gói dùng thử 1 ngày (giới hạn 20 bài đăng)</strong>. Hoàn toàn miễn phí, không mất tiền và <strong>không cần chuyển khoản ngân hàng</strong>. Bấm nút bên dưới để gửi yêu cầu kích hoạt ngay!
-                            </>
-                          ) : (
-                            <>
-                              Khi bấm <strong>"Gửi Đơn Đặt Mua"</strong>: Yêu cầu của bạn sẽ được gửi thẳng lên hệ thống Quản Trị Viên để cấp mã bản quyền tự động.
-                            </>
-                          )}
-                        </span>
-                      </div>
-
-                      <div className="flex gap-2 justify-end pt-1">
-                        <button
-                          onClick={() => setOrderModalPkg(null)}
-                          className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium text-xs rounded-lg transition"
-                        >
-                          Hủy
-                        </button>
-                        <button
-                          onClick={handleSubmitCustomerOrder}
-                          disabled={isSubmittingOrder}
-                          className={`px-4 py-1.5 text-white font-bold text-xs rounded-lg shadow-md transition flex items-center gap-1.5 active:scale-95 disabled:opacity-50 cursor-pointer ${
-                            orderModalPkg.price === '0đ' || orderModalPkg.name.includes('Dùng Thử')
-                              ? 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 shadow-purple-500/20'
-                              : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 shadow-emerald-500/20'
-                          }`}
-                        >
-                          <Send className="w-3.5 h-3.5" />
-                          <span>
-                            {isSubmittingOrder
-                              ? 'Đang gửi...'
-                              : (orderModalPkg.price === '0đ' || orderModalPkg.name.includes('Dùng Thử'))
-                              ? '🚀 Gửi Yêu Cầu Kích Hoạt Dùng Thử (0đ)'
-                              : '🚀 Gửi Đơn Đặt Mua'}
-                          </span>
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    /* BƯỚC 2: THÔNG BÁO GỬI ĐƠN THÀNH CÔNG */
-                    <div className="space-y-3.5 text-xs text-center py-2">
-                      <div className="w-12 h-12 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 mx-auto flex items-center justify-center">
-                        <CheckCircle2 className="w-6 h-6" />
-                      </div>
-
-                      <div>
-                        <h4 className="text-sm font-bold text-white">
-                          {(orderModalPkg.price === '0đ' || orderModalPkg.name.includes('Dùng Thử'))
-                            ? 'ĐÃ GỬI YÊU CẦU KÍCH HOẠT DÙNG THỬ THÀNH CÔNG!'
-                            : 'ĐÃ GỬI ĐƠN ĐẶT MUA THÀNH CÔNG!'}
-                        </h4>
-                        <p className="text-[11px] text-slate-400 mt-1">
-                          Mã đơn hàng: <strong className="text-sky-400 font-mono">#{orderSuccessData.order.id}</strong>
-                        </p>
-                      </div>
-
-                      <div className="bg-slate-950 p-3 rounded-xl border border-emerald-500/30 text-left space-y-1.5 text-[11px] text-slate-300">
-                        <div>📦 Gói đăng ký: <strong className="text-white">{orderModalPkg.name}</strong></div>
-                        <div>💰 Chi phí: <strong className="text-emerald-400">{orderModalPkg.price === '0đ' || orderModalPkg.name.includes('Dùng Thử') ? '0 VNĐ (Miễn phí • Không mất tiền)' : orderModalPkg.price}</strong></div>
-                        {(orderModalPkg.price === '0đ' || orderModalPkg.name.includes('Dùng Thử')) && (
-                          <div className="text-purple-300 font-medium">🎯 Hạn mức: <strong>1 Ngày • Tối đa 20 bài đăng tự động</strong></div>
-                        )}
-                        {orderCustomerPhone && (
-                          <div>📞 SĐT / Zalo nhận mã: <strong className="text-sky-400">{orderCustomerPhone}</strong></div>
-                        )}
-                        <div className="pt-1 border-t border-slate-800 text-[10.5px] text-slate-400">
-                          {(orderModalPkg.price === '0đ' || orderModalPkg.name.includes('Dùng Thử'))
-                            ? '✓ Yêu cầu dùng thử đã được lưu. Không cần chuyển khoản ngân hàng, Quản trị viên đang kích hoạt mã cho bạn!'
-                            : '✓ Đơn hàng đã được lưu trên máy chủ Quản trị viên. Quản trị viên sẽ phê duyệt và kích hoạt mã bản quyền cho bạn ngay!'}
-                        </div>
-                      </div>
-
-                      <div className="flex gap-2">
-                        <a
-                          href={`https://zalo.me/0869029310?text=${encodeURIComponent(
-                            (orderModalPkg.price === '0đ' || orderModalPkg.name.includes('Dùng Thử'))
-                              ? `Chào Admin, tôi vừa gửi yêu cầu Gói Dùng Thử 1 Ngày (20 bài đăng, SĐT: ${orderCustomerPhone || 'Chưa rõ'}, Mã đơn: #${orderSuccessData.order.id}). Nhờ Admin duyệt và cấp key dùng thử giúp tôi nhé!`
-                              : `Chào Admin, tôi vừa gửi đơn mua ${orderModalPkg.name} (SĐT: ${orderCustomerPhone || 'Chưa rõ'}, Mã đơn: #${orderSuccessData.order.id}). Nhờ Admin duyệt và cấp key giúp tôi nhé!`
-                          )}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="flex-1 py-2 px-3 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-xs font-bold transition shadow-md flex items-center justify-center gap-1"
-                        >
-                          <MessageSquare className="w-3.5 h-3.5" />
-                          <span>Nhắn Zalo Nhận Key Ngay</span>
-                        </a>
-                        <button
-                          onClick={() => {
-                            setOrderModalPkg(null);
-                            setOrderSuccessData(null);
-                          }}
-                          className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-bold transition"
-                        >
-                          Đóng
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </>
+          <CustomerDownloadPortal
+            packageInfo={packageInfo}
+            onDownloadZip={handleDownloadStoreZip}
+            isDownloadingZip={isDownloadingZip}
+            edgeStoreUrl={edgeStoreUrl}
+            chromeStoreUrl={chromeStoreUrl}
+            adminZaloUrl={adminZaloUrl}
+            onGoToAdmin={() => {
+              handleTabChange('license-admin');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+          />
         )}
 
         {/* PRIVACY POLICY TAB */}
@@ -2907,21 +2683,6 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
                     Khu vực bảo mật dành cho Quản trị viên quản lý cấp phép &amp; gia hạn
                   </p>
                 </div>
-
-                {/* Huy hiệu Quả Chuông rung lắc thông báo đơn chờ duyệt */}
-                {pendingOrderCount > 0 && (
-                  <div className="bg-gradient-to-r from-red-600/25 via-rose-600/30 to-amber-600/25 border-2 border-red-500/70 rounded-xl p-2.5 flex items-center justify-center gap-2.5 text-red-200 animate-pulse shadow-lg shadow-red-600/30 my-1">
-                    <Bell className="w-5 h-5 text-amber-300 shrink-0 animate-bounce" />
-                    <div className="text-left text-xs">
-                      <div className="font-black text-amber-300 flex items-center gap-1">
-                        <span>🔔 {pendingOrderCount} ĐƠN ĐANG CHỜ BẠN DUYỆT!</span>
-                      </div>
-                      <div className="text-[10.5px] text-slate-200">
-                        Nhập khóa PIN bên dưới để vào cấp key kích hoạt ngay cho khách.
-                      </div>
-                    </div>
-                  </div>
-                )}
 
                 <form onSubmit={handleVerifyPin} className="space-y-3 pt-1">
                   <div>
@@ -4147,7 +3908,7 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
                                   <button
                                     onClick={() => handleCopyZaloTemplate(actionModalLicense)}
                                     className="p-2 bg-blue-600/15 hover:bg-blue-600/25 text-blue-300 border border-blue-500/30 rounded-lg text-xs font-semibold transition flex items-center justify-center gap-1.5 active:scale-95"
-                                    title="Copy mẫu tin nhắn Zalo kèm thông tin thanh toán MBBank"
+                                    title="Copy mẫu tin nhắn Zalo kèm thông tin thanh toán TPBank"
                                   >
                                     <MessageSquare className="w-3.5 h-3.5 text-blue-400 shrink-0" />
                                     <span className="truncate">{copiedZaloMsg === actionModalLicense.id ? '✓ Đã Copy' : 'Mẫu Nhắc Tiền'}</span>
@@ -4251,8 +4012,8 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
                             </button>
                           ) : (
                             <button
-                              onClick={() => handleRevokeLicense(actionModalLicense.id, actionModalLicense.clientName)}
-                              className="px-2.5 py-1.5 bg-rose-600/30 hover:bg-rose-600/50 text-rose-300 border border-rose-500/40 rounded-lg text-xs font-bold transition flex items-center gap-1 active:scale-95"
+                              onClick={() => handleOpenRevokeModal(actionModalLicense)}
+                              className="px-2.5 py-1.5 bg-rose-600/30 hover:bg-rose-600/50 text-rose-300 border border-rose-500/40 rounded-lg text-xs font-bold transition flex items-center gap-1 active:scale-95 shadow-sm"
                               title="Ngắt kết nối ngay lập tức toàn bộ máy tính của khách"
                             >
                               <ShieldAlert className="w-3.5 h-3.5" />
@@ -4338,6 +4099,77 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                           <span>{isDeletingItem ? 'Đang xóa...' : 'Xác Nhận Xóa'}</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* HỘP THOẠI XÁC NHẬN THU HỒI BẢN QUYỀN & NGẮT KẾT NỐI MÁY (CUSTOM IN-APP REVOKE MODAL - CHỐNG BỊ CHẶN BỞI IFRAME) */}
+                {revokeConfirmItem && (
+                  <div
+                    className="fixed inset-0 z-[100] bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto"
+                    onClick={() => setRevokeConfirmItem(null)}
+                  >
+                    <div
+                      className="bg-slate-900 border border-rose-500/50 rounded-2xl max-w-md w-full p-5 shadow-2xl space-y-4 animate-in fade-in zoom-in-95"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div className="flex items-center gap-3 text-rose-400 border-b border-slate-800 pb-3">
+                        <div className="w-10 h-10 rounded-full bg-rose-500/10 border border-rose-500/30 flex items-center justify-center shrink-0">
+                          <ShieldAlert className="w-5 h-5 text-rose-400" />
+                        </div>
+                        <div>
+                          <h3 className="text-sm font-bold text-white">Thu Hồi Bản Quyền &amp; Ngắt Máy Khách</h3>
+                          <p className="text-[11px] text-slate-400">
+                            Ngắt ngay lập tức toàn bộ máy tính của khách hàng
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="bg-slate-950/70 p-3.5 rounded-xl border border-slate-800 space-y-2.5 text-xs">
+                        <div className="text-slate-300">
+                          Khách hàng: <strong className="text-white text-sm text-rose-300">{revokeConfirmItem.clientName}</strong>
+                        </div>
+                        <div className="font-mono text-slate-400 text-[11px] flex items-center gap-2">
+                          <span>Mã Key:</span>
+                          <span className="bg-slate-900 px-2 py-0.5 rounded text-rose-300 font-bold border border-slate-700">
+                            {revokeConfirmItem.key}
+                          </span>
+                          <span className="text-slate-500">({revokeConfirmItem.devicesCount} máy đang kết nối)</span>
+                        </div>
+                        <div>
+                          <label className="block text-slate-300 text-[11px] font-semibold mb-1">
+                            Lý do thu hồi / ngắt kết nối:
+                          </label>
+                          <input
+                            type="text"
+                            value={revokeReasonInput}
+                            onChange={(e) => setRevokeReasonInput(e.target.value)}
+                            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white outline-none focus:border-rose-500 focus:ring-1 focus:ring-rose-500"
+                            placeholder="Nhập lý do thu hồi..."
+                          />
+                        </div>
+                        <p className="text-[10.5px] text-rose-400/90 pt-1 italic">
+                          🚨 CẢNH BÁO: Khi bấm Xác Nhận, toàn bộ máy tính của khách này sẽ bị ngắt kết nối, khóa mọi tính năng và dừng mọi tiến trình đăng bài tự động ngay lập tức!
+                        </p>
+                      </div>
+
+                      <div className="flex items-center justify-end gap-2 pt-1">
+                        <button
+                          onClick={() => setRevokeConfirmItem(null)}
+                          disabled={isRevoking}
+                          className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-medium transition active:scale-95"
+                        >
+                          Hủy Bỏ
+                        </button>
+                        <button
+                          onClick={handleExecuteRevoke}
+                          disabled={isRevoking}
+                          className="px-4 py-1.5 bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-lg shadow-rose-950/50 active:scale-95 disabled:opacity-50"
+                        >
+                          <ShieldAlert className="w-3.5 h-3.5" />
+                          <span>{isRevoking ? 'Đang Ngắt...' : 'Xác Nhận Thu Hồi (Ngắt Máy)'}</span>
                         </button>
                       </div>
                     </div>
@@ -4568,7 +4400,7 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
                             rows={2}
                             value={editingOrder.note}
                             onChange={(e) => setEditingOrder({ ...editingOrder, note: e.target.value })}
-                            placeholder="Ghi chú nội bộ, phương thức chuyển khoản MBBank, yêu cầu xuất hóa đơn..."
+                            placeholder="Ghi chú nội bộ, phương thức chuyển khoản TPBank, yêu cầu xuất hóa đơn..."
                             className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-sky-500"
                           />
                         </div>
@@ -4887,7 +4719,7 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
                         type="text"
                         value={newLicNotes}
                         onChange={(e) => setNewLicNotes(e.target.value)}
-                        placeholder="VD: Chuyển khoản MBBank..."
+                        placeholder="VD: Chuyển khoản TPBank..."
                         className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white focus:border-emerald-500 focus:outline-none"
                       />
                     </div>

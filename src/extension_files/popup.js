@@ -890,21 +890,34 @@ document.addEventListener('DOMContentLoaded', async () => {
   function refreshPopupLicense() {
     chrome.runtime.sendMessage({ action: 'CHECK_LICENSE' }, (res) => {
       if (!res) return;
-      if (res.isValid && res.license) {
+      if (res.isValid && res.license && !res.isRevoked && !res.license.isRevoked) {
+        const daysLeft = typeof res.license.daysLeft === 'number' ? res.license.daysLeft : parseInt(res.license.daysLeft || '0', 10);
+        const isExpiringSoon = daysLeft <= 3 && daysLeft >= 0;
+
         if (popupLicTitle) {
           const planLabel = res.license.planType === 'team' ? 'DOANH NGHIỆP' : (res.license.planType === 'trial' ? 'DÙNG THỬ' : 'CÁ NHÂN');
-          popupLicTitle.innerText = `${res.license.clientName} (${planLabel}) - Còn ${res.license.daysLeft} ngày`;
+          popupLicTitle.innerText = isExpiringSoon
+            ? `⚠️ Sắp hết hạn (Còn ${daysLeft} ngày) - Hãy gia hạn!`
+            : `${res.license.clientName} (${planLabel}) - Còn ${daysLeft} ngày`;
+          popupLicTitle.style.color = isExpiringSoon ? '#fbbf24' : '#6ee7b7';
         }
-        if (popupLicIcon) popupLicIcon.innerText = res.license.planType === 'trial' ? '🎁' : '💎';
-        if (btnPopupOpenLicense) btnPopupOpenLicense.innerText = 'VIP Hợp Lệ';
+        if (popupLicIcon) popupLicIcon.innerText = isExpiringSoon ? '⏰' : (res.license.planType === 'trial' ? '🎁' : '💎');
+        if (btnPopupOpenLicense) {
+          btnPopupOpenLicense.innerText = isExpiringSoon ? 'Gia Hạn' : 'Quản Lý';
+          btnPopupOpenLicense.className = isExpiringSoon ? 'btn-sub btn-sub-amber' : 'btn-sub btn-sub-emerald';
+        }
       } else {
         const isExp = res.isExpired;
-        const isRevoked = res.isRevoked;
+        const isRevoked = Boolean(res.isRevoked || res.license?.isRevoked);
         if (popupLicTitle) {
-          popupLicTitle.innerText = isRevoked ? '🚫 Bản Quyền Đã Bị Thu Hồi' : (isExp ? '🚨 Bản Quyền Đã Hết Hạn' : '⚠️ Chưa Kích Hoạt Bản Quyền');
+          popupLicTitle.innerText = isRevoked ? '🚫 Bản Quyền Đã Thu Hồi (Bị Khóa)' : (isExp ? '🚨 Bản Quyền Đã Hết Hạn' : '⚠️ Chưa Kích Hoạt Bản Quyền');
+          popupLicTitle.style.color = isRevoked || isExp ? '#fda4af' : '#fbbf24';
         }
         if (popupLicIcon) popupLicIcon.innerText = isRevoked ? '🚫' : (isExp ? '🚨' : '⚠️');
-        if (btnPopupOpenLicense) btnPopupOpenLicense.innerText = isRevoked ? 'Bị Khóa' : (isExp ? 'Gia Hạn' : 'Kích Hoạt');
+        if (btnPopupOpenLicense) {
+          btnPopupOpenLicense.innerText = isRevoked ? 'Bị Khóa' : (isExp ? 'Gia Hạn' : 'Kích Hoạt');
+          btnPopupOpenLicense.className = isRevoked ? 'btn-sub btn-sub-danger' : 'btn-sub btn-sub-amber';
+        }
       }
     });
   }

@@ -1,41 +1,26 @@
 [
   {
-    "id": "lic_edge_reviewer",
-    "key": "EDGE-REVIEWER-2026",
-    "clientName": "Microsoft Edge Store Certification Team",
-    "phone": "0869029310",
-    "planType": "team",
-    "maxDevices": 99,
-    "devices": [],
-    "createdAt": "2026-10-01T00:00:00.000Z",
-    "expiresAt": "2030-12-31T23:59:59.000Z",
-    "isSuspended": false,
-    "notes": "Mã bản quyền vĩnh viễn dành cho chuyên viên kiểm duyệt Microsoft Edge Add-ons"
-  },
-  {
-    "id": "lic_team_hoaphuong",
-    "key": "HCNS-HOAPHUONG-3SLOTS",
-    "clientName": "Công Ty CP Hoa Phượng ME (Team HCNS)",
-    "phone": "0869029310",
-    "planType": "team",
-    "maxDevices": 3,
-    "devices": [],
-    "createdAt": "2026-10-04T03:39:13.239Z",
-    "expiresAt": "2026-11-03T03:39:13.239Z",
-    "isSuspended": false,
-    "notes": "3 máy tính (1.000.000đ x 3 = 3.000.000đ/tháng)"
-  },
-  {
-    "id": "lic_indiv_vip",
-    "key": "VIP-CANHAN-2026",
-    "clientName": "Anh Tuấn (Recruiter Tự Do)",
-    "phone": "0912345678",
+    "id": "lic_1791734634256_QU9IY",
+    "key": "GLFB-VIP-QU9IY",
+    "clientName": "củ tỏidfdsffdfds",
+    "phone": "164645464",
     "planType": "individual",
     "maxDevices": 1,
-    "devices": [],
-    "createdAt": "2026-10-04T03:39:13.239Z",
-    "expiresAt": "2026-11-03T03:39:13.239Z",
+    "devices": [
+      {
+        "deviceId": "dev_49omswx_mv370ms3",
+        "deviceName": "Browser (0ms3)",
+        "activatedAt": "2026-10-11T16:03:54.256Z",
+        "lastSeenAt": "2026-10-11T16:55:29.273Z"
+      }
+    ],
+    "createdAt": "2026-10-11T16:03:54.256Z",
+    "expiresAt": "2029-03-09T16:00:12.181Z",
     "isSuspended": false,
-    "notes": "1 máy tính (1.000.000đ/tháng)"
+    "notes": "Bản quyền VIP cộng dồn 3 gói: Gói 3 Tháng (+100n) + Gói 12 Tháng (+390n) + Gói 12 Tháng (+390n) = Tổng 880 ngày (Hạn dùng đến 9/3/2029)",
+    "aliasKeys": [
+      "GLFB-VIP-RR79K",
+      "GLFB-VIP-QVHKJ"
+    ]
   }
 ]
