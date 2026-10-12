@@ -636,24 +636,21 @@ export default function App() {
       const data = await res.json();
       if (data.success && Array.isArray(data.orders)) {
         setAdminOrders((prev) => {
-          const map = new Map<string, any>();
-          prev.forEach((o) => { if (o && o.id) map.set(o.id, o); });
-          data.orders.forEach((o: any) => { if (o && o.id) map.set(o.id, o); });
-          const merged = Array.from(map.values()).sort(
+          const prevPending = prev.filter((o) => o.status === 'pending');
+          const newOrders = [...data.orders].sort(
             (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
           );
           try {
-            localStorage.setItem('glfb_admin_orders', JSON.stringify(merged));
+            localStorage.setItem('glfb_admin_orders', JSON.stringify(newOrders));
           } catch (e) {}
-          if (areArraysEqual(prev, merged)) return prev;
-          const prevPending = prev.filter((o) => o.status === 'pending');
-          const newPending = merged.filter((o: any) => o.status === 'pending');
+          if (areArraysEqual(prev, newOrders)) return prev;
+          const newPending = newOrders.filter((o: any) => o.status === 'pending');
           setPendingOrderCount(newPending.length);
           if (newPending.length > prevPending.length && prev.length > 0) {
             const latest = newPending[0];
             triggerToast(`🔔 Có đơn đặt mua mới: ${latest.pkgName} từ ${latest.clientName || 'Khách'} (${latest.phone || ''})!`);
           }
-          return merged;
+          return newOrders;
         });
       }
     } catch (e) {
@@ -663,32 +660,30 @@ export default function App() {
     }
   };
 
-  // Tra cứu số lượng đơn chờ duyệt (Chỉ kích hoạt khi Quản trị viên đã đăng nhập PIN)
+  // Tra cứu số lượng đơn chờ duyệt
   const fetchPendingCount = async () => {
-    if (!isAdminUnlocked) {
-      setPendingOrderCount(0);
-      return;
-    }
     try {
       const res = await fetch('/api/orders/pending-count');
       const data = await res.json();
       if (data && data.success && typeof data.pendingCount === 'number') {
-        setPendingOrderCount(data.pendingCount);
+        setPendingOrderCount((prev) => {
+          if (data.pendingCount > prev && isAdminUnlocked) {
+            fetchOrders(adminPin, true);
+            if (data.latestPending) {
+              triggerToast(`🔔 Có đơn đặt mua mới: ${data.latestPending.pkgName || 'Gói Bản Quyền'} từ ${data.latestPending.clientName || 'Khách'}!`);
+            }
+          }
+          return data.pendingCount;
+        });
       }
     } catch (e) {}
   };
 
   useEffect(() => {
-    if (isAdminUnlocked) {
-      fetchPendingCount();
-    } else {
-      setPendingOrderCount(0);
-    }
+    fetchPendingCount();
     const timer = setInterval(() => {
-      if (isAdminUnlocked) {
-        fetchPendingCount();
-      }
-    }, 5000);
+      fetchPendingCount();
+    }, 4000);
 
     const onOrderFromExtension = (e: any) => {
       const order = e.detail || e.data?.order;
@@ -867,9 +862,13 @@ export default function App() {
         });
         const data = await res.json();
         if (data.success) {
-          if (data.orders) setAdminOrders(data.orders);
-          else setAdminOrders((prev) => prev.filter((o) => o.id !== id));
+          const updated = data.orders || adminOrders.filter((o) => o.id !== id);
+          setAdminOrders(updated);
+          try {
+            localStorage.setItem('glfb_admin_orders', JSON.stringify(updated));
+          } catch (e) {}
           if (data.history) setHistoryList(data.history);
+          if (data.licenses) setLicenses(data.licenses);
           triggerToast(`✓ Đã xóa đơn đặt mua của khách "${name}" thành công!`);
           fetchHistory(adminPin, true);
         } else {
@@ -887,6 +886,12 @@ export default function App() {
         const data = await res.json();
         if (data.success) {
           setLicenses((prev) => prev.filter((l) => l.id !== id));
+          if (data.orders) {
+            setAdminOrders(data.orders);
+            try {
+              localStorage.setItem('glfb_admin_orders', JSON.stringify(data.orders));
+            } catch (e) {}
+          }
           if (actionModalLicense && actionModalLicense.id === id) {
             setActionModalLicense(null);
           }

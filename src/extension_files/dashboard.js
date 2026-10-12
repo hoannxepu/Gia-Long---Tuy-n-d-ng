@@ -1025,10 +1025,124 @@ document.addEventListener('DOMContentLoaded', async () => {
   const btnSubmitActivateLicense = document.getElementById('btnSubmitActivateLicense');
   const btnRefreshLicenseStatus = document.getElementById('btnRefreshLicenseStatus');
 
-  licenseHeaderPill?.addEventListener('click', () => switchTab('license'));
+  const modalActivateLicense = document.getElementById('modalActivateLicense');
+  const inputModalLicenseKey = document.getElementById('inputModalLicenseKey');
+  const btnSubmitModalActivate = document.getElementById('btnSubmitModalActivate');
+  const btnCloseActivateModal = document.getElementById('btnCloseActivateModal');
+  const btnCancelActivateModal = document.getElementById('btnCancelActivateModal');
+  const linkGoToBuyPackages = document.getElementById('linkGoToBuyPackages');
+
+  // Mở modal kích hoạt bản quyền
+  window.openActivateModal = function() {
+    switchTab('license');
+    const modal = document.getElementById('modalActivateLicense');
+    const input = document.getElementById('inputModalLicenseKey');
+    const devEl = document.getElementById('modalActiveDeviceId');
+    const curDev = document.getElementById('licCurrentDeviceId');
+    if (devEl && curDev) devEl.innerText = curDev.innerText || 'Đang lấy...';
+    if (modal) modal.style.display = 'flex';
+    if (input) {
+      setTimeout(() => input.focus(), 150);
+    }
+  };
+
+  window.closeActivateModal = function() {
+    const modal = document.getElementById('modalActivateLicense');
+    if (modal) modal.style.display = 'none';
+  };
+
+  // Thực thi kích hoạt bản quyền
+  async function performActivateKey(rawKey, resultContainerId = 'licenseActivationResultMsg') {
+    const key = (rawKey || '').trim().toUpperCase();
+    const resultEl = document.getElementById(resultContainerId);
+    if (!key) {
+      alert('Vui lòng nhập hoặc dán mã bản quyền của bạn!');
+      return;
+    }
+
+    if (resultEl) {
+      resultEl.style.display = 'block';
+      resultEl.style.background = 'rgba(56, 189, 248, 0.15)';
+      resultEl.style.color = '#38bdf8';
+      resultEl.style.border = '1px solid rgba(56, 189, 248, 0.4)';
+      resultEl.innerText = '⏳ Đang xác thực và kích hoạt mã trên máy chủ...';
+    }
+
+    chrome.runtime.sendMessage({ action: 'ACTIVATE_LICENSE', key }, (res) => {
+      if (res && res.success) {
+        if (resultEl) {
+          resultEl.style.background = 'rgba(16, 185, 129, 0.2)';
+          resultEl.style.color = '#34d399';
+          resultEl.style.border = '1px solid rgba(16, 185, 129, 0.5)';
+          resultEl.innerText = `✓ ${res.message || 'Kích hoạt thành công!'}`;
+        }
+        showToast('✓ Kích hoạt bản quyền thành công! Chúc bạn tuyển dụng hiệu quả.');
+        loadLicenseDetails(true);
+        fetchMyOrdersAndSync(true);
+        setTimeout(() => {
+          window.closeActivateModal();
+        }, 1500);
+      } else {
+        const errMsg = res?.message || 'Mã bản quyền không tồn tại hoặc không hợp lệ!';
+        if (resultEl) {
+          resultEl.style.background = 'rgba(239, 68, 68, 0.2)';
+          resultEl.style.color = '#f87171';
+          resultEl.style.border = '1px solid rgba(239, 68, 68, 0.5)';
+          resultEl.innerText = `🚨 Lỗi kích hoạt: ${errMsg}`;
+        }
+        alert(`🚨 KÍCH HOẠT THẤT BẠI:\n\n${errMsg}\n\nVui lòng kiểm tra lại mã hoặc liên hệ Zalo 0869.029.310 để Quản trị viên hỗ trợ!`);
+      }
+    });
+  }
+
+  // Gắn sự kiện cho các nút kích hoạt
+  btnSubmitActivateLicense?.addEventListener('click', () => {
+    performActivateKey(inputNewLicenseKey?.value, 'licenseActivationResultMsg');
+  });
+  inputNewLicenseKey?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      performActivateKey(inputNewLicenseKey?.value, 'licenseActivationResultMsg');
+    }
+  });
+
+  btnSubmitModalActivate?.addEventListener('click', () => {
+    performActivateKey(inputModalLicenseKey?.value, 'modalActivateResultMsg');
+  });
+  inputModalLicenseKey?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      performActivateKey(inputModalLicenseKey?.value, 'modalActivateResultMsg');
+    }
+  });
+
+  btnRefreshLicenseStatus?.addEventListener('click', () => {
+    loadLicenseDetails(true);
+    fetchMyOrdersAndSync(true);
+    showToast('✓ Đang làm mới trạng thái bản quyền trực tuyến...');
+  });
+
+  btnCloseActivateModal?.addEventListener('click', () => window.closeActivateModal());
+  btnCancelActivateModal?.addEventListener('click', () => window.closeActivateModal());
+  modalActivateLicense?.addEventListener('click', (e) => {
+    if (e.target === modalActivateLicense) window.closeActivateModal();
+  });
+
+  linkGoToBuyPackages?.addEventListener('click', () => {
+    window.closeActivateModal();
+    switchTab('license');
+    const plansGrid = document.querySelector('.license-plans-grid');
+    if (plansGrid) {
+      plansGrid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  });
+
+  licenseHeaderPill?.addEventListener('click', () => {
+    switchTab('license');
+    window.openActivateModal();
+  });
   btnHeaderLicenseAction?.addEventListener('click', (e) => {
     e.stopPropagation();
     switchTab('license');
+    window.openActivateModal();
   });
 
   const btnQuickRenewModal = document.getElementById('btnQuickRenewModal');
@@ -1913,4 +2027,19 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   updateDashboardRealtimeClock();
   setInterval(updateDashboardRealtimeClock, 1000);
+
+  // Mở tab bản quyền & modal kích hoạt tự động nếu URL chứa ?tab=license hoặc ?activate=1
+  try {
+    const urlParams = new URLSearchParams(window.location.search);
+    const reqTab = urlParams.get('tab');
+    const reqActivate = urlParams.get('activate');
+    if (reqTab === 'license' || reqActivate === '1') {
+      switchTab('license');
+      if (reqActivate === '1' || reqTab === 'license') {
+        setTimeout(() => {
+          window.openActivateModal();
+        }, 200);
+      }
+    }
+  } catch (e) {}
 });

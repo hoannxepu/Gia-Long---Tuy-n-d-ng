@@ -211,6 +211,47 @@ async function handleCreateOrder(payload) {
     .filter((r) => r.status === 'fulfilled' && r.value)
     .map((r) => r.value);
 
+  // Gửi trực tiếp lên Cloud Database toàn cầu để trang Admin ở mọi máy nhận đơn ngay lập tức
+  let createdOrder = successful.length > 0 ? successful[0].order : null;
+  try {
+    const globalStoreUrl = 'https://api.restful-api.dev/objects/ff808181a09d98f701a12e4db8ee4513';
+    const gResp = await fetch(globalStoreUrl, { headers: { 'Accept': 'application/json' } });
+    if (gResp.ok) {
+      const gJson = await gResp.json();
+      const existingOrders = Array.isArray(gJson?.data?.orders) ? gJson.data.orders : [];
+      const newOrd = createdOrder || {
+        id: `ord_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        pkgName: payload.pkgName || 'Gói Bản Quyền',
+        price: payload.price || '1.000.000đ',
+        clientName: payload.clientName || 'Khách Đặt Mua',
+        phone: payload.phone || '',
+        deviceId: payload.deviceId || '',
+        createdAt: new Date().toISOString(),
+        status: 'pending',
+        note: payload.note || '',
+      };
+      if (!createdOrder) createdOrder = newOrd;
+      if (!existingOrders.some((o) => o.id === newOrd.id)) {
+        existingOrders.unshift(newOrd);
+        await fetch(globalStoreUrl, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: 'GiaLongFB_Global_State_2026',
+            data: {
+              ...(gJson.data || {}),
+              orders: existingOrders,
+              updatedAt: Date.now(),
+            },
+          }),
+        });
+        console.log('[Gia Long - FB Background] ✓ Đã đồng bộ trực tiếp đơn hàng lên Cloud Database!');
+      }
+    }
+  } catch (e) {
+    console.warn('[Gia Long - FB Background] Lỗi đồng bộ Cloud Direct:', e);
+  }
+
   // Phát trực tiếp vào DOM của tất cả các Tab Web Quản Trị đang mở (Cloudflare Pages tab)
   try {
     if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.query) {

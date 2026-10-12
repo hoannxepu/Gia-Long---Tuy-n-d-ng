@@ -59,39 +59,9 @@ export interface LicenseItem {
   aliasKeys?: string[];
 }
 
-// Khởi tạo dữ liệu mẫu nếu chưa có file
+// Khởi tạo danh sách rỗng nếu chưa có file (không tạo người dùng mẫu để tránh tái xuất hiện sau khi xóa)
 function getInitialLicenses(): LicenseItem[] {
-  const now = Date.now();
-  const dayMs = 24 * 60 * 60 * 1000;
-
-  return [
-    {
-      id: 'lic_team_hoaphuong',
-      key: 'HCNS-HOAPHUONG-3SLOTS',
-      clientName: 'Công Ty CP Hoa Phượng ME (Team HCNS)',
-      phone: 'gialonggiaiphapvanhanh',
-      planType: 'team',
-      maxDevices: 3,
-      devices: [],
-      createdAt: new Date(now).toISOString(),
-      expiresAt: new Date(now + 30 * dayMs).toISOString(),
-      isSuspended: false,
-      notes: '3 máy tính (1.000.000đ x 3 = 3.000.000đ/tháng)',
-    },
-    {
-      id: 'lic_indiv_vip',
-      key: 'VIP-CANHAN-2026',
-      clientName: 'Anh Tuấn (Recruiter Tự Do)',
-      phone: '0912345678',
-      planType: 'individual',
-      maxDevices: 1,
-      devices: [],
-      createdAt: new Date(now).toISOString(),
-      expiresAt: new Date(now + 30 * dayMs).toISOString(),
-      isSuspended: false,
-      notes: '1 máy tính (1.000.000đ/tháng)',
-    },
-  ];
+  return [];
 }
 
 function loadLicenses(): LicenseItem[] {
@@ -112,6 +82,7 @@ function loadLicenses(): LicenseItem[] {
 function saveLicenses(items: LicenseItem[]) {
   try {
     fs.writeFileSync(LICENSES_FILE, JSON.stringify(items, null, 2), 'utf-8');
+    syncGlobalStoreServer().catch(() => {});
   } catch (err) {
     console.error('[License DB] Lỗi lưu file:', err);
   }
@@ -163,6 +134,7 @@ function addRevokedKey(key: string, reason = 'Quản trị viên xóa hoặc thu
     list.unshift({ key: cleanKey, reason, revokedAt: new Date().toISOString() });
     try {
       fs.writeFileSync(REVOKED_KEYS_FILE, JSON.stringify(list, null, 2), 'utf-8');
+      syncGlobalStoreServer().catch(() => {});
     } catch (e) {}
   }
 }
@@ -243,6 +215,7 @@ function loadHistory(): LicenseHistoryItem[] {
 function saveHistory(items: LicenseHistoryItem[]) {
   try {
     fs.writeFileSync(HISTORY_FILE, JSON.stringify(items, null, 2), 'utf-8');
+    syncGlobalStoreServer().catch(() => {});
   } catch (e) {
     console.error('[History DB] Lỗi lưu history:', e);
   }
@@ -978,7 +951,15 @@ app.post('/api/admin/licenses/delete', requireAdmin, (req: Request, res: Respons
   const toDelete = licenses.find((l) => l.id === targetId || l.key === targetId);
 
   if (toDelete) {
+    const devId = toDelete.devices?.[0]?.deviceId?.toLowerCase();
+    const phone = toDelete.phone?.replace(/\D/g, '');
+
     addRevokedKey(toDelete.key, 'Quản trị viên đã xóa người dùng khỏi danh sách');
+    if (toDelete.aliasKeys && Array.isArray(toDelete.aliasKeys)) {
+      toDelete.aliasKeys.forEach((ak) => addRevokedKey(ak, 'Quản trị viên đã xóa người dùng khỏi danh sách'));
+    }
+    if (devId) addRevokedKey(`DEV:${devId}`, 'Quản trị viên đã xóa thiết bị này khỏi danh sách');
+    if (phone) addRevokedKey(`PHONE:${phone}`, 'Quản trị viên đã xóa SĐT này khỏi danh sách');
     addHistoryEntry({
       action: 'revoke',
       actionName: 'Xóa người dùng',
@@ -989,6 +970,18 @@ app.post('/api/admin/licenses/delete', requireAdmin, (req: Request, res: Respons
       planType: toDelete.planType,
       notes: `Quản trị viên xóa người dùng "${toDelete.clientName}" khỏi danh sách`,
     });
+
+    // Xóa hoặc hủy bỏ toàn bộ các đơn hàng của người dùng này để KHÔNG bị tự động tạo lại
+    let orders = loadOrders();
+    const aliasSet = new Set<string>([toDelete.key, ...(toDelete.aliasKeys || [])]);
+
+    orders = orders.filter((o) => {
+      const matchKey = o.generatedKey && aliasSet.has(o.generatedKey);
+      const matchDev = devId && o.deviceId && o.deviceId.toLowerCase() === devId;
+      const matchPhone = phone && o.phone && o.phone.replace(/\D/g, '') === phone;
+      return !(matchKey || matchDev || matchPhone);
+    });
+    saveOrders(orders);
   }
 
   licenses = licenses.filter((l) => l.id !== targetId && l.key !== targetId);
@@ -997,6 +990,8 @@ app.post('/api/admin/licenses/delete', requireAdmin, (req: Request, res: Respons
     success: true,
     message: '✓ Đã xóa người dùng khỏi danh sách và khóa quyền vĩnh viễn trên toàn bộ thiết bị!',
     count: before - licenses.length,
+    licenses,
+    orders: loadOrders(),
   });
 });
 
@@ -1018,6 +1013,86 @@ export interface OrderItem {
 
 const ORDERS_FILE = path.join(DATA_DIR, 'orders.json');
 
+const GLOBAL_STORE_URL = 'https://api.restful-api.dev/objects/ff808181a09d98f701a12e4db8ee4513';
+
+async function syncGlobalStoreServer() {
+  try {
+    const licenses = loadLicenses();
+    const orders = loadOrders();
+    const history = loadHistory();
+    const revokedKeys = loadRevokedKeys().map((r) => r.key);
+    const payload = {
+      name: 'GiaLongFB_Global_State_2026',
+      data: {
+        licenses,
+        orders,
+        history,
+        revokedKeys,
+        updatedAt: Date.now(),
+      },
+    };
+    await fetch(GLOBAL_STORE_URL, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  } catch (e) {}
+}
+
+let lastPullMs = 0;
+async function pullGlobalStoreServer() {
+  if (Date.now() - lastPullMs < 1000) return;
+  lastPullMs = Date.now();
+  try {
+    const resp = await fetch(GLOBAL_STORE_URL, { headers: { 'Accept': 'application/json' } });
+    if (resp.ok) {
+      const json = await resp.json();
+      if (json && json.data) {
+        if (Array.isArray(json.data.orders)) {
+          const currentOrders = loadOrders();
+          const remoteMap = new Map<string, OrderItem>();
+          json.data.orders.forEach((o: OrderItem) => { if (o && o.id) remoteMap.set(o.id, o); });
+          currentOrders.forEach((o: OrderItem) => {
+            if (o && o.id && !remoteMap.has(o.id) && o.status === 'pending') {
+              remoteMap.set(o.id, o);
+            }
+          });
+          const mergedOrders = Array.from(remoteMap.values()).sort(
+            (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+          );
+          if (JSON.stringify(mergedOrders) !== JSON.stringify(currentOrders)) {
+            fs.writeFileSync(ORDERS_FILE, JSON.stringify(mergedOrders, null, 2), 'utf-8');
+          }
+        }
+        if (Array.isArray(json.data.licenses)) {
+          const currentLics = loadLicenses();
+          const remoteMap = new Map<string, LicenseItem>();
+          json.data.licenses.forEach((l: LicenseItem) => { if (l && l.id) remoteMap.set(l.id, l); });
+          const mergedLics = Array.from(remoteMap.values());
+          if (JSON.stringify(mergedLics) !== JSON.stringify(currentLics)) {
+            fs.writeFileSync(LICENSES_FILE, JSON.stringify(mergedLics, null, 2), 'utf-8');
+          }
+        }
+        if (Array.isArray(json.data.revokedKeys)) {
+          const currentRev = loadRevokedKeys();
+          const revSet = new Set(currentRev.map((r) => r.key));
+          let changed = false;
+          json.data.revokedKeys.forEach((rk: string) => {
+            if (rk && !revSet.has(rk.toUpperCase())) {
+              revSet.add(rk.toUpperCase());
+              currentRev.unshift({ key: rk.toUpperCase(), reason: 'Đồng bộ từ Cloud', revokedAt: new Date().toISOString() });
+              changed = true;
+            }
+          });
+          if (changed) {
+            fs.writeFileSync(REVOKED_KEYS_FILE, JSON.stringify(currentRev, null, 2), 'utf-8');
+          }
+        }
+      }
+    }
+  } catch (e) {}
+}
+
 function loadOrders(): OrderItem[] {
   try {
     if (fs.existsSync(ORDERS_FILE)) {
@@ -1030,6 +1105,7 @@ function loadOrders(): OrderItem[] {
 function saveOrders(items: OrderItem[]) {
   try {
     fs.writeFileSync(ORDERS_FILE, JSON.stringify(items, null, 2), 'utf-8');
+    syncGlobalStoreServer().catch(() => {});
   } catch (e) {
     console.error('[Orders DB] Lỗi lưu file orders:', e);
   }
@@ -1091,9 +1167,22 @@ export function autoConsolidateLicensesAndOrders(): { licenses: LicenseItem[]; o
       }
     }
 
+    // Bỏ qua nếu đơn hàng thuộc mã/thiết bị/SĐT đã bị thu hồi hoặc xóa
+    const revokedKeys = loadRevokedKeys().map((r) => r.key.toUpperCase());
+    const isOrderRevoked = ords.some((o) => {
+      const gk = (o.generatedKey || '').trim().toUpperCase();
+      const dev = (o.deviceId || '').trim().toLowerCase();
+      const ph = (o.phone || '').trim().replace(/\D/g, '');
+      if (gk && revokedKeys.includes(gk)) return true;
+      if (dev && revokedKeys.includes(`DEV:${dev}`)) return true;
+      if (ph && revokedKeys.includes(`PHONE:${ph}`)) return true;
+      return false;
+    });
+    if (isOrderRevoked) continue;
+
     // Tìm tất cả các license liên quan
     const matchedLics = licenses.filter((l) => {
-      if (l.isRevoked) return false;
+      if (l.isRevoked || revokedKeys.includes(l.key.toUpperCase())) return false;
       if (devId && l.devices?.some((d) => d.deviceId.toLowerCase() === devId)) return true;
       if (phone && l.phone && l.phone.replace(/\D/g, '') === phone) return true;
       if (ords.some((o) => o.generatedKey && l.key.toUpperCase() === o.generatedKey.toUpperCase())) return true;
@@ -1301,8 +1390,9 @@ app.post('/api/orders/sync', (req: Request, res: Response) => {
 });
 
 // Lấy số lượng đơn hàng chờ duyệt (Hoạt động ngay từ khi tải trang, phục vụ Quả Chuông thông báo)
-app.get('/api/orders/pending-count', (_req: Request, res: Response) => {
+app.get('/api/orders/pending-count', async (_req: Request, res: Response) => {
   try {
+    await pullGlobalStoreServer();
     const orders = loadOrders();
     const pendingOrders = orders.filter((o) => o.status === 'pending');
     res.json({
@@ -1381,7 +1471,8 @@ app.get('/api/orders/my-orders', (req: Request, res: Response) => {
 });
 
 // Admin xem danh sách đơn hàng
-app.get('/api/admin/orders', requireAdmin, (_req: Request, res: Response) => {
+app.get('/api/admin/orders', requireAdmin, async (_req: Request, res: Response) => {
+  await pullGlobalStoreServer();
   const { orders } = autoConsolidateLicensesAndOrders();
   res.json({ success: true, orders });
 });
