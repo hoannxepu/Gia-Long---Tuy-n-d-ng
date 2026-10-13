@@ -175,13 +175,12 @@ function autoConsolidateEdgeLicensesAndOrders(): { licenses: LicenseItem[]; orde
         }
       }
 
-      const licCreatedMs = new Date(primaryLic.createdAt).getTime();
-      const baseMs = !isNaN(licCreatedMs) && licCreatedMs < earliestOrderMs ? licCreatedMs : earliestOrderMs;
-      const finalExpMs = baseMs + totalDays * 24 * 60 * 60 * 1000;
-      primaryLic.expiresAt = new Date(finalExpMs).toISOString();
-      const pkgListStr = ords.map((o) => `${o.pkgName} (+${getOrderDurationDays(o.pkgName, o.price)}n)`).join(' + ');
-      primaryLic.notes = `Bản quyền VIP cộng dồn ${ords.length} gói: ${pkgListStr} = Tổng ${totalDays} ngày (Hạn dùng đến ${new Date(finalExpMs).toLocaleDateString('vi-VN')})`;
-    }
+    const licCreatedMs = new Date(primaryLic.createdAt).getTime();
+    const baseMs = !isNaN(licCreatedMs) && licCreatedMs < earliestOrderMs ? licCreatedMs : earliestOrderMs;
+    const finalExpMs = baseMs + totalDays * 24 * 60 * 60 * 1000;
+    primaryLic.expiresAt = new Date(finalExpMs).toISOString();
+    const pkgListStr = ords.map((o) => `${o.pkgName} (+${getOrderDurationDays(o.pkgName, o.price)}n)`).join(' + ');
+    primaryLic.notes = `Bản quyền VIP cộng dồn ${ords.length} gói: ${pkgListStr} = Tổng ${totalDays} ngày (Hạn dùng đến ${new Date(finalExpMs).toLocaleDateString('vi-VN')})`;
   }
   return { licenses: edgeLicenses, orders: edgeOrders };
 }
