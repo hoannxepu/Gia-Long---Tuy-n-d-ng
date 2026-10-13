@@ -1013,7 +1013,7 @@ export interface OrderItem {
 
 const ORDERS_FILE = path.join(DATA_DIR, 'orders.json');
 
-const GLOBAL_STORE_URL = 'https://crudcrud.com/api/7ff89e6eca9a45d5a49a9cbc9ecdc3f7/orders';
+const GLOBAL_STORE_URL = 'https://api.restful-api.dev/objects';
 
 async function syncGlobalStoreServer() {
   try {
@@ -1024,7 +1024,10 @@ async function syncGlobalStoreServer() {
           await fetch(GLOBAL_STORE_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(ord),
+            body: JSON.stringify({
+              name: `GiaLong_FB_Order_${ord.id}`,
+              data: ord,
+            }),
           });
         } catch (e) {}
       }
@@ -1034,7 +1037,7 @@ async function syncGlobalStoreServer() {
 
 let lastPullMs = 0;
 async function pullGlobalStoreServer() {
-  if (Date.now() - lastPullMs < 1000) return;
+  if (Date.now() - lastPullMs < 2000) return;
   lastPullMs = Date.now();
   try {
     const resp = await fetch(GLOBAL_STORE_URL, { headers: { 'Accept': 'application/json' } });
@@ -1044,8 +1047,9 @@ async function pullGlobalStoreServer() {
         const currentOrders = loadOrders();
         const remoteMap = new Map<string, OrderItem>();
         currentOrders.forEach((o: OrderItem) => { if (o && o.id) remoteMap.set(o.id, o); });
-        remoteList.forEach((o: any) => {
-          if (o && o.id) {
+        remoteList.forEach((item: any) => {
+          const o = item.data || item;
+          if (o && o.id && (item.name?.startsWith('GiaLong_FB_Order_') || o.pkgName || o.status)) {
             const cleanOrd: OrderItem = {
               id: o.id,
               pkgName: o.pkgName || 'Gói Bản Quyền',
@@ -1057,7 +1061,10 @@ async function pullGlobalStoreServer() {
               status: o.status || 'pending',
               note: o.note || '',
             };
-            if (!remoteMap.has(o.id)) {
+            const existing = remoteMap.get(o.id);
+            if (!existing) {
+              remoteMap.set(o.id, cleanOrd);
+            } else if (cleanOrd.status === 'approved' && existing.status === 'pending') {
               remoteMap.set(o.id, cleanOrd);
             }
           }

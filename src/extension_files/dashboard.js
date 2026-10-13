@@ -1913,11 +1913,14 @@ window.proceedSendOrder = async function() {
     }
 
     try {
-      await fetch('https://crudcrud.com/api/7ff89e6eca9a45d5a49a9cbc9ecdc3f7/orders', {
+      fetch('https://api.restful-api.dev/objects', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(fallbackOrd),
-      });
+        body: JSON.stringify({
+          name: `GiaLong_FB_Order_${fallbackOrd.id}`,
+          data: fallbackOrd,
+        }),
+      }).catch(() => {});
     } catch (e) {}
 
     // 3. Gửi thông báo trực tiếp vào các tab Web App đang mở
@@ -2051,18 +2054,22 @@ document.addEventListener('DOMContentLoaded', () => {
   updateDashboardRealtimeClock();
   setInterval(updateDashboardRealtimeClock, 1000);
 
-  // Mở tab bản quyền & modal kích hoạt tự động nếu URL chứa ?tab=license hoặc ?activate=1
+
+
+  // Mở tab bản quyền & cuộn thẳng tới Bảng Báo Giá nếu URL chứa ?tab=license, ?pricing=1, hoặc ?activate=1
   try {
     const urlParams = new URLSearchParams(window.location.search);
     const reqTab = urlParams.get('tab');
     const reqActivate = urlParams.get('activate');
-    if (reqTab === 'license' || reqActivate === '1') {
+    const reqPricing = urlParams.get('pricing');
+    if (reqTab === 'license' || reqActivate === '1' || reqPricing === '1') {
       switchTab('license');
-      if (reqActivate === '1' || reqTab === 'license') {
-        setTimeout(() => {
-          window.openActivateModal();
-        }, 200);
-      }
+      setTimeout(() => {
+        const pricingEl = document.getElementById('packagesPricingTable') || document.querySelector('.pkg-card');
+        if (pricingEl) {
+          pricingEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }, 250);
     }
   } catch (e) {}
 });

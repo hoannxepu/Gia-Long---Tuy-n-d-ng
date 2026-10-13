@@ -926,12 +926,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   btnPopupOpenLicense?.addEventListener('click', (e) => {
     e.stopPropagation();
-    chrome.tabs.create({ url: chrome.runtime.getURL('dashboard.html?tab=license&activate=1') });
+    chrome.tabs.create({ url: chrome.runtime.getURL('dashboard.html?tab=license&pricing=1') });
   });
 
   document.getElementById('popupLicenseBar')?.addEventListener('click', () => {
-    chrome.tabs.create({ url: chrome.runtime.getURL('dashboard.html?tab=license&activate=1') });
+    chrome.tabs.create({ url: chrome.runtime.getURL('dashboard.html?tab=license&pricing=1') });
   });
+
+
 
   refreshPopupLicense();
 

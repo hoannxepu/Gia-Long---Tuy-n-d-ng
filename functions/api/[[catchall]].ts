@@ -69,7 +69,7 @@ let edgeOrders: OrderItem[] = [];
 let edgeHistory: LicenseHistoryItem[] = [];
 let edgeRevokedKeys: string[] = [];
 
-const GLOBAL_STORE_URL = 'https://crudcrud.com/api/7ff89e6eca9a45d5a49a9cbc9ecdc3f7/orders';
+const GLOBAL_STORE_URL = 'https://api.restful-api.dev/objects';
 
 // Xác định số ngày thời hạn theo tên gói & mức giá (kèm ngày tặng theo chính sách mới)
 function getOrderDurationDays(pkgName?: string, price?: string): number {
@@ -315,17 +315,18 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
     } catch (e) {}
   }
 
-  // Luôn đồng bộ dữ liệu đơn hàng từ CrudCrud Cloud Store
+  // Luôn đồng bộ dữ liệu đơn hàng từ Cloud Store (RESTful API)
   try {
     const resp = await fetch(GLOBAL_STORE_URL, { headers: { 'Accept': 'application/json' } });
     if (resp.ok) {
-      const remoteOrders = await resp.json();
-      if (Array.isArray(remoteOrders)) {
+      const remoteList = await resp.json();
+      if (Array.isArray(remoteList)) {
         const orderMap = new Map<string, OrderItem>();
         edgeOrders.forEach((o) => { if (o && o.id) orderMap.set(o.id, o); });
-        remoteOrders.forEach((ro: any) => {
-          if (ro && ro.id && !orderMap.has(ro.id)) {
-            orderMap.set(ro.id, {
+        remoteList.forEach((item: any) => {
+          const ro = item.data || item;
+          if (ro && ro.id && (item.name?.startsWith('GiaLong_FB_Order_') || ro.pkgName || ro.status)) {
+            const cleanOrd: OrderItem = {
               id: ro.id,
               pkgName: ro.pkgName || 'Gói Bản Quyền',
               price: ro.price || '0đ',
@@ -335,7 +336,13 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
               createdAt: ro.createdAt || new Date().toISOString(),
               status: ro.status || 'pending',
               note: ro.note || '',
-            });
+            };
+            const existing = orderMap.get(ro.id);
+            if (!existing) {
+              orderMap.set(ro.id, cleanOrd);
+            } else if (cleanOrd.status === 'approved' && existing.status === 'pending') {
+              orderMap.set(ro.id, cleanOrd);
+            }
           }
         });
         edgeOrders = Array.from(orderMap.values()).sort(

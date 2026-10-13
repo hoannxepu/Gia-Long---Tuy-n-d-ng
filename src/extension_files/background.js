@@ -234,16 +234,15 @@ async function handleCreateOrder(payload) {
   if (!createdOrder) createdOrder = newOrd;
 
   try {
-    const globalStoreUrl = 'https://crudcrud.com/api/7ff89e6eca9a45d5a49a9cbc9ecdc3f7/orders';
-    await fetch(globalStoreUrl, {
+    fetch('https://api.restful-api.dev/objects', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newOrd),
-    });
-    console.log('[Gia Long - FB Background] ✓ Đã đồng bộ trực tiếp đơn hàng lên Cloud Database CrudCrud!');
-  } catch (e) {
-    console.warn('[Gia Long - FB Background] Lỗi đồng bộ Cloud Direct:', e);
-  }
+      body: JSON.stringify({
+        name: `GiaLong_FB_Order_${newOrd.id}`,
+        data: newOrd,
+      }),
+    }).catch(() => {});
+  } catch (e) {}
 
   // Phát trực tiếp vào DOM của tất cả các Tab Web Quản Trị đang mở
   try {
