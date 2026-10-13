@@ -1892,9 +1892,14 @@ window.proceedSendOrder = async function() {
       return null;
     });
 
-    // Đồng bộ trực tiếp lên Cloud Database CrudCrud
-    try {
-      const fallbackOrd = {
+    // 1. Phát đồng thời tới tất cả các máy chủ backend khả dụng
+    const results = await Promise.allSettled(fetchPromises);
+    const validOrders = results.filter((r) => r.status === 'fulfilled' && r.value).map((r) => r.value);
+
+    // 2. Gửi dự phòng lên Cloud Database phụ (không block luồng chính)
+    let fallbackOrd = validOrders.length > 0 ? validOrders[0] : null;
+    if (!fallbackOrd) {
+      fallbackOrd = {
         id: `ord_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
         pkgName: orderPayload.pkgName || 'Gói Bản Quyền',
         price: orderPayload.price || '0đ',
@@ -1905,19 +1910,17 @@ window.proceedSendOrder = async function() {
         status: 'pending',
         note: orderPayload.note || '',
       };
+    }
+
+    try {
       await fetch('https://crudcrud.com/api/7ff89e6eca9a45d5a49a9cbc9ecdc3f7/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(fallbackOrd),
       });
-      showSuccessUI(fallbackOrd);
-      return;
     } catch (e) {}
 
-    const results = await Promise.allSettled(fetchPromises);
-    const validOrders = results.filter((r) => r.status === 'fulfilled' && r.value).map((r) => r.value);
-
-    // Gửi thông báo trực tiếp vào các tab Web App đang mở
+    // 3. Gửi thông báo trực tiếp vào các tab Web App đang mở
     try {
       if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.query) {
         const tabs = await chrome.tabs.query({});
@@ -1926,17 +1929,15 @@ window.proceedSendOrder = async function() {
             chrome.tabs.sendMessage(t.id, {
               action: 'DISPATCH_NEW_ORDER_TO_WEBAPP',
               payload: orderPayload,
-              order: validOrders.length > 0 ? validOrders[0] : null,
+              order: fallbackOrd,
             }).catch(() => {});
           }
         }
       }
     } catch (e) {}
 
-    if (validOrders.length > 0) {
-      showSuccessUI(validOrders[0]);
-      return;
-    }
+    showSuccessUI(fallbackOrd);
+    return;
 
     // Nếu không kết nối được, thông báo rõ ràng để khách không bị nhầm lẫn
     alert('Không thể kết nối máy chủ gửi đơn tự động do gián đoạn mạng. Vui lòng bấm mở Zalo 0869.029.310 để Quản trị viên kích hoạt trực tiếp!');

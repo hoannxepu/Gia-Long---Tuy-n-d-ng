@@ -21,11 +21,18 @@ async function interruptibleSleep(ms) {
   }
 }
 
-// Chống ngủ Service Worker trong Manifest V3
+// Chống ngủ Service Worker trong Manifest V3 & Tự động đồng bộ trạng thái duyệt đơn từ Admin
+let keepAliveCounter = 0;
 function startKeepAlive() {
   stopKeepAlive();
+  keepAliveCounter = 0;
   keepAliveTimer = setInterval(() => {
     chrome.runtime.getPlatformInfo(() => {});
+    keepAliveCounter++;
+    // Định kỳ 30s (2 lần tick) tự động đồng bộ đơn hàng & kích hoạt mã mới từ máy chủ Quản trị
+    if (keepAliveCounter % 2 === 0) {
+      fetchMyOrdersAndSync().catch(() => {});
+    }
   }, 15000);
 }
 
