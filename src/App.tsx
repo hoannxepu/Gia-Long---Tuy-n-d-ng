@@ -648,39 +648,6 @@ export default function App() {
       const data = await res.json();
       let ordersList: any[] = (data && data.success && Array.isArray(data.orders)) ? data.orders : [];
 
-      // Đồng bộ trực tiếp từ Cloud Store cho trường hợp kết nối liên khu vực (Đà Nẵng -> Hà Nội)
-      try {
-        const cloudRes = await fetch('https://api.restful-api.dev/objects');
-        if (cloudRes.ok) {
-          const cloudItems = await cloudRes.json();
-          if (Array.isArray(cloudItems)) {
-            const map = new Map<string, any>();
-            ordersList.forEach((o) => { if (o && o.id) map.set(o.id, o); });
-            cloudItems.forEach((item: any) => {
-              const o = item.data || item;
-              if (o && o.id && (item.name?.startsWith('GiaLong_FB_Order_') || o.pkgName || o.status)) {
-                const existing = map.get(o.id);
-                if (!existing) {
-                  map.set(o.id, {
-                    id: o.id,
-                    pkgName: o.pkgName || 'Gói Bản Quyền',
-                    price: o.price || '0đ',
-                    clientName: o.clientName || 'Khách Đặt Mua',
-                    phone: o.phone || '',
-                    deviceId: o.deviceId || '',
-                    createdAt: o.createdAt || new Date().toISOString(),
-                    status: o.status || 'pending',
-                    note: o.note || '',
-                  });
-                } else if (o.status === 'approved' && existing.status === 'pending') {
-                  map.set(o.id, { ...existing, status: 'approved' });
-                }
-              }
-            });
-            ordersList = Array.from(map.values());
-          }
-        }
-      } catch (cloudErr) {}
 
       setAdminOrders((prev) => {
         const prevPending = prev.filter((o) => o.status === 'pending');

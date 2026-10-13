@@ -1913,16 +1913,6 @@ window.proceedSendOrder = async function() {
       };
     }
 
-    try {
-      fetch('https://api.restful-api.dev/objects', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: `GiaLong_FB_Order_${fallbackOrd.id}`,
-          data: fallbackOrd,
-        }),
-      }).catch(() => {});
-    } catch (e) {}
 
     // 3. Gửi thông báo trực tiếp vào các tab Web App đang mở
     try {

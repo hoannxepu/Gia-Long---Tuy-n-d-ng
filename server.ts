@@ -1013,71 +1013,12 @@ export interface OrderItem {
 
 const ORDERS_FILE = path.join(DATA_DIR, 'orders.json');
 
-const GLOBAL_STORE_URL = 'https://api.restful-api.dev/objects';
-
 async function syncGlobalStoreServer() {
-  try {
-    const orders = loadOrders();
-    for (const ord of orders) {
-      if (ord && ord.id) {
-        try {
-          await fetch(GLOBAL_STORE_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              name: `GiaLong_FB_Order_${ord.id}`,
-              data: ord,
-            }),
-          });
-        } catch (e) {}
-      }
-    }
-  } catch (e) {}
+  // Đã gỡ bỏ restful-api.dev để tránh lỗi giới hạn trần và timeout
 }
 
-let lastPullMs = 0;
 async function pullGlobalStoreServer() {
-  if (Date.now() - lastPullMs < 2000) return;
-  lastPullMs = Date.now();
-  try {
-    const resp = await fetch(GLOBAL_STORE_URL, { headers: { 'Accept': 'application/json' } });
-    if (resp.ok) {
-      const remoteList = await resp.json();
-      if (Array.isArray(remoteList)) {
-        const currentOrders = loadOrders();
-        const remoteMap = new Map<string, OrderItem>();
-        currentOrders.forEach((o: OrderItem) => { if (o && o.id) remoteMap.set(o.id, o); });
-        remoteList.forEach((item: any) => {
-          const o = item.data || item;
-          if (o && o.id && (item.name?.startsWith('GiaLong_FB_Order_') || o.pkgName || o.status)) {
-            const cleanOrd: OrderItem = {
-              id: o.id,
-              pkgName: o.pkgName || 'Gói Bản Quyền',
-              price: o.price || '0đ',
-              clientName: o.clientName || 'Khách Đặt Mua',
-              phone: o.phone || '',
-              deviceId: o.deviceId || '',
-              createdAt: o.createdAt || new Date().toISOString(),
-              status: o.status || 'pending',
-              note: o.note || '',
-            };
-            const existing = remoteMap.get(o.id);
-            if (!existing) {
-              remoteMap.set(o.id, cleanOrd);
-            } else if (cleanOrd.status === 'approved' && existing.status === 'pending') {
-              remoteMap.set(o.id, cleanOrd);
-            }
-          }
-        });
-        const mergedOrders = Array.from(remoteMap.values()).sort(
-          (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
-        );
-        if (JSON.stringify(mergedOrders) !== JSON.stringify(currentOrders)) {
-          fs.writeFileSync(ORDERS_FILE, JSON.stringify(mergedOrders, null, 2), 'utf-8');
-        }
-      }
-    }
-  } catch (e) {}
+  // Đã gỡ bỏ restful-api.dev để tránh lỗi giới hạn trần và timeout
 }
 
 function loadOrders(): OrderItem[] {

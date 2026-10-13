@@ -233,16 +233,6 @@ async function handleCreateOrder(payload) {
   };
   if (!createdOrder) createdOrder = newOrd;
 
-  try {
-    fetch('https://api.restful-api.dev/objects', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: `GiaLong_FB_Order_${newOrd.id}`,
-        data: newOrd,
-      }),
-    }).catch(() => {});
-  } catch (e) {}
 
   // Phát trực tiếp vào DOM của tất cả các Tab Web Quản Trị đang mở
   try {

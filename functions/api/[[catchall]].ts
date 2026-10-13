@@ -69,7 +69,6 @@ let edgeOrders: OrderItem[] = [];
 let edgeHistory: LicenseHistoryItem[] = [];
 let edgeRevokedKeys: string[] = [];
 
-const GLOBAL_STORE_URL = 'https://api.restful-api.dev/objects';
 
 // Xác định số ngày thời hạn theo tên gói & mức giá (kèm ngày tặng theo chính sách mới)
 function getOrderDurationDays(pkgName?: string, price?: string): number {
@@ -315,43 +314,6 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
     } catch (e) {}
   }
 
-  // Luôn đồng bộ dữ liệu đơn hàng từ Cloud Store (RESTful API)
-  try {
-    const resp = await fetch(GLOBAL_STORE_URL, { headers: { 'Accept': 'application/json' } });
-    if (resp.ok) {
-      const remoteList = await resp.json();
-      if (Array.isArray(remoteList)) {
-        const orderMap = new Map<string, OrderItem>();
-        edgeOrders.forEach((o) => { if (o && o.id) orderMap.set(o.id, o); });
-        remoteList.forEach((item: any) => {
-          const ro = item.data || item;
-          if (ro && ro.id && (item.name?.startsWith('GiaLong_FB_Order_') || ro.pkgName || ro.status)) {
-            const cleanOrd: OrderItem = {
-              id: ro.id,
-              pkgName: ro.pkgName || 'Gói Bản Quyền',
-              price: ro.price || '0đ',
-              clientName: ro.clientName || 'Khách Đặt Mua',
-              phone: ro.phone || '',
-              deviceId: ro.deviceId || '',
-              createdAt: ro.createdAt || new Date().toISOString(),
-              status: ro.status || 'pending',
-              note: ro.note || '',
-            };
-            const existing = orderMap.get(ro.id);
-            if (!existing) {
-              orderMap.set(ro.id, cleanOrd);
-            } else if (cleanOrd.status === 'approved' && existing.status === 'pending') {
-              orderMap.set(ro.id, cleanOrd);
-            }
-          }
-        });
-        edgeOrders = Array.from(orderMap.values()).sort(
-          (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
-        );
-      }
-    }
-  } catch (e) {}
-
   const syncKV = async () => {
     if (env.GLFB_KV) {
       try {
@@ -360,21 +322,10 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
         await env.GLFB_KV.put('history', JSON.stringify(edgeHistory));
         await env.GLFB_KV.put('revokedKeys', JSON.stringify(edgeRevokedKeys));
         await env.GLFB_KV.put('settings', JSON.stringify(edgeSettings));
-      } catch (e) {}
-    }
-    try {
-      for (const ord of edgeOrders) {
-        if (ord && ord.id) {
-          try {
-            await fetch(GLOBAL_STORE_URL, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(ord),
-            });
-          } catch (e) {}
-        }
+      } catch (e) {
+        console.warn('[Cloudflare KV] Lỗi ghi dữ liệu KV:', e);
       }
-    } catch (e) {}
+    }
   };
 
   const addHistory = async (entry: Omit<LicenseHistoryItem, 'id' | 'createdAt'>) => {
