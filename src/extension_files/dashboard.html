@@ -104,6 +104,19 @@
     @media (max-width: 800px) { .license-plans-grid { grid-template-columns: repeat(2, 1fr); } }
     @media (max-width: 580px) { .license-plans-grid { grid-template-columns: 1fr; } }
 
+    @keyframes highlightPulse {
+      0% { box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.7); }
+      50% { box-shadow: 0 0 24px 6px rgba(56, 189, 248, 0.45); }
+      100% { box-shadow: 0 0 0 0 rgba(56, 189, 248, 0); }
+    }
+    .pricing-highlight-pulse {
+      animation: highlightPulse 1.2s ease-in-out 3;
+      border: 2px solid #38bdf8 !important;
+      border-radius: 18px;
+      padding: 12px;
+      background: rgba(14, 165, 233, 0.04);
+    }
+
     .process-steps-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
     @media (max-width: 860px) { .process-steps-grid { grid-template-columns: 1fr; } }
 
@@ -601,67 +614,26 @@
           </div>
         </div>
 
-        <!-- KHỐI NHẬP & KÍCH HOẠT MÃ BẢN QUYỀN TRỰC TIẾP (KEY ACTIVATION BOX) -->
-        <div id="licenseActivationCard" style="background: linear-gradient(135deg, rgba(6, 78, 59, 0.45) 0%, rgba(15, 23, 42, 0.95) 100%); border: 1.5px solid rgba(16, 185, 129, 0.55); border-radius: 16px; padding: 16px 20px; box-shadow: 0 8px 25px rgba(0,0,0,0.5); display: flex; flex-direction: column; gap: 11px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
-            <div style="display: flex; align-items: center; gap: 10px;">
-              <div style="width: 38px; height: 38px; border-radius: 10px; background: rgba(16, 185, 129, 0.2); border: 1px solid rgba(16, 185, 129, 0.4); display: flex; align-items: center; justify-content: center; font-size: 20px;">
-                🔑
-              </div>
-              <div>
-                <h3 style="margin: 0; font-size: 14.5px; font-weight: 800; color: #ffffff; letter-spacing: 0.2px;">
-                  KÍCH HOẠT MÃ BẢN QUYỀN (LICENSE KEY)
-                </h3>
-                <p style="margin: 2px 0 0 0; font-size: 11px; color: #94a3b8;">
-                  Nhập mã bản quyền Quản trị viên cấp (hoặc mã VIP / Dùng thử) để kích hoạt ngay trên máy này
-                </p>
-              </div>
+        <!-- 2. BẢNG BÁO GIÁ GÓI BẢN QUYỀN (HIỆN TRỰC TIẾP KHI KÍCH HOẠT KEY HOẶC MỞ TAB) -->
+        <div id="packagesPricingTable" style="scroll-margin-top: 80px; display: flex; flex-direction: column; gap: 12px; transition: all 0.3s ease;">
+          <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 6px; border-bottom: 1.5px solid rgba(56, 189, 248, 0.4); padding-bottom: 10px; margin-top: 4px;">
+            <div>
+              <h2 style="font-size: 16px; font-weight: 800; color: #ffffff; display: flex; align-items: center; gap: 8px; margin: 0;">
+                <span style="color: #f59e0b; font-size: 18px;">📑</span>
+                <span style="background: linear-gradient(to right, #38bdf8, #818cf8, #f472b6); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">Bảng Báo Giá Gói Bản Quyền Gia Long - FB</span>
+                <span style="font-size: 11px; background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); padding: 2px 8px; border-radius: 9999px;">Kích Hoạt & Cấp Gói Tức Thì</span>
+              </h2>
+              <p style="font-size: 12px; color: #cbd5e1; margin: 4px 0 0 0;">
+                Chi phí chỉ từ <strong>~70đ – 90đ/bài</strong> • Nhấp vào gói để xem quy trình đặt mua &amp; thanh toán quét mã QR tự động:
+              </p>
             </div>
-            <button type="button" id="btnRefreshLicenseStatus" class="btn btn-sub" style="font-size: 11px; padding: 5px 12px; border-radius: 8px; display: inline-flex; align-items: center; gap: 5px; cursor: pointer;">
-              <span>🔄 Làm Mới Trạng Thái</span>
-            </button>
+            <span style="font-size: 11px; color: #94a3b8; font-family: monospace;">
+              🔒 Khóa an toàn theo phần cứng máy tính • 100% Không sợ lộ
+            </span>
           </div>
 
-          <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: stretch;">
-            <div style="flex: 1; min-width: 260px;">
-              <input
-                type="text"
-                id="inputNewLicenseKey"
-                placeholder="Dán mã bản quyền của bạn tại đây (Ví dụ: GLFB-VIP-XXXXX)..."
-                style="width: 100%; box-sizing: border-box; height: 42px; background: #080d1a; border: 1.5px solid #10b981; border-radius: 10px; padding: 0 14px; font-family: monospace; font-size: 13.5px; font-weight: 700; color: #ffffff; text-transform: uppercase; outline: none;"
-              />
-            </div>
-            <button
-              type="button"
-              id="btnSubmitActivateLicense"
-              class="btn btn-primary"
-              style="height: 42px; padding: 0 22px; font-size: 13px; font-weight: 800; background: linear-gradient(135deg, #059669, #10b981); box-shadow: 0 4px 14px rgba(16,185,129,0.35); border-radius: 10px; cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center; gap: 6px;"
-            >
-              <span>⚡ Kích Hoạt Ngay</span>
-            </button>
-          </div>
-
-          <div id="licenseActivationResultMsg" style="display: none; padding: 9px 14px; border-radius: 8px; font-size: 12px; font-weight: 600;"></div>
-        </div>
-
-        <!-- 2. TIÊU ĐỀ SECTION BẢNG BÁO GIÁ GÓI BẢN QUYỀN (GIỐNG QUẢN TRỊ ẢNH 2) -->
-        <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 6px; border-bottom: 1px solid rgba(51, 65, 85, 0.7); padding-bottom: 8px; margin-top: 4px;">
-          <div>
-            <h2 style="font-size: 14.5px; font-weight: 800; color: #ffffff; display: flex; align-items: center; gap: 7px; margin: 0;">
-              <span style="color: #f59e0b;">📑</span>
-              <span>Bảng Báo Giá Gói Bản Quyền</span>
-            </h2>
-            <p style="font-size: 11px; color: #94a3b8; margin: 3px 0 0 0;">
-              Chi phí chỉ từ <strong>~70đ – 90đ/bài</strong> • Nhấp vào gói để xem quy trình đặt mua &amp; hỗ trợ bên dưới:
-            </p>
-          </div>
-          <span style="font-size: 10.5px; color: #64748b;">
-            Khóa theo phần cứng máy tính • An toàn 100%
-          </span>
-        </div>
-
-        <!-- 3. BẢNG 5 GÓI CƯỚC DÀN NGANG CHUẨN ĐỒNG BỘ 100% VỚI QUẢN TRỊ (ẢNH 2) -->
-        <div class="license-plans-grid" style="padding-top: 18px; margin-bottom: 6px;">
+          <!-- 3. BẢNG 5 GÓI CƯỚC DÀN NGANG CHUẨN ĐỒNG BỘ 100% VỚI QUẢN TRỊ -->
+          <div class="license-plans-grid" style="padding-top: 10px; margin-bottom: 6px;">
           
           <!-- 0. GÓI DÙNG THỬ (0đ - GIỚI HẠN 20 BÀI) -->
           <div class="pkg-card" data-pkg-name="Gói Dùng Thử" data-pkg-price="0đ" onclick="openOrderModal('Gói Dùng Thử', '0đ')" data-pkg-note="Dùng thử 1 ngày (giới hạn 20 bài đăng) • Miễn phí 100%, không cần chuyển khoản" style="background: rgba(15, 23, 42, 0.95); border: 1px solid rgba(51, 65, 85, 0.85); border-radius: 16px; padding: 15px; display: flex; flex-direction: column; justify-content: space-between; gap: 12px; cursor: pointer; transition: all 0.2s ease; position: relative;">
@@ -938,6 +910,50 @@
             </div>
           </div>
 
+        </div>
+        <!-- /packagesPricingTable -->
+
+        <!-- KHỐI NHẬP & KÍCH HOẠT MÃ BẢN QUYỀN TRỰC TIẾP (DÀNH CHO KHÁCH HÀNG ĐÃ CÓ MÃ) -->
+        <div id="licenseActivationCard" style="background: linear-gradient(135deg, rgba(6, 78, 59, 0.35) 0%, rgba(15, 23, 42, 0.95) 100%); border: 1.5px solid rgba(16, 185, 129, 0.55); border-radius: 16px; padding: 16px 20px; box-shadow: 0 8px 25px rgba(0,0,0,0.5); display: flex; flex-direction: column; gap: 11px; margin-top: 4px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <div style="width: 38px; height: 38px; border-radius: 10px; background: rgba(16, 185, 129, 0.2); border: 1px solid rgba(16, 185, 129, 0.4); display: flex; align-items: center; justify-content: center; font-size: 20px;">
+                🔑
+              </div>
+              <div>
+                <h3 style="margin: 0; font-size: 14.5px; font-weight: 800; color: #ffffff; letter-spacing: 0.2px;">
+                  ĐÃ CÓ MÃ BẢN QUYỀN? NHẬP VÀ KÍCH HOẠT TẠI ĐÂY
+                </h3>
+                <p style="margin: 2px 0 0 0; font-size: 11px; color: #94a3b8;">
+                  Nhập mã bản quyền do Quản trị viên cấp (hoặc mã VIP / Dùng thử) để kích hoạt ngay trên máy tính này
+                </p>
+              </div>
+            </div>
+            <button type="button" id="btnRefreshLicenseStatus" class="btn btn-sub" style="font-size: 11px; padding: 5px 12px; border-radius: 8px; display: inline-flex; align-items: center; gap: 5px; cursor: pointer;">
+              <span>🔄 Làm Mới Trạng Thái</span>
+            </button>
+          </div>
+
+          <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: stretch;">
+            <div style="flex: 1; min-width: 260px;">
+              <input
+                type="text"
+                id="inputNewLicenseKey"
+                placeholder="Dán mã bản quyền của bạn tại đây (Ví dụ: GLFB-VIP-XXXXX)..."
+                style="width: 100%; box-sizing: border-box; height: 42px; background: #080d1a; border: 1.5px solid #10b981; border-radius: 10px; padding: 0 14px; font-family: monospace; font-size: 13.5px; font-weight: 700; color: #ffffff; text-transform: uppercase; outline: none;"
+              />
+            </div>
+            <button
+              type="button"
+              id="btnSubmitActivateLicense"
+              class="btn btn-primary"
+              style="height: 42px; padding: 0 22px; font-size: 13px; font-weight: 800; background: linear-gradient(135deg, #059669, #10b981); box-shadow: 0 4px 14px rgba(16,185,129,0.35); border-radius: 10px; cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center; gap: 6px;"
+            >
+              <span>⚡ Kích Hoạt Ngay</span>
+            </button>
+          </div>
+
+          <div id="licenseActivationResultMsg" style="display: none; padding: 9px 14px; border-radius: 8px; font-size: 12px; font-weight: 600;"></div>
         </div>
 
         <!-- 4. KHU VỰC BẢN QUYỀN & QUY TRÌNH ĐẶT MUA TỰ ĐỘNG (CHUẨN WEB QUẢN TRỊ ẢNH 2) -->

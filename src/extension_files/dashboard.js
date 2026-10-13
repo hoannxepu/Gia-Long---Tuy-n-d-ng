@@ -1126,32 +1126,33 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (e.target === modalActivateLicense) window.closeActivateModal();
   });
 
+  window.scrollToPricingTable = function() {
+    switchTab('license');
+    if (window.closeActivateModal) window.closeActivateModal();
+    const pricingEl = document.getElementById('packagesPricingTable') || document.querySelector('.license-plans-grid');
+    if (pricingEl) {
+      pricingEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      pricingEl.classList.add('pricing-highlight-pulse');
+      setTimeout(() => pricingEl.classList.remove('pricing-highlight-pulse'), 3600);
+    }
+  };
+
   linkGoToBuyPackages?.addEventListener('click', () => {
     window.closeActivateModal();
-    switchTab('license');
-    const plansGrid = document.querySelector('.license-plans-grid');
-    if (plansGrid) {
-      plansGrid.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
+    window.scrollToPricingTable();
   });
 
   licenseHeaderPill?.addEventListener('click', () => {
-    switchTab('license');
-    window.openActivateModal();
+    window.scrollToPricingTable();
   });
   btnHeaderLicenseAction?.addEventListener('click', (e) => {
     e.stopPropagation();
-    switchTab('license');
-    window.openActivateModal();
+    window.scrollToPricingTable();
   });
 
   const btnQuickRenewModal = document.getElementById('btnQuickRenewModal');
   btnQuickRenewModal?.addEventListener('click', () => {
-    switchTab('license');
-    const plansGrid = document.querySelector('.license-plans-grid');
-    if (plansGrid) {
-      plansGrid.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
+    window.scrollToPricingTable();
   });
 
   async function loadLicenseDetails(forceRemote = false) {
@@ -2063,13 +2064,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const reqActivate = urlParams.get('activate');
     const reqPricing = urlParams.get('pricing');
     if (reqTab === 'license' || reqActivate === '1' || reqPricing === '1') {
-      switchTab('license');
-      setTimeout(() => {
-        const pricingEl = document.getElementById('packagesPricingTable') || document.querySelector('.pkg-card');
-        if (pricingEl) {
-          pricingEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
-      }, 250);
+      window.scrollToPricingTable();
+      setTimeout(() => window.scrollToPricingTable(), 150);
+      setTimeout(() => window.scrollToPricingTable(), 400);
     }
   } catch (e) {}
 });
