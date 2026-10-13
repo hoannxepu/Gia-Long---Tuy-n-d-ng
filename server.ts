@@ -981,15 +981,23 @@ app.post('/api/admin/licenses/delete', requireAdmin, (req: Request, res: Respons
   const toDelete = licenses.find((l) => l.id === targetId || l.key === targetId);
 
   if (toDelete) {
-    const devId = toDelete.devices?.[0]?.deviceId?.toLowerCase();
-    const phone = toDelete.phone?.replace(/\D/g, '');
+    const devIds = (toDelete.devices || []).map((d) => (d.deviceId || '').trim().toUpperCase()).filter(Boolean);
+    const phone = (toDelete.phone || '').trim().replace(/\D/g, '');
 
-    addRevokedKey(toDelete.key, 'Quản trị viên đã xóa người dùng khỏi danh sách');
+    addRevokedKey(toDelete.key.toUpperCase(), 'Quản trị viên đã xóa người dùng khỏi danh sách');
+    addRevokedKey(toDelete.id.toUpperCase(), 'Quản trị viên đã xóa người dùng khỏi danh sách');
     if (toDelete.aliasKeys && Array.isArray(toDelete.aliasKeys)) {
-      toDelete.aliasKeys.forEach((ak) => addRevokedKey(ak, 'Quản trị viên đã xóa người dùng khỏi danh sách'));
+      toDelete.aliasKeys.forEach((ak) => addRevokedKey(ak.toUpperCase(), 'Quản trị viên đã xóa người dùng khỏi danh sách'));
     }
-    if (devId) addRevokedKey(`DEV:${devId}`, 'Quản trị viên đã xóa thiết bị này khỏi danh sách');
-    if (phone) addRevokedKey(`PHONE:${phone}`, 'Quản trị viên đã xóa SĐT này khỏi danh sách');
+    devIds.forEach((dev) => {
+      addRevokedKey(dev, 'Quản trị viên đã xóa thiết bị này khỏi danh sách');
+      addRevokedKey(`DEV:${dev}`, 'Quản trị viên đã xóa thiết bị này khỏi danh sách');
+    });
+    if (phone) {
+      addRevokedKey(phone, 'Quản trị viên đã xóa SĐT này khỏi danh sách');
+      addRevokedKey(`PHONE:${phone}`, 'Quản trị viên đã xóa SĐT này khỏi danh sách');
+    }
+
     addHistoryEntry({
       action: 'revoke',
       actionName: 'Xóa người dùng',
@@ -1001,15 +1009,22 @@ app.post('/api/admin/licenses/delete', requireAdmin, (req: Request, res: Respons
       notes: `Quản trị viên xóa người dùng "${toDelete.clientName}" khỏi danh sách`,
     });
 
-    // Xóa hoặc hủy bỏ toàn bộ các đơn hàng của người dùng này để KHÔNG bị tự động tạo lại
+    // Xóa vĩnh viễn toàn bộ các đơn hàng của người dùng này để KHÔNG bị tự động tạo lại
     let orders = loadOrders();
-    const aliasSet = new Set<string>([toDelete.key, ...(toDelete.aliasKeys || [])]);
+    const aliasSet = new Set<string>([toDelete.key.toUpperCase(), ...(toDelete.aliasKeys || []).map((k) => k.toUpperCase())]);
 
     orders = orders.filter((o) => {
-      const matchKey = o.generatedKey && aliasSet.has(o.generatedKey);
-      const matchDev = devId && o.deviceId && o.deviceId.toLowerCase() === devId;
-      const matchPhone = phone && o.phone && o.phone.replace(/\D/g, '') === phone;
-      return !(matchKey || matchDev || matchPhone);
+      const oKey = (o.generatedKey || '').trim().toUpperCase();
+      const matchKey = oKey && aliasSet.has(oKey);
+      const oDev = (o.deviceId || '').trim().toUpperCase();
+      const matchDev = oDev && (devIds.includes(oDev) || devIds.some((d) => oDev.includes(d)));
+      const oPhone = (o.phone || '').trim().replace(/\D/g, '');
+      const matchPhone = phone && oPhone && oPhone === phone;
+      if (matchKey || matchDev || matchPhone) {
+        addRevokedKey(o.id.toUpperCase(), 'Đơn hàng liên kết với bản quyền đã xóa');
+        return false;
+      }
+      return true;
     });
     saveOrders(orders);
   }
@@ -1020,8 +1035,9 @@ app.post('/api/admin/licenses/delete', requireAdmin, (req: Request, res: Respons
     success: true,
     message: '✓ Đã xóa người dùng khỏi danh sách và khóa quyền vĩnh viễn trên toàn bộ thiết bị!',
     count: before - licenses.length,
-    licenses,
+    licenses: loadLicenses(),
     orders: loadOrders(),
+    history: loadHistory(),
   });
 });
 
@@ -1126,14 +1142,16 @@ export function autoConsolidateLicensesAndOrders(): { licenses: LicenseItem[]; o
     }
 
     // Bỏ qua nếu đơn hàng thuộc mã/thiết bị/SĐT đã bị thu hồi hoặc xóa
-    const revokedKeys = loadRevokedKeys().map((r) => r.key.toUpperCase());
+    const revokedKeys = loadRevokedKeys().map((r) => r.key.trim().toUpperCase());
     const isOrderRevoked = ords.some((o) => {
+      const ordId = (o.id || '').trim().toUpperCase();
       const gk = (o.generatedKey || '').trim().toUpperCase();
-      const dev = (o.deviceId || '').trim().toLowerCase();
+      const dev = (o.deviceId || '').trim().toUpperCase();
       const ph = (o.phone || '').trim().replace(/\D/g, '');
+      if (ordId && revokedKeys.includes(ordId)) return true;
       if (gk && revokedKeys.includes(gk)) return true;
-      if (dev && revokedKeys.includes(`DEV:${dev}`)) return true;
-      if (ph && revokedKeys.includes(`PHONE:${ph}`)) return true;
+      if (dev && (revokedKeys.includes(dev) || revokedKeys.includes(`DEV:${dev}`))) return true;
+      if (ph && (revokedKeys.includes(ph) || revokedKeys.includes(`PHONE:${ph}`))) return true;
       return false;
     });
     if (isOrderRevoked) continue;
@@ -1149,34 +1167,10 @@ export function autoConsolidateLicensesAndOrders(): { licenses: LicenseItem[]; o
 
     const firstValidDev = ords.find((o) => o.deviceId && o.deviceId !== 'Chưa gắn' && !o.deviceId.includes('đang lấy') && !o.deviceId.includes('dang lay'))?.deviceId || devId;
 
-    let primaryLic: LicenseItem;
-    if (matchedLics.length > 0) {
-      primaryLic = matchedLics[0];
-    } else {
-      const randomCode = Math.random().toString(36).substring(2, 7).toUpperCase();
-      const newKey = `GLFB-VIP-${randomCode}`;
-      primaryLic = {
-        id: `lic_${Date.now()}_${randomCode}`,
-        key: newKey,
-        clientName: ords[0].clientName || 'Khách Đặt Mua Gói',
-        phone: ords[0].phone || '',
-        planType: 'individual',
-        maxDevices: 1,
-        devices: firstValidDev && firstValidDev !== 'chưa gắn' && firstValidDev !== 'chuagan' ? [{
-          deviceId: firstValidDev,
-          deviceName: ords[0].clientName || 'Thiết bị đặt mua',
-          activatedAt: new Date().toISOString(),
-          lastSeenAt: new Date().toISOString(),
-        }] : [],
-        createdAt: new Date(earliestOrderMs).toISOString(),
-        expiresAt: new Date().toISOString(),
-        isSuspended: false,
-        aliasKeys: [],
-      };
-      licenses.unshift(primaryLic);
-      licensesModified = true;
+    if (matchedLics.length === 0) {
+      continue;
     }
-
+    const primaryLic = matchedLics[0];
     const aliasSet = new Set<string>(primaryLic.aliasKeys || []);
 
     // Gom các license phụ vào primaryLic và xóa license trùng lặp
@@ -1260,7 +1254,7 @@ export function autoConsolidateLicensesAndOrders(): { licenses: LicenseItem[]; o
 // Khách hàng bấm gửi đơn mua (Tự động ghi nhận lên server)
 app.post('/api/orders/create', (req: Request, res: Response) => {
   try {
-    const { pkgName, price, clientName, phone, deviceId, note } = req.body || {};
+    const { id: clientOrderId, pkgName, price, clientName, phone, deviceId, note } = req.body || {};
     const orders = loadOrders();
     const isTrial = (price === '0đ' || String(pkgName || '').toLowerCase().includes('dùng thử') || String(pkgName || '').toLowerCase().includes('trial'));
 
@@ -1268,12 +1262,39 @@ app.post('/api/orders/create', (req: Request, res: Response) => {
     if (!cleanDeviceId || cleanDeviceId.toLowerCase().includes('đang lấy') || cleanDeviceId.toLowerCase().includes('dang lay') || cleanDeviceId === 'Chưa gắn') {
       const cleanPhone = phone ? String(phone).replace(/\D/g, '') : '';
       cleanDeviceId = cleanPhone && cleanPhone.length >= 8
-        ? `dev_${cleanPhone.slice(-8)}_${Date.now().toString(36).slice(-4)}`
-        : `dev_${Math.random().toString(36).substring(2, 9)}_${Date.now().toString(36).slice(-4)}`;
+        ? `GLFB-PC-${cleanPhone.slice(-6)}`
+        : `GLFB-PC-${Date.now().toString(36).slice(-6).toUpperCase()}`;
+    }
+
+    const orderId = clientOrderId || `ord_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+
+    // Kiểm tra đơn đã bị xóa trước đó
+    const revoked = loadRevokedKeys().map((r) => r.key.trim().toUpperCase());
+    if (revoked.includes(orderId.toUpperCase())) {
+      return res.json({ success: true, message: 'Đơn hàng đã được ghi nhận trước đó', order: { id: orderId } });
+    }
+
+    // Chống tạo đơn trùng lặp (Deduplication): Nếu đã có đơn cùng ID hoặc cùng khách/máy/gói gửi trong 2 phút gần nhất
+    const existing = orders.find((o) => {
+      if (o.id === orderId) return true;
+      const sameDev = cleanDeviceId && o.deviceId && o.deviceId.toUpperCase() === cleanDeviceId.toUpperCase();
+      const samePhone = phone && o.phone && o.phone.replace(/\D/g, '') === String(phone).replace(/\D/g, '');
+      const samePkg = o.pkgName === pkgName;
+      const timeDiff = Math.abs(Date.now() - new Date(o.createdAt).getTime());
+      return (sameDev || samePhone) && samePkg && o.status === 'pending' && timeDiff < 2 * 60 * 1000;
+    });
+
+    if (existing) {
+      console.log(`[Order API] Trả về đơn hiện có (tránh trùng lặp): ${existing.id}`);
+      return res.json({
+        success: true,
+        message: 'Đơn hàng đã được tiếp nhận thành công!',
+        order: existing,
+      });
     }
 
     const newOrder: OrderItem = {
-      id: `ord_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      id: orderId,
       pkgName: pkgName || (isTrial ? 'Gói Dùng Thử (1 ngày)' : 'Gói 1 Tháng (30 ngày)'),
       price: price || (isTrial ? '0đ' : '1.000.000đ'),
       clientName: clientName ? String(clientName).trim() : (isTrial ? 'Khách Dùng Thử 1 Ngày' : 'Khách Đặt Mua Tự Động'),
@@ -1396,10 +1417,7 @@ app.get('/api/orders/my-orders', (req: Request, res: Response) => {
       return false;
     });
 
-    // Nếu không khớp đơn nào theo deviceId / phone, trả về tối đa 5 đơn gần nhất đã tạo từ máy này hoặc đơn mới
-    if (matched.length === 0 && (deviceId || orderIds.length > 0)) {
-      matched = orders.slice(0, 5);
-    }
+
 
     // Tìm license đại diện gắn với deviceId hoặc phone
     let activeLic = licenses.find(
@@ -1534,11 +1552,50 @@ app.post('/api/admin/orders/approve', requireAdmin, (req: Request, res: Response
   order.status = 'approved';
   saveOrders(orders);
 
-  // 2. Tự động hợp nhất và cộng dồn tất cả các gói cho máy này
-  const { licenses: updatedLicenses, orders: updatedOrders } = autoConsolidateLicensesAndOrders();
-
+  // 2. Tìm mã bản quyền hiện có hoặc tạo mới ngay khi duyệt đơn
+  let currentLicenses = loadLicenses();
   const cleanDeviceId = (order.deviceId || '').trim().toLowerCase();
   const cleanPhone = (order.phone || '').trim().replace(/\D/g, '');
+
+  let matchedLic = currentLicenses.find((l) => {
+    if (l.isRevoked) return false;
+    if (cleanDeviceId && cleanDeviceId !== 'chưa gắn' && cleanDeviceId !== 'chuagan' && l.devices?.some((d) => d.deviceId.toLowerCase() === cleanDeviceId)) return true;
+    if (cleanPhone && l.phone && l.phone.replace(/\D/g, '') === cleanPhone) return true;
+    if (order.generatedKey && (l.key.toUpperCase() === order.generatedKey.toUpperCase() || l.aliasKeys?.includes(order.generatedKey.toUpperCase()))) return true;
+    return false;
+  });
+
+  if (!matchedLic) {
+    const randomCode = Math.random().toString(36).substring(2, 7).toUpperCase();
+    const newKey = `GLFB-VIP-${randomCode}`;
+    matchedLic = {
+      id: `lic_${Date.now()}_${randomCode}`,
+      key: newKey,
+      clientName: order.clientName || 'Khách Đặt Mua Gói',
+      phone: order.phone || '',
+      planType: isTrial ? 'trial' : 'individual',
+      maxDevices: 1,
+      devices: cleanDeviceId && cleanDeviceId !== 'chưa gắn' && cleanDeviceId !== 'chuagan' ? [{
+        deviceId: cleanDeviceId,
+        deviceName: order.clientName || 'Thiết bị đặt mua',
+        activatedAt: new Date().toISOString(),
+        lastSeenAt: new Date().toISOString(),
+      }] : [],
+      createdAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString(),
+      isSuspended: false,
+      aliasKeys: [],
+      notes: `Bản quyền cấp từ duyệt đơn: ${order.pkgName} (+${days} ngày)`,
+    };
+    currentLicenses.unshift(matchedLic);
+    saveLicenses(currentLicenses);
+  }
+
+  order.generatedKey = matchedLic.key;
+  saveOrders(orders);
+
+  // 3. Tự động hợp nhất và cộng dồn tất cả các gói cho máy này
+  const { licenses: updatedLicenses, orders: updatedOrders } = autoConsolidateLicensesAndOrders();
 
   let returnedLicense = updatedLicenses.find((l) => {
     if (l.isRevoked) return false;
@@ -1546,7 +1603,7 @@ app.post('/api/admin/orders/approve', requireAdmin, (req: Request, res: Response
     if (cleanPhone && l.phone && l.phone.replace(/\D/g, '') === cleanPhone) return true;
     if (order.generatedKey && (l.key.toUpperCase() === order.generatedKey.toUpperCase() || l.aliasKeys?.includes(order.generatedKey.toUpperCase()))) return true;
     return false;
-  }) || updatedLicenses[0];
+  }) || matchedLic || updatedLicenses[0];
 
   const assignedKey = returnedLicense.key;
   order.generatedKey = assignedKey;
@@ -1602,8 +1659,33 @@ app.post('/api/admin/orders/delete', requireAdmin, (req: Request, res: Response)
   let orders = loadOrders();
   const target = orders.find((o) => o.id === targetId);
   const before = orders.length;
-  orders = orders.filter((o) => o.id !== targetId);
+
+  // Ghi nhận targetId vào danh sách đã xóa để không bao giờ bị phục hồi
+  addRevokedKey(String(targetId).toUpperCase(), 'Đơn hàng đã bị Quản trị viên xóa khỏi hệ thống');
+
+  // Xóa đơn mục tiêu và các đơn trùng lặp (cùng người mua, SĐT, gói tạo gần cùng lúc)
+  orders = orders.filter((o) => {
+    if (o.id === targetId) return false;
+    if (target && target.status === 'pending' && o.status === 'pending') {
+      const sameClient = (o.clientName || '').trim().toLowerCase() === (target.clientName || '').trim().toLowerCase();
+      const samePhone = (o.phone || '').trim() === (target.phone || '').trim();
+      const samePkg = o.pkgName === target.pkgName;
+      const timeDiff = Math.abs(new Date(o.createdAt).getTime() - new Date(target.createdAt).getTime());
+      if (sameClient && samePhone && samePkg && timeDiff < 3 * 60 * 1000) {
+        addRevokedKey(o.id.toUpperCase(), 'Đơn hàng trùng lặp đã bị xóa');
+        return false;
+      }
+    }
+    return true;
+  });
   saveOrders(orders);
+
+  // Cập nhật lại giấy phép nếu đơn đã được duyệt trước đó
+  let licenses = loadLicenses();
+  if (target && target.status === 'approved') {
+    const { licenses: updatedLics } = autoConsolidateLicensesAndOrders();
+    licenses = updatedLics;
+  }
 
   if (target) {
     addHistoryEntry({
@@ -1625,6 +1707,7 @@ app.post('/api/admin/orders/delete', requireAdmin, (req: Request, res: Response)
     message: 'Đã xóa đơn đặt mua thành công!',
     count: before - orders.length,
     orders: loadOrders(),
+    licenses,
     history: loadHistory(),
   });
 });

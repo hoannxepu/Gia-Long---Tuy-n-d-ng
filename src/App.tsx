@@ -265,10 +265,34 @@ export default function App() {
   const [showNewPinPassword, setShowNewPinPassword] = useState<boolean>(false);
   const [isChangingPin, setIsChangingPin] = useState<boolean>(false);
   const [isAdminUnlocked, setIsAdminUnlocked] = useState<boolean>(false);
+  const deletedOrderIdsRef = useRef<Set<string>>(
+    (() => {
+      try {
+        const saved = localStorage.getItem('glfb_deleted_orders');
+        if (saved) return new Set<string>(JSON.parse(saved));
+      } catch (e) {}
+      return new Set<string>();
+    })()
+  );
+  const deletedLicenseIdsRef = useRef<Set<string>>(
+    (() => {
+      try {
+        const saved = localStorage.getItem('glfb_deleted_licenses');
+        if (saved) return new Set<string>(JSON.parse(saved));
+      } catch (e) {}
+      return new Set<string>();
+    })()
+  );
+
   const [licenses, setLicenses] = useState<AdminLicenseItem[]>(() => {
     try {
       const cached = localStorage.getItem('glfb_admin_licenses');
-      if (cached) return JSON.parse(cached);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        const del = localStorage.getItem('glfb_deleted_licenses');
+        const delSet = del ? new Set(JSON.parse(del)) : new Set();
+        return parsed.filter((l: any) => l && !delSet.has(l.id) && !delSet.has(l.key));
+      }
     } catch (e) {}
     return [];
   });
@@ -298,7 +322,12 @@ export default function App() {
   const [adminOrders, setAdminOrders] = useState<any[]>(() => {
     try {
       const cached = localStorage.getItem('glfb_admin_orders');
-      if (cached) return JSON.parse(cached);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        const del = localStorage.getItem('glfb_deleted_orders');
+        const delSet = del ? new Set(JSON.parse(del)) : new Set();
+        return parsed.filter((o: any) => o && o.id && !delSet.has(o.id));
+      }
     } catch (e) {}
     return [];
   });
@@ -651,9 +680,11 @@ export default function App() {
 
       setAdminOrders((prev) => {
         const prevPending = prev.filter((o) => o.status === 'pending');
-        const newOrders = [...ordersList].sort(
-          (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
-        );
+        const newOrders = [...ordersList]
+          .filter((o: any) => o && o.id && !deletedOrderIdsRef.current.has(o.id))
+          .sort(
+            (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+          );
         try {
           localStorage.setItem('glfb_admin_orders', JSON.stringify(newOrders));
         } catch (e) {}
@@ -705,10 +736,11 @@ export default function App() {
 
     const onOrderFromExtension = (e: any) => {
       const order = e.detail || e.data?.order;
-      if (order && order.id) {
+      if (order && order.id && !deletedOrderIdsRef.current.has(order.id)) {
         setAdminOrders((prev) => {
+          if (deletedOrderIdsRef.current.has(order.id)) return prev;
           const map = new Map<string, any>();
-          prev.forEach((o) => { if (o && o.id) map.set(o.id, o); });
+          prev.forEach((o) => { if (o && o.id && !deletedOrderIdsRef.current.has(o.id)) map.set(o.id, o); });
           map.set(order.id, order);
           const merged = Array.from(map.values()).sort(
             (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
@@ -722,7 +754,7 @@ export default function App() {
       if (isAdminUnlocked) {
         fetchPendingCount();
         fetchOrders(adminPin, true);
-        if (order) {
+        if (order && !deletedOrderIdsRef.current.has(order.id)) {
           triggerToast(`🔔 Có đơn đặt mua mới từ Extension: ${order.pkgName || 'Gói Bản Quyền'} (${order.clientName || 'Khách'})!`);
         }
       }
@@ -867,10 +899,21 @@ export default function App() {
   const handleExecuteDelete = async () => {
     if (!deleteConfirmItem) return;
     setIsDeletingItem(true);
-    const { id, type, name } = deleteConfirmItem;
+    const { id, type, name, keyOrCode } = deleteConfirmItem;
 
     try {
       if (type === 'order') {
+        deletedOrderIdsRef.current.add(id);
+        try {
+          localStorage.setItem('glfb_deleted_orders', JSON.stringify(Array.from(deletedOrderIdsRef.current)));
+        } catch (e) {}
+
+        const updatedOrders = adminOrders.filter((o) => o.id !== id);
+        setAdminOrders(updatedOrders);
+        try {
+          localStorage.setItem('glfb_admin_orders', JSON.stringify(updatedOrders));
+        } catch (e) {}
+
         const res = await fetch('/api/admin/orders/delete', {
           method: 'POST',
           headers: {
@@ -881,37 +924,58 @@ export default function App() {
         });
         const data = await res.json();
         if (data.success) {
-          const updated = data.orders || adminOrders.filter((o) => o.id !== id);
-          setAdminOrders(updated);
+          const finalOrders = (data.orders || updatedOrders).filter((o: any) => o && !deletedOrderIdsRef.current.has(o.id));
+          setAdminOrders(finalOrders);
           try {
-            localStorage.setItem('glfb_admin_orders', JSON.stringify(updated));
+            localStorage.setItem('glfb_admin_orders', JSON.stringify(finalOrders));
           } catch (e) {}
           if (data.history) setHistoryList(data.history);
-          if (data.licenses) setLicenses(data.licenses);
+          if (data.licenses) {
+            const filteredLics = data.licenses.filter((l: any) => !deletedLicenseIdsRef.current.has(l.id) && !deletedLicenseIdsRef.current.has(l.key));
+            setLicenses(filteredLics);
+            try { localStorage.setItem('glfb_admin_licenses', JSON.stringify(filteredLics)); } catch (e) {}
+          }
           triggerToast(`✓ Đã xóa đơn đặt mua của khách "${name}" thành công!`);
           fetchHistory(adminPin, true);
         } else {
           alert('Lỗi: ' + (data.error || 'Không thể xóa đơn'));
         }
       } else {
+        deletedLicenseIdsRef.current.add(id);
+        if (keyOrCode) deletedLicenseIdsRef.current.add(keyOrCode);
+        try {
+          localStorage.setItem('glfb_deleted_licenses', JSON.stringify(Array.from(deletedLicenseIdsRef.current)));
+        } catch (e) {}
+
+        const updatedLics = licenses.filter((l) => l.id !== id && l.key !== id && l.key !== keyOrCode);
+        setLicenses(updatedLics);
+        try {
+          localStorage.setItem('glfb_admin_licenses', JSON.stringify(updatedLics));
+        } catch (e) {}
+
         const res = await fetch('/api/admin/licenses/delete', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'x-admin-pin': adminPin,
           },
-          body: JSON.stringify({ id, licenseId: id }),
+          body: JSON.stringify({ id, licenseId: id, key: keyOrCode }),
         });
         const data = await res.json();
         if (data.success) {
-          setLicenses((prev) => prev.filter((l) => l.id !== id));
+          const finalLics = (data.licenses || updatedLics).filter((l: any) => !deletedLicenseIdsRef.current.has(l.id) && !deletedLicenseIdsRef.current.has(l.key));
+          setLicenses(finalLics);
+          try {
+            localStorage.setItem('glfb_admin_licenses', JSON.stringify(finalLics));
+          } catch (e) {}
           if (data.orders) {
-            setAdminOrders(data.orders);
+            const finalOrders = data.orders.filter((o: any) => !deletedOrderIdsRef.current.has(o.id));
+            setAdminOrders(finalOrders);
             try {
-              localStorage.setItem('glfb_admin_orders', JSON.stringify(data.orders));
+              localStorage.setItem('glfb_admin_orders', JSON.stringify(finalOrders));
             } catch (e) {}
           }
-          if (actionModalLicense && actionModalLicense.id === id) {
+          if (actionModalLicense && (actionModalLicense.id === id || actionModalLicense.key === id || actionModalLicense.key === keyOrCode)) {
             setActionModalLicense(null);
           }
           triggerToast(`✓ Đã xóa mã bản quyền của khách "${name}" thành công!`);
@@ -940,8 +1004,11 @@ export default function App() {
       });
       const data = await res.json();
       if (data.success && Array.isArray(data.licenses)) {
-        try { localStorage.setItem('glfb_admin_licenses', JSON.stringify(data.licenses)); } catch (e) {}
-        setLicenses((prev) => (areArraysEqual(prev, data.licenses) ? prev : data.licenses));
+        const filteredLics = data.licenses.filter(
+          (l: any) => l && !deletedLicenseIdsRef.current.has(l.id) && !deletedLicenseIdsRef.current.has(l.key)
+        );
+        try { localStorage.setItem('glfb_admin_licenses', JSON.stringify(filteredLics)); } catch (e) {}
+        setLicenses((prev) => (areArraysEqual(prev, filteredLics) ? prev : filteredLics));
       }
       fetchOrders(pin, isSilent);
       fetchHistory(pin, isSilent);

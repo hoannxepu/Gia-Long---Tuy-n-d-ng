@@ -19,12 +19,10 @@ function generateHardwareFingerprint() {
       str += (navigator.userAgent || '') + '|';
       str += (navigator.hardwareConcurrency || 4) + '|';
       str += (navigator.language || 'vi-VN') + '|';
-    }
-    if (typeof screen !== 'undefined') {
-      str += screen.width + 'x' + screen.height + '|' + (screen.colorDepth || 24);
+      str += (navigator.platform || '') + '|';
     }
     try {
-      str += '|' + (Intl.DateTimeFormat().resolvedOptions().timeZone || '');
+      str += '|' + (Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Ho_Chi_Minh');
     } catch (e) {}
 
     let hash = 0;
@@ -32,11 +30,11 @@ function generateHardwareFingerprint() {
       hash = ((hash << 5) - hash) + str.charCodeAt(i);
       hash |= 0;
     }
-    const shortHash = Math.abs(hash).toString(36);
-    const cpu = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) ? `${navigator.hardwareConcurrency}c` : 'pc';
-    return `dev_${cpu}_${shortHash}`;
+    const shortHash = Math.abs(hash).toString(36).toUpperCase().padStart(6, '0').slice(-6);
+    const cpu = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) ? `${navigator.hardwareConcurrency}C` : 'PC';
+    return `GLFB-${cpu}-${shortHash}`;
   } catch (e) {
-    return `dev_pc_${Date.now().toString(36)}`;
+    return 'GLFB-PC-AUTO01';
   }
 }
 
@@ -47,71 +45,59 @@ function updateDeviceDomElements(id) {
     document.getElementById('licCurrentDeviceId'),
     document.getElementById('modalDeviceId'),
     document.getElementById('modalActiveDeviceId'),
-    document.getElementById('trialDeviceIdNotice')
+    document.getElementById('trialDeviceIdNotice'),
+    document.getElementById('successDeviceId')
   ];
   elements.forEach((el) => {
-    if (el) el.innerText = cachedDeviceId;
+    if (el) {
+      el.innerText = cachedDeviceId;
+      if ('value' in el) el.value = cachedDeviceId;
+    }
   });
 }
 
-async function getOrInitDeviceId() {
+function getOrInitDeviceId() {
   if (cachedDeviceId && cachedDeviceId !== 'Đang lấy...' && cachedDeviceId.trim() !== '') {
     return cachedDeviceId;
   }
 
-  // 1. Kiểm tra localStorage (tức thì 0ms)
+  // 1. Kiểm tra localStorage (tức thì 0ms đồng bộ)
   try {
     const localId = localStorage.getItem('autorecruit_device_id');
-    if (localId && localId !== 'Đang lấy...' && localId.trim() !== '') {
+    if (localId && localId !== 'Đang lấy...' && !localId.includes('đang lấy') && localId.trim() !== '') {
       updateDeviceDomElements(localId);
       return localId;
     }
   } catch (e) {}
 
-  // 2. Kiểm tra chrome.storage.local
-  try {
-    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-      const stored = await chrome.storage.local.get(['autorecruit_device_id']);
-      if (stored && stored.autorecruit_device_id && stored.autorecruit_device_id !== 'Đang lấy...') {
-        updateDeviceDomElements(stored.autorecruit_device_id);
-        try { localStorage.setItem('autorecruit_device_id', stored.autorecruit_device_id); } catch (e) {}
-        return stored.autorecruit_device_id;
-      }
-    }
-  } catch (e) {}
-
-  // 3. Hỏi Background Service Worker
-  try {
-    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
-      const res = await new Promise((resolve) => {
-        chrome.runtime.sendMessage({ action: 'GET_DEVICE_ID' }, (resp) => {
-          if (chrome.runtime.lastError || !resp || !resp.deviceId) resolve(null);
-          else resolve(resp.deviceId);
-        });
-      });
-      if (res && res !== 'Đang lấy...') {
-        updateDeviceDomElements(res);
-        try { localStorage.setItem('autorecruit_device_id', res); } catch (e) {}
-        return res;
-      }
-    }
-  } catch (e) {}
-
-  // 4. Sinh mã máy cố định dựa trên phần cứng duy nhất của máy tính này
+  // 2. Sinh mã máy cố định phần cứng chuẩn xác duy nhất ngay lập tức (0ms)
   const genId = generateHardwareFingerprint();
   updateDeviceDomElements(genId);
   try { localStorage.setItem('autorecruit_device_id', genId); } catch (e) {}
+
+  // Đồng bộ với chrome.storage.local & sync
   try {
     if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-      chrome.storage.local.set({ autorecruit_device_id: genId });
-      if (chrome.storage.sync) chrome.storage.sync.set({ autorecruit_device_id: genId });
+      chrome.storage.local.get(['autorecruit_device_id'], (stored) => {
+        if (stored && stored.autorecruit_device_id && stored.autorecruit_device_id !== 'Đang lấy...' && !stored.autorecruit_device_id.includes('đang lấy')) {
+          updateDeviceDomElements(stored.autorecruit_device_id);
+          try { localStorage.setItem('autorecruit_device_id', stored.autorecruit_device_id); } catch (e) {}
+        } else {
+          chrome.storage.local.set({ autorecruit_device_id: genId });
+          if (chrome.storage.sync) chrome.storage.sync.set({ autorecruit_device_id: genId });
+        }
+      });
     }
   } catch (e) {}
+
   return genId;
 }
 
-document.addEventListener('DOMContentLoaded', async () => {
-  // Khởi tạo và gán mã máy tức thì ngay khi mở trang
+// Khởi tạo mã máy ngay tức khắc khi script nạp để DOM nhận diện ngay
+getOrInitDeviceId();
+
+document.addEventListener('DOMContentLoaded', () => {
+  // Gán lại mã máy cho DOM ngay khi cấu trúc HTML sẵn sàng
   getOrInitDeviceId();
 
   // Navigation Tabs
@@ -1913,7 +1899,9 @@ window.proceedSendOrder = async function() {
     if (customerName) localStorage.setItem('gialong_last_name', customerName);
   } catch (e) {}
 
+  const stableOrderId = 'ord_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
   const orderPayload = {
+    id: stableOrderId,
     pkgName: pkg.name,
     price: pkg.price,
     deviceId: devId,
@@ -1933,7 +1921,7 @@ window.proceedSendOrder = async function() {
     const successDev = document.getElementById('successDeviceId');
     const successPhone = document.getElementById('successCustomerPhone');
 
-    if (successCode) successCode.innerText = orderData?.id || '#ORD-' + Date.now().toString().slice(-4);
+    if (successCode) successCode.innerText = orderData?.id || stableOrderId;
     if (successPkg) successPkg.innerText = pkg.name + ' (' + pkg.price + ')';
     if (successDev) successDev.innerText = devId;
     if (successPhone) successPhone.innerText = phone + (customerName ? ` (${customerName})` : '');
@@ -1942,57 +1930,52 @@ window.proceedSendOrder = async function() {
     if (successBody) successBody.style.display = 'flex';
   };
 
-  // 1. Gửi qua Service Worker (Background) có quyền kết nối mạng đầy đủ và phản hồi siêu nhanh
+  // Hiển thị UI thành công NGAY LẬP TỨC (0ms) để khách hàng không phải chờ đợi load
+  let uiShown = false;
+  const triggerSuccessOnce = (data) => {
+    if (uiShown) return;
+    uiShown = true;
+    showSuccessUI(data || orderPayload);
+  };
+
+  // Kích hoạt hiển thị thành công ngay tức thì
+  triggerSuccessOnce(orderPayload);
+
+  // Gửi song song đến tất cả máy chủ trong nền (Không bao giờ block giao diện người dùng)
+  const candidateUrls = [
+    'https://gia-long---tuy-n-d-ng.pages.dev',
+    'https://dang-bai-fb.pages.dev',
+    'http://localhost:3000',
+    'http://127.0.0.1:3000'
+  ];
   try {
-    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
-      chrome.runtime.sendMessage({ action: 'CREATE_ORDER', payload: orderPayload }, (resp) => {
-        if (!chrome.runtime.lastError && resp && resp.success) {
-          showSuccessUI(resp.order);
-          return;
-        }
-        fallbackDirectFetch();
-      });
-      return;
+    const savedCustom = localStorage.getItem('customApiServerUrl');
+    if (savedCustom && savedCustom.startsWith('http')) candidateUrls.unshift(savedCustom.replace(/\/+$/, ''));
+    if (typeof window !== 'undefined' && window.location && window.location.origin && window.location.origin.startsWith('http')) {
+      candidateUrls.unshift(window.location.origin.replace(/\/+$/, ''));
     }
   } catch (e) {}
 
-  fallbackDirectFetch();
+  // 1. Gửi qua Background Service Worker
+  try {
+    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+      chrome.runtime.sendMessage({ action: 'CREATE_ORDER', payload: orderPayload });
+    }
+  } catch (e) {}
 
-  // 2. Fallback gửi trực tiếp qua API chính (tối đa 2.5 giây)
-  async function fallbackDirectFetch() {
-    const primaryBase = 'https://gia-long---tuy-n-d-ng.pages.dev';
+  // 2. Direct fetch song song nhanh đến các máy chủ khả dụng
+  candidateUrls.forEach((base) => {
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 2500);
-      const res = await fetch(`${primaryBase}/api/orders/create`, {
+      const timeoutId = setTimeout(() => controller.abort(), 2000);
+      fetch(`${base}/api/orders/create`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(orderPayload),
         signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
-      if (res.ok) {
-        const text = await res.text();
-        if (text && (text.trim().startsWith('{') || text.trim().startsWith('['))) {
-          const data = JSON.parse(text);
-          if (data && data.success) {
-            showSuccessUI(data.order);
-            return;
-          }
-        }
-      }
+      }).then(() => clearTimeout(timeoutId)).catch(() => clearTimeout(timeoutId));
     } catch (e) {}
-
-    // Hiển thị thành công cục bộ ngay lập tức để người dùng không phải chờ
-    showSuccessUI({
-      id: '#ORD-' + Date.now().toString().slice(-4),
-      pkgName: orderPayload.pkgName,
-      price: orderPayload.price,
-      deviceId: devId,
-      phone: phone,
-      clientName: customerName,
-    });
-  }
+  });
 };
 
 // Gắn sự kiện cho các nút trong Modal khi DOM sẵn sàng

@@ -80,9 +80,10 @@ function generateHardwareFingerprint() {
       str += (navigator.userAgent || '') + '|';
       str += (navigator.hardwareConcurrency || 4) + '|';
       str += (navigator.language || 'vi-VN') + '|';
+      str += (navigator.platform || '') + '|';
     }
     try {
-      str += '|' + (Intl.DateTimeFormat().resolvedOptions().timeZone || '');
+      str += '|' + (Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Ho_Chi_Minh');
     } catch (e) {}
 
     let hash = 0;
@@ -90,11 +91,11 @@ function generateHardwareFingerprint() {
       hash = ((hash << 5) - hash) + str.charCodeAt(i);
       hash |= 0;
     }
-    const shortHash = Math.abs(hash).toString(36);
-    const cpu = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) ? `${navigator.hardwareConcurrency}c` : 'pc';
-    return `dev_${cpu}_${shortHash}`;
+    const shortHash = Math.abs(hash).toString(36).toUpperCase().padStart(6, '0').slice(-6);
+    const cpu = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) ? `${navigator.hardwareConcurrency}C` : 'PC';
+    return `GLFB-${cpu}-${shortHash}`;
   } catch (e) {
-    return `dev_pc_${Date.now().toString(36)}`;
+    return 'GLFB-PC-AUTO01';
   }
 }
 
@@ -232,15 +233,19 @@ async function handleCreateOrder(payload) {
   if (!payload.deviceId || payload.deviceId === 'Đang lấy...' || payload.deviceId.trim() === '') {
     payload.deviceId = await getOrCreateDeviceId();
   }
+  if (!payload.id) {
+    payload.id = 'ord_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
+  }
 
-  const primaryBase = 'https://gia-long---tuy-n-d-ng.pages.dev';
+  const primaryBase = await getApiBaseUrl();
+  const candidates = await getAllServerCandidates(primaryBase);
 
-  // Hàm gửi đơn tới một endpoint với timeout ngắn (2.5 giây)
+  // Hàm gửi đơn tới một endpoint với timeout ngắn (1.8 giây)
   async function postOrderTo(url) {
     if (!url || !url.startsWith('http')) return null;
     const base = url.replace(/\/+$/, '');
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 2500);
+    const timeoutId = setTimeout(() => controller.abort(), 1800);
     try {
       const resp = await fetch(`${base}/api/orders/create`, {
         method: 'POST',
@@ -261,31 +266,26 @@ async function handleCreateOrder(payload) {
       }
     } catch (err) {
       clearTimeout(timeoutId);
-      console.warn('[Gia Long - FB Background] Thử gửi đơn tới', base, 'thất bại:', err.message);
     }
     return null;
   }
 
-  // 1. Thử gửi ngay lên máy chủ sản xuất Cloudflare Pages trước tiên (Tốc độ phản hồi cực nhanh ~100-200ms)
-  let orderResult = await postOrderTo(primaryBase);
-
-  // 2. Nếu primary chưa thành công, thử song song các máy chủ dự phòng khả dụng
-  if (!orderResult) {
-    const currentBase = await getApiBaseUrl();
-    const urlsToTry = await getAllServerCandidates(currentBase);
-    const fallbacks = urlsToTry.filter((u) => u && !u.includes('gia-long---tuy-n-d-ng.pages.dev'));
-    if (fallbacks.length > 0) {
-      const fallbackPromises = fallbacks.map((u) => postOrderTo(u));
-      const results = await Promise.allSettled(fallbackPromises);
-      const successful = results.find((r) => r.status === 'fulfilled' && r.value);
-      if (successful) {
-        orderResult = successful.value;
-      }
-    }
-  }
+  // Gửi song song siêu tốc tới tất cả máy chủ khả dụng (phản hồi trong < 200ms)
+  const allUrls = [primaryBase, ...candidates].filter((u, i, arr) => u && arr.indexOf(u) === i);
+  let orderResult = null;
+  try {
+    orderResult = await Promise.any(
+      allUrls.map((u) =>
+        postOrderTo(u).then((res) => {
+          if (res) return res;
+          throw new Error('fail');
+        })
+      )
+    );
+  } catch (e) {}
 
   const createdOrder = orderResult?.order || {
-    id: `ord_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+    id: payload.id,
     pkgName: payload.pkgName || 'Gói Bản Quyền',
     price: payload.price || '1.000.000đ',
     clientName: payload.clientName || 'Khách Đặt Mua',
@@ -305,7 +305,6 @@ async function handleCreateOrder(payload) {
             if (tab.id && tab.url && tab.url.startsWith('http')) {
               chrome.tabs.sendMessage(tab.id, {
                 action: 'DISPATCH_NEW_ORDER_TO_WEBAPP',
-                payload: payload,
                 order: createdOrder,
               }).catch(() => {});
             }

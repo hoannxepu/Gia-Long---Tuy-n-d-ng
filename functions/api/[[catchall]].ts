@@ -107,12 +107,15 @@ function autoConsolidateEdgeLicensesAndOrders(): { licenses: LicenseItem[]; orde
     const phone = groupKey.startsWith('phone:') ? groupKey.replace('phone:', '') : '';
 
     const isOrderRevoked = ords.some((o) => {
+      const ordId = (o.id || '').trim().toUpperCase();
       const gk = (o.generatedKey || '').trim().toUpperCase();
-      const dev = (o.deviceId || '').trim().toLowerCase();
+      const dev = (o.deviceId || '').trim().toUpperCase();
       const ph = (o.phone || '').trim().replace(/\D/g, '');
-      if (gk && edgeRevokedKeys.includes(gk)) return true;
-      if (dev && edgeRevokedKeys.includes(`dev:${dev}`)) return true;
-      if (ph && edgeRevokedKeys.includes(`phone:${ph}`)) return true;
+      const revUpper = edgeRevokedKeys.map((r) => String(r).trim().toUpperCase());
+      if (ordId && revUpper.includes(ordId)) return true;
+      if (gk && revUpper.includes(gk)) return true;
+      if (dev && (revUpper.includes(dev) || revUpper.includes(`DEV:${dev}`))) return true;
+      if (ph && (revUpper.includes(ph) || revUpper.includes(`PHONE:${ph}`))) return true;
       return false;
     });
     if (isOrderRevoked) continue;
@@ -137,34 +140,10 @@ function autoConsolidateEdgeLicensesAndOrders(): { licenses: LicenseItem[]; orde
     const firstValidDev = ords.find((o) => o.deviceId && o.deviceId !== 'Chưa gắn' && !o.deviceId.includes('đang lấy') && !o.deviceId.includes('dang lay'))?.deviceId || devId;
 
     if (matchedLics.length === 0) {
-      const randomCode = Math.random().toString(36).substring(2, 7).toUpperCase();
-      const newKey = `GLFB-VIP-${randomCode}`;
-      const primaryLic: LicenseItem = {
-        id: `lic_${Date.now()}_${randomCode}`,
-        key: newKey,
-        clientName: ords[0].clientName || 'Khách Đặt Mua Gói',
-        phone: ords[0].phone || '',
-        planType: 'individual',
-        maxDevices: 1,
-        devices: firstValidDev ? [{
-          deviceId: firstValidDev,
-          deviceName: ords[0].clientName || 'Thiết bị đặt mua',
-          activatedAt: new Date().toISOString(),
-          lastSeenAt: new Date().toISOString(),
-        }] : [],
-        createdAt: new Date(earliestOrderMs).toISOString(),
-        expiresAt: new Date(earliestOrderMs + totalDays * 24 * 60 * 60 * 1000).toISOString(),
-        isSuspended: false,
-        aliasKeys: [],
-        notes: `Bản quyền VIP cộng dồn ${ords.length} gói: Tổng ${totalDays} ngày`,
-      };
-      edgeLicenses.unshift(primaryLic);
-      for (const o of ords) {
-        if (!o.generatedKey) o.generatedKey = newKey;
-      }
-    } else {
-      const primaryLic = matchedLics[0];
-      const aliasSet = new Set<string>(primaryLic.aliasKeys || []);
+      continue;
+    }
+    const primaryLic = matchedLics[0];
+    const aliasSet = new Set<string>(primaryLic.aliasKeys || []);
       if (matchedLics.length > 1) {
         for (const ml of matchedLics.slice(1)) {
           aliasSet.add(ml.key);
@@ -575,19 +554,45 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
 
   // ROUTE: Gửi đơn đặt mua gói
   if (pathname === '/api/orders/create' && method === 'POST') {
-    const { pkgName, price, clientName, phone, deviceId, note } = body;
+    const { id: clientOrderId, pkgName, price, clientName, phone, deviceId, note } = body;
     const isTrial = (price === '0đ' || String(pkgName || '').toLowerCase().includes('dùng thử') || String(pkgName || '').toLowerCase().includes('trial'));
 
     let cleanDeviceId = deviceId ? String(deviceId).trim() : '';
     if (!cleanDeviceId || cleanDeviceId.toLowerCase().includes('đang lấy') || cleanDeviceId.toLowerCase().includes('dang lay') || cleanDeviceId === 'Chưa gắn') {
       const cleanPhone = phone ? String(phone).replace(/\D/g, '') : '';
       cleanDeviceId = cleanPhone && cleanPhone.length >= 8
-        ? `dev_${cleanPhone.slice(-8)}_${Date.now().toString(36).slice(-4)}`
-        : `dev_${Math.random().toString(36).substring(2, 9)}_${Date.now().toString(36).slice(-4)}`;
+        ? `GLFB-PC-${cleanPhone.slice(-6)}`
+        : `GLFB-PC-${Date.now().toString(36).slice(-6).toUpperCase()}`;
+    }
+
+    const orderId = clientOrderId || `ord_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+
+    // Kiểm tra đơn đã bị xóa trước đó
+    const revoked = edgeRevokedKeys.map((r) => String(r).trim().toUpperCase());
+    if (revoked.includes(orderId.toUpperCase())) {
+      return jsonResponse({ success: true, message: 'Đơn hàng đã được ghi nhận trước đó', order: { id: orderId } });
+    }
+
+    // Chống tạo đơn trùng lặp (Deduplication): Nếu đã có đơn cùng ID hoặc cùng khách/máy/gói gửi trong 2 phút gần nhất
+    const existing = edgeOrders.find((o) => {
+      if (o.id === orderId) return true;
+      const sameDev = cleanDeviceId && o.deviceId && o.deviceId.toUpperCase() === cleanDeviceId.toUpperCase();
+      const samePhone = phone && o.phone && o.phone.replace(/\D/g, '') === String(phone).replace(/\D/g, '');
+      const samePkg = o.pkgName === pkgName;
+      const timeDiff = Math.abs(Date.now() - new Date(o.createdAt).getTime());
+      return (sameDev || samePhone) && samePkg && o.status === 'pending' && timeDiff < 2 * 60 * 1000;
+    });
+
+    if (existing) {
+      return jsonResponse({
+        success: true,
+        message: 'Đơn hàng đã được tiếp nhận thành công!',
+        order: existing,
+      });
     }
 
     const newOrder: OrderItem = {
-      id: `ord_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      id: orderId,
       pkgName: pkgName || (isTrial ? 'Gói Dùng Thử (1 ngày)' : 'Gói 1 Tháng (30 ngày)'),
       price: price || (isTrial ? '0đ' : '1.000.000đ'),
       clientName: clientName ? String(clientName).trim() : (isTrial ? 'Khách Dùng Thử 1 Ngày' : 'Khách Đặt Mua Tự Động'),
@@ -656,9 +661,7 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
       return false;
     });
 
-    if (matched.length === 0 && (cleanDevId || orderIds.length > 0)) {
-      matched = edgeOrders.slice(0, 5);
-    }
+
 
     const activeLic = licenses.find(
       (l) => !l.isRevoked && (
@@ -775,17 +778,52 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
       }
 
       order.status = 'approved';
+      const cleanDeviceId = (order.deviceId || '').trim().toLowerCase();
+      const cleanPhone = (order.phone || '').trim().replace(/\D/g, '');
+      const days = getOrderDurationDays(order.pkgName, order.price);
+      const isTrial = days === 1;
+
+      let matchedLic = edgeLicenses.find((l) => {
+        if (l.isRevoked) return false;
+        if (cleanDeviceId && cleanDeviceId !== 'chưa gắn' && cleanDeviceId !== 'chuagan' && l.devices?.some((d) => d.deviceId.toLowerCase() === cleanDeviceId)) return true;
+        if (cleanPhone && l.phone && l.phone.replace(/\D/g, '') === cleanPhone) return true;
+        if (order.generatedKey && (l.key.toUpperCase() === order.generatedKey.toUpperCase() || l.aliasKeys?.includes(order.generatedKey.toUpperCase()))) return true;
+        return false;
+      });
+
+      if (!matchedLic) {
+        const randomCode = Math.random().toString(36).substring(2, 7).toUpperCase();
+        const newKey = `GLFB-VIP-${randomCode}`;
+        matchedLic = {
+          id: `lic_${Date.now()}_${randomCode}`,
+          key: newKey,
+          clientName: order.clientName || 'Khách Đặt Mua Gói',
+          phone: order.phone || '',
+          planType: isTrial ? 'trial' : 'individual',
+          maxDevices: 1,
+          devices: cleanDeviceId && cleanDeviceId !== 'chưa gắn' && cleanDeviceId !== 'chuagan' ? [{
+            deviceId: cleanDeviceId,
+            deviceName: order.clientName || 'Thiết bị đặt mua',
+            activatedAt: new Date().toISOString(),
+            lastSeenAt: new Date().toISOString(),
+          }] : [],
+          createdAt: new Date().toISOString(),
+          expiresAt: new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString(),
+          isSuspended: false,
+          aliasKeys: [],
+          notes: `Bản quyền cấp từ duyệt đơn: ${order.pkgName} (+${days} ngày)`,
+        };
+        edgeLicenses.unshift(matchedLic);
+      }
+
+      order.generatedKey = matchedLic.key;
       const { licenses } = autoConsolidateEdgeLicensesAndOrders();
       const approvedLicense = licenses.find((l) => {
-        if (order.deviceId && l.devices?.some((d) => d.deviceId.toLowerCase() === order.deviceId?.toLowerCase())) return true;
-        if (order.phone && l.phone && l.phone.replace(/\D/g, '') === order.phone.replace(/\D/g, '')) return true;
+        if (cleanDeviceId && cleanDeviceId !== 'chưa gắn' && l.devices?.some((d) => d.deviceId.toLowerCase() === cleanDeviceId)) return true;
+        if (cleanPhone && l.phone && l.phone.replace(/\D/g, '') === cleanPhone) return true;
         if (order.generatedKey && l.key === order.generatedKey) return true;
         return false;
-      }) || licenses[0];
-
-      if (approvedLicense && !order.generatedKey) {
-        order.generatedKey = approvedLicense.key;
-      }
+      }) || matchedLic || licenses[0];
 
       await addHistory({
         action: 'approve',
@@ -964,23 +1002,39 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
       const targetId = body?.id || body?.licenseId || body?.key;
       const toDelete = edgeLicenses.find((l) => l.id === targetId || l.key === targetId);
       if (toDelete) {
-        const devId = toDelete.devices?.[0]?.deviceId?.toLowerCase();
-        const phone = toDelete.phone?.replace(/\D/g, '');
-        const aliasSet = new Set<string>([toDelete.key, ...(toDelete.aliasKeys || [])]);
+        const devIds = (toDelete.devices || []).map((d) => (d.deviceId || '').trim().toUpperCase()).filter(Boolean);
+        const phone = (toDelete.phone || '').trim().replace(/\D/g, '');
+        const aliasSet = new Set<string>([toDelete.key.toUpperCase(), ...(toDelete.aliasKeys || []).map((k) => k.toUpperCase())]);
 
         // Ghi nhận khóa vĩnh viễn key, aliasKeys, devId và phone để autoConsolidate không bao giờ tạo lại người dùng này
         aliasSet.forEach((k) => {
-          if (k && !edgeRevokedKeys.includes(k.toUpperCase())) edgeRevokedKeys.push(k.toUpperCase());
+          if (k && !edgeRevokedKeys.includes(k)) edgeRevokedKeys.push(k);
         });
-        if (devId && !edgeRevokedKeys.includes(`dev:${devId}`)) edgeRevokedKeys.push(`dev:${devId}`);
-        if (phone && !edgeRevokedKeys.includes(`phone:${phone}`)) edgeRevokedKeys.push(`phone:${phone}`);
+        if (toDelete.id && !edgeRevokedKeys.includes(toDelete.id.toUpperCase())) {
+          edgeRevokedKeys.push(toDelete.id.toUpperCase());
+        }
+        devIds.forEach((dev) => {
+          if (!edgeRevokedKeys.includes(dev)) edgeRevokedKeys.push(dev);
+          if (!edgeRevokedKeys.includes(`DEV:${dev}`)) edgeRevokedKeys.push(`DEV:${dev}`);
+        });
+        if (phone) {
+          if (!edgeRevokedKeys.includes(phone)) edgeRevokedKeys.push(phone);
+          if (!edgeRevokedKeys.includes(`PHONE:${phone}`)) edgeRevokedKeys.push(`PHONE:${phone}`);
+        }
 
         // Xóa hoặc hủy các đơn liên quan để KHÔNG bao giờ bị tự động tạo lại
         edgeOrders = edgeOrders.filter((o) => {
-          const matchKey = o.generatedKey && aliasSet.has(o.generatedKey);
-          const matchDev = devId && o.deviceId && o.deviceId.toLowerCase() === devId;
-          const matchPhone = phone && o.phone && o.phone.replace(/\D/g, '') === phone;
-          return !(matchKey || matchDev || matchPhone);
+          const oKey = (o.generatedKey || '').trim().toUpperCase();
+          const matchKey = oKey && aliasSet.has(oKey);
+          const oDev = (o.deviceId || '').trim().toUpperCase();
+          const matchDev = oDev && (devIds.includes(oDev) || devIds.some((d) => oDev.includes(d)));
+          const oPhone = (o.phone || '').trim().replace(/\D/g, '');
+          const matchPhone = phone && oPhone && oPhone === phone;
+          if (matchKey || matchDev || matchPhone) {
+            edgeRevokedKeys.push(o.id.toUpperCase());
+            return false;
+          }
+          return true;
         });
 
         await addHistory({
@@ -1001,12 +1055,48 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
         message: 'Đã xóa mã bản quyền và toàn bộ đơn liên quan thành công!',
         licenses: edgeLicenses,
         orders: edgeOrders,
+        history: edgeHistory,
       });
     }
 
     if (pathname === '/api/admin/orders/delete' && method === 'POST') {
       const targetId = body?.orderId || body?.id;
-      edgeOrders = edgeOrders.filter((o) => o.id !== targetId);
+      const target = edgeOrders.find((o) => o.id === targetId);
+
+      if (targetId) {
+        edgeRevokedKeys.push(String(targetId).toUpperCase());
+      }
+
+      edgeOrders = edgeOrders.filter((o) => {
+        if (o.id === targetId) return false;
+        if (target && target.status === 'pending' && o.status === 'pending') {
+          const sameClient = (o.clientName || '').trim().toLowerCase() === (target.clientName || '').trim().toLowerCase();
+          const samePhone = (o.phone || '').trim() === (target.phone || '').trim();
+          const samePkg = o.pkgName === target.pkgName;
+          const timeDiff = Math.abs(new Date(o.createdAt).getTime() - new Date(target.createdAt).getTime());
+          if (sameClient && samePhone && samePkg && timeDiff < 3 * 60 * 1000) {
+            edgeRevokedKeys.push(o.id.toUpperCase());
+            return false;
+          }
+        }
+        return true;
+      });
+
+      if (target) {
+        await addHistory({
+          action: 'revoke',
+          actionName: 'Hủy/Xóa đơn mua',
+          clientName: target.clientName || 'Khách đặt mua',
+          phone: target.phone || '',
+          deviceId: target.deviceId || '',
+          key: target.id.slice(-8).toUpperCase(),
+          planType: 'individual',
+          pkgName: normalizePkgSymbol(target.pkgName),
+          amount: target.price,
+          notes: `Quản trị viên xóa đơn đặt mua: ${target.clientName} (${target.pkgName})`,
+        });
+      }
+
       autoConsolidateEdgeLicensesAndOrders();
       await syncKV();
       return jsonResponse({
@@ -1014,6 +1104,7 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
         message: 'Đã xóa đơn đặt mua thành công!',
         orders: edgeOrders,
         licenses: edgeLicenses,
+        history: edgeHistory,
       });
     }
 
