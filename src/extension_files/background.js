@@ -73,15 +73,58 @@ async function addHistoryEntry(entry) {
 // HỆ THỐNG QUẢN LÝ BẢN QUYỀN (LICENSE MANAGER)
 // Hỗ trợ cả Cá Nhân (1 máy) & Doanh Nghiệp (Team N máy)
 // ==========================================
+function generateHardwareFingerprint() {
+  try {
+    let str = '';
+    if (typeof navigator !== 'undefined') {
+      str += (navigator.userAgent || '') + '|';
+      str += (navigator.hardwareConcurrency || 4) + '|';
+      str += (navigator.language || 'vi-VN') + '|';
+    }
+    try {
+      str += '|' + (Intl.DateTimeFormat().resolvedOptions().timeZone || '');
+    } catch (e) {}
+
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      hash = ((hash << 5) - hash) + str.charCodeAt(i);
+      hash |= 0;
+    }
+    const shortHash = Math.abs(hash).toString(36);
+    const cpu = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) ? `${navigator.hardwareConcurrency}c` : 'pc';
+    return `dev_${cpu}_${shortHash}`;
+  } catch (e) {
+    return `dev_pc_${Date.now().toString(36)}`;
+  }
+}
+
 async function getOrCreateDeviceId() {
   try {
     const data = await chrome.storage.local.get(['autorecruit_device_id']);
-    if (data.autorecruit_device_id) return data.autorecruit_device_id;
-    const newId = 'dev_' + Math.random().toString(36).substring(2, 9) + '_' + Date.now().toString(36);
+    if (data.autorecruit_device_id && data.autorecruit_device_id !== 'Đang lấy...' && !data.autorecruit_device_id.includes('đang lấy')) {
+      return data.autorecruit_device_id;
+    }
+
+    try {
+      if (chrome.storage && chrome.storage.sync) {
+        const syncData = await chrome.storage.sync.get(['autorecruit_device_id']);
+        if (syncData.autorecruit_device_id && syncData.autorecruit_device_id !== 'Đang lấy...' && !syncData.autorecruit_device_id.includes('đang lấy')) {
+          await chrome.storage.local.set({ autorecruit_device_id: syncData.autorecruit_device_id });
+          return syncData.autorecruit_device_id;
+        }
+      }
+    } catch (e) {}
+
+    const newId = generateHardwareFingerprint();
     await chrome.storage.local.set({ autorecruit_device_id: newId });
+    try {
+      if (chrome.storage && chrome.storage.sync) {
+        await chrome.storage.sync.set({ autorecruit_device_id: newId });
+      }
+    } catch (e) {}
     return newId;
   } catch (e) {
-    return 'dev_fallback_' + Date.now();
+    return 'dev_pc_' + Date.now().toString(36);
   }
 }
 
@@ -183,72 +226,94 @@ function getCandidateServerUrls(primaryBase) {
 }
 
 // Xử lý gửi đơn đặt mua gói bản quyền tự động lên Server
-// Đồng bộ song song tới cả Cloudflare Pages và Studio để đơn hiển thị lập tức trên cả hai hệ thống
+// Ưu tiên phản hồi tức thì (< 200ms) qua Cloudflare Pages Edge API sản xuất
 async function handleCreateOrder(payload) {
-  const currentBase = await getApiBaseUrl();
-  const urlsToTry = await getAllServerCandidates(currentBase);
-  console.log('[Gia Long - FB Background] Bắt đầu phát đơn hàng đồng thời tới:', urlsToTry);
+  // Đảm bảo tuyệt đối mã máy luôn hợp lệ, không bao giờ gửi chuỗi 'Đang lấy...'
+  if (!payload.deviceId || payload.deviceId === 'Đang lấy...' || payload.deviceId.trim() === '') {
+    payload.deviceId = await getOrCreateDeviceId();
+  }
 
-  const promises = urlsToTry.map(async (rawUrl) => {
-    if (!rawUrl || !rawUrl.startsWith('http')) return null;
-    const base = rawUrl.replace(/\/+$/, '');
+  const primaryBase = 'https://gia-long---tuy-n-d-ng.pages.dev';
+
+  // Hàm gửi đơn tới một endpoint với timeout ngắn (2.5 giây)
+  async function postOrderTo(url) {
+    if (!url || !url.startsWith('http')) return null;
+    const base = url.replace(/\/+$/, '');
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2500);
     try {
       const resp = await fetch(`${base}/api/orders/create`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
+        signal: controller.signal,
       });
-      const text = await resp.text();
-      if (!text || (!text.trim().startsWith('{') && !text.trim().startsWith('['))) {
-        return null;
-      }
-      const data = JSON.parse(text);
-      if (data && data.success) {
-        console.log('[Gia Long - FB Background] ✓ Đã gửi đơn hàng thành công lên:', base);
-        return { base, order: data.order, message: data.message };
+      clearTimeout(timeoutId);
+      if (resp.ok) {
+        const text = await resp.text();
+        if (text && (text.trim().startsWith('{') || text.trim().startsWith('['))) {
+          const data = JSON.parse(text);
+          if (data && data.success) {
+            console.log('[Gia Long - FB Background] ✓ Đã gửi đơn thành công lên:', base);
+            return { base, order: data.order, message: data.message };
+          }
+        }
       }
     } catch (err) {
+      clearTimeout(timeoutId);
       console.warn('[Gia Long - FB Background] Thử gửi đơn tới', base, 'thất bại:', err.message);
     }
     return null;
-  });
+  }
 
-  const results = await Promise.allSettled(promises);
-  const successful = results
-    .filter((r) => r.status === 'fulfilled' && r.value)
-    .map((r) => r.value);
+  // 1. Thử gửi ngay lên máy chủ sản xuất Cloudflare Pages trước tiên (Tốc độ phản hồi cực nhanh ~100-200ms)
+  let orderResult = await postOrderTo(primaryBase);
 
-  // Gửi trực tiếp lên Cloud Database toàn cầu để trang Admin ở mọi máy nhận đơn ngay lập tức
-  let createdOrder = successful.length > 0 ? successful[0].order : null;
-  const newOrd = createdOrder || {
+  // 2. Nếu primary chưa thành công, thử song song các máy chủ dự phòng khả dụng
+  if (!orderResult) {
+    const currentBase = await getApiBaseUrl();
+    const urlsToTry = await getAllServerCandidates(currentBase);
+    const fallbacks = urlsToTry.filter((u) => u && !u.includes('gia-long---tuy-n-d-ng.pages.dev'));
+    if (fallbacks.length > 0) {
+      const fallbackPromises = fallbacks.map((u) => postOrderTo(u));
+      const results = await Promise.allSettled(fallbackPromises);
+      const successful = results.find((r) => r.status === 'fulfilled' && r.value);
+      if (successful) {
+        orderResult = successful.value;
+      }
+    }
+  }
+
+  const createdOrder = orderResult?.order || {
     id: `ord_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
     pkgName: payload.pkgName || 'Gói Bản Quyền',
     price: payload.price || '1.000.000đ',
     clientName: payload.clientName || 'Khách Đặt Mua',
     phone: payload.phone || '',
-    deviceId: payload.deviceId || '',
+    deviceId: payload.deviceId,
     createdAt: new Date().toISOString(),
     status: 'pending',
     note: payload.note || '',
   };
-  if (!createdOrder) createdOrder = newOrd;
 
-
-  // Phát trực tiếp vào DOM của tất cả các Tab Web Quản Trị đang mở
-  try {
-    if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.query) {
-      const openTabs = await chrome.tabs.query({});
-      for (const tab of openTabs) {
-        if (tab.id && tab.url && tab.url.startsWith('http')) {
-          chrome.tabs.sendMessage(tab.id, {
-            action: 'DISPATCH_NEW_ORDER_TO_WEBAPP',
-            payload: payload,
-            order: createdOrder,
-          }).catch(() => {});
-        }
+  // Đồng bộ chạy ngầm sang các Tab Web Quản Trị đang mở (không chặn response UI)
+  setTimeout(() => {
+    try {
+      if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.query) {
+        chrome.tabs.query({}).then((openTabs) => {
+          for (const tab of openTabs) {
+            if (tab.id && tab.url && tab.url.startsWith('http')) {
+              chrome.tabs.sendMessage(tab.id, {
+                action: 'DISPATCH_NEW_ORDER_TO_WEBAPP',
+                payload: payload,
+                order: createdOrder,
+              }).catch(() => {});
+            }
+          }
+        }).catch(() => {});
       }
-    }
-  } catch (e) {}
+    } catch (e) {}
+  }, 10);
 
   return { 
     success: true, 
@@ -259,17 +324,19 @@ async function handleCreateOrder(payload) {
 
 async function checkLicenseStatus(forceRemote = false) {
   try {
-    const data = await chrome.storage.local.get(['licenseKey', 'licenseData']);
+    const data = await chrome.storage.local.get(['licenseKey', 'licenseData', 'gialong_customer_phone']);
     const key = data.licenseKey;
     const deviceId = await getOrCreateDeviceId();
+    const phone = data.gialong_customer_phone || '';
 
     if (!key) {
-      // Nếu chưa nạp key thủ công: Thử kiểm tra xem Quản trị viên đã duyệt đề xuất mua cho Device ID này chưa
+      // Nếu chưa nạp key thủ công: Thử kiểm tra xem Quản trị viên đã duyệt đề xuất mua cho Device ID / SĐT này chưa
       const primaryBase = await getApiBaseUrl();
       const serverCandidates = getCandidateServerUrls(primaryBase);
       for (const baseUrl of serverCandidates) {
         try {
-          const resp = await fetch(`${baseUrl}/api/license/check-by-device?deviceId=${encodeURIComponent(deviceId)}`);
+          const checkUrl = `${baseUrl}/api/license/check-by-device?deviceId=${encodeURIComponent(deviceId)}${phone ? `&phone=${encodeURIComponent(phone)}` : ''}`;
+          const resp = await fetch(checkUrl);
           const text = await resp.text();
           if (!text || (!text.trim().startsWith('{') && !text.trim().startsWith('['))) continue;
           const devResult = JSON.parse(text);

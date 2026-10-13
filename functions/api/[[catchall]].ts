@@ -90,7 +90,7 @@ function autoConsolidateEdgeLicensesAndOrders(): { licenses: LicenseItem[]; orde
     const devId = (ord.deviceId || '').trim().toLowerCase();
     const phone = (ord.phone || '').trim().replace(/\D/g, '');
     let groupKey = '';
-    if (devId && devId !== 'chưa gắn' && devId !== 'chuagan') {
+    if (devId && devId !== 'chưa gắn' && devId !== 'chuagan' && !devId.includes('đang lấy') && !devId.includes('dang lay')) {
       groupKey = `dev:${devId}`;
     } else if (phone && phone.length >= 8) {
       groupKey = `phone:${phone}`;
@@ -134,6 +134,8 @@ function autoConsolidateEdgeLicensesAndOrders(): { licenses: LicenseItem[]; orde
       return false;
     });
 
+    const firstValidDev = ords.find((o) => o.deviceId && o.deviceId !== 'Chưa gắn' && !o.deviceId.includes('đang lấy') && !o.deviceId.includes('dang lay'))?.deviceId || devId;
+
     if (matchedLics.length === 0) {
       const randomCode = Math.random().toString(36).substring(2, 7).toUpperCase();
       const newKey = `GLFB-VIP-${randomCode}`;
@@ -144,8 +146,8 @@ function autoConsolidateEdgeLicensesAndOrders(): { licenses: LicenseItem[]; orde
         phone: ords[0].phone || '',
         planType: 'individual',
         maxDevices: 1,
-        devices: devId ? [{
-          deviceId: ords[0].deviceId || devId,
+        devices: firstValidDev ? [{
+          deviceId: firstValidDev,
           deviceName: ords[0].clientName || 'Thiết bị đặt mua',
           activatedAt: new Date().toISOString(),
           lastSeenAt: new Date().toISOString(),
@@ -183,10 +185,10 @@ function autoConsolidateEdgeLicensesAndOrders(): { licenses: LicenseItem[]; orde
       }
       primaryLic.aliasKeys = Array.from(aliasSet);
 
-      if (devId) {
-        if (!primaryLic.devices.some((d) => d.deviceId.toLowerCase() === devId)) {
+      if (firstValidDev) {
+        if (!primaryLic.devices.some((d) => d.deviceId.toLowerCase() === firstValidDev.toLowerCase())) {
           primaryLic.devices.push({
-            deviceId: ords[0].deviceId || devId,
+            deviceId: firstValidDev,
             deviceName: ords[0].clientName || primaryLic.clientName || 'Thiết bị đặt mua',
             activatedAt: new Date().toISOString(),
             lastSeenAt: new Date().toISOString(),
@@ -441,18 +443,48 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
     });
   }
 
-  // ROUTE: Kiểm tra tự động theo Device ID
+  // ROUTE: Kiểm tra tự động theo Device ID & Số điện thoại (Nhận diện thiết bị kép)
   if (pathname === '/api/license/check-by-device' && method === 'GET') {
     const deviceId = url.searchParams.get('deviceId');
-    if (!deviceId) return jsonResponse({ success: false, message: 'Thiếu mã thiết bị!' }, 400);
+    const phone = (url.searchParams.get('phone') || '').replace(/\D/g, '');
+    if (!deviceId && !phone) return jsonResponse({ success: false, message: 'Thiếu mã thiết bị hoặc SĐT!' }, 400);
+
+    // Hợp nhất đơn hàng đã duyệt mới nhất vào danh sách bản quyền
+    autoConsolidateEdgeLicensesAndOrders();
 
     const now = Date.now();
-    const found = edgeLicenses.find((l) => {
+    let found = edgeLicenses.find((l) => {
       if (l.isRevoked || l.isSuspended) return false;
       const expMs = new Date(l.expiresAt).getTime();
       if (expMs < now) return false;
-      return l.devices && l.devices.some((d) => d.deviceId === deviceId);
+      return deviceId && l.devices && l.devices.some((d) => d.deviceId.toLowerCase() === String(deviceId).toLowerCase());
     });
+
+    // Nếu chưa thấy qua deviceId, tìm qua số điện thoại khách hàng đã mua gói
+    if (!found && phone && phone.length >= 8) {
+      found = edgeLicenses.find((l) => {
+        if (l.isRevoked || l.isSuspended) return false;
+        const expMs = new Date(l.expiresAt).getTime();
+        if (expMs < now) return false;
+        const licPhone = (l.phone || '').replace(/\D/g, '');
+        return licPhone === phone;
+      });
+
+      // Tự động gán chính xác mã máy này vào bản quyền ngay khi nhận diện qua SĐT!
+      if (found && deviceId) {
+        if (!found.devices) found.devices = [];
+        const cleanDev = String(deviceId).trim();
+        if (!found.devices.some((d) => d.deviceId.toLowerCase() === cleanDev.toLowerCase())) {
+          found.devices.push({
+            deviceId: cleanDev,
+            deviceName: found.clientName || 'Thiết bị tự động gán',
+            activatedAt: new Date().toISOString(),
+            lastSeenAt: new Date().toISOString(),
+          });
+          await syncKV();
+        }
+      }
+    }
 
     if (found) {
       const expMs = new Date(found.expiresAt).getTime();
@@ -465,7 +497,7 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
           clientName: found.clientName,
           planType: found.planType,
           maxDevices: found.maxDevices,
-          activeDevicesCount: found.devices.length,
+          activeDevicesCount: found.devices ? found.devices.length : 1,
           expiresAt: found.expiresAt,
           daysLeft,
           isExpired: false,
@@ -546,13 +578,21 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
     const { pkgName, price, clientName, phone, deviceId, note } = body;
     const isTrial = (price === '0đ' || String(pkgName || '').toLowerCase().includes('dùng thử') || String(pkgName || '').toLowerCase().includes('trial'));
 
+    let cleanDeviceId = deviceId ? String(deviceId).trim() : '';
+    if (!cleanDeviceId || cleanDeviceId.toLowerCase().includes('đang lấy') || cleanDeviceId.toLowerCase().includes('dang lay') || cleanDeviceId === 'Chưa gắn') {
+      const cleanPhone = phone ? String(phone).replace(/\D/g, '') : '';
+      cleanDeviceId = cleanPhone && cleanPhone.length >= 8
+        ? `dev_${cleanPhone.slice(-8)}_${Date.now().toString(36).slice(-4)}`
+        : `dev_${Math.random().toString(36).substring(2, 9)}_${Date.now().toString(36).slice(-4)}`;
+    }
+
     const newOrder: OrderItem = {
       id: `ord_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       pkgName: pkgName || (isTrial ? 'Gói Dùng Thử (1 ngày)' : 'Gói 1 Tháng (30 ngày)'),
       price: price || (isTrial ? '0đ' : '1.000.000đ'),
       clientName: clientName ? String(clientName).trim() : (isTrial ? 'Khách Dùng Thử 1 Ngày' : 'Khách Đặt Mua Tự Động'),
       phone: phone ? String(phone).trim() : 'Chờ liên hệ Zalo',
-      deviceId: deviceId ? String(deviceId).trim() : 'Chưa gắn',
+      deviceId: cleanDeviceId,
       createdAt: new Date().toISOString(),
       status: 'pending',
       note: note || (isTrial ? 'Đăng ký dùng thử 1 ngày (giới hạn 20 bài đăng, 0đ)' : ''),
@@ -726,6 +766,13 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
       const { orderId } = body;
       const order = edgeOrders.find((o) => o.id === orderId);
       if (!order) return jsonResponse({ success: false, error: 'Không tìm thấy đơn hàng!' }, 404);
+
+      if (!order.deviceId || order.deviceId.toLowerCase().includes('đang lấy') || order.deviceId.toLowerCase().includes('dang lay') || order.deviceId === 'Chưa gắn') {
+        const cleanPhone = (order.phone || '').replace(/\D/g, '');
+        order.deviceId = cleanPhone.length >= 8 
+          ? `dev_${cleanPhone.slice(-8)}_${Date.now().toString(36).slice(-4)}` 
+          : `dev_${Math.random().toString(36).substring(2, 9)}_${Date.now().toString(36).slice(-4)}`;
+      }
 
       order.status = 'approved';
       const { licenses } = autoConsolidateEdgeLicensesAndOrders();

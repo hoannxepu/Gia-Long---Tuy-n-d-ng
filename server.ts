@@ -399,11 +399,12 @@ app.post('/api/license/verify', (req: Request, res: Response) => {
   });
 });
 
-// Kiểm tra bản quyền tự động theo mã thiết bị (Dành cho máy khách vừa được duyệt đề xuất mua)
+// Kiểm tra bản quyền tự động theo mã thiết bị & số điện thoại (Nhận diện thiết bị kép)
 app.get('/api/license/check-by-device', (req: Request, res: Response) => {
   const deviceId = String(req.query.deviceId || '').trim();
-  if (!deviceId) {
-    return res.status(400).json({ success: false, message: 'Thiếu mã thiết bị!' });
+  const phone = String(req.query.phone || '').trim().replace(/\D/g, '');
+  if (!deviceId && !phone) {
+    return res.status(400).json({ success: false, message: 'Thiếu mã thiết bị hoặc số điện thoại!' });
   }
 
   // 1. Kiểm tra nếu thiết bị này đã bị Quản trị viên Thu Hồi (Ngắt Máy)
@@ -411,7 +412,7 @@ app.get('/api/license/check-by-device', (req: Request, res: Response) => {
   const cleanDevUpper = deviceId.toUpperCase();
   const isRevokedDev = revokedList.find((r) => {
     const k = r.key.trim().toUpperCase();
-    return k === cleanDevUpper || k === `DEV:${cleanDevUpper}`;
+    return (deviceId && (k === cleanDevUpper || k === `DEV:${cleanDevUpper}`)) || (phone && k === `PHONE:${phone}`);
   });
   if (isRevokedDev) {
     return res.json({
@@ -427,7 +428,10 @@ app.get('/api/license/check-by-device', (req: Request, res: Response) => {
 
   // Kiểm tra nếu có mã bản quyền gắn với thiết bị này mà đang bị thu hồi
   const foundRevokedLic = licenses.find((l) => {
-    return l.isRevoked && l.devices && l.devices.some((d) => d.deviceId.toLowerCase() === deviceId.toLowerCase());
+    return l.isRevoked && (
+      (deviceId && l.devices && l.devices.some((d) => d.deviceId.toLowerCase() === deviceId.toLowerCase())) ||
+      (phone && l.phone && l.phone.replace(/\D/g, '') === phone)
+    );
   });
   if (foundRevokedLic) {
     return res.json({
@@ -439,12 +443,38 @@ app.get('/api/license/check-by-device', (req: Request, res: Response) => {
   }
 
   // Tìm mã bản quyền còn hạn, không bị khóa, gắn với deviceId này
-  const found = licenses.find((l) => {
+  let found = licenses.find((l) => {
     if (l.isRevoked || l.isSuspended) return false;
     const expMs = new Date(l.expiresAt).getTime();
     if (expMs < now) return false;
-    return l.devices && l.devices.some((d) => d.deviceId.toLowerCase() === deviceId.toLowerCase());
+    return deviceId && l.devices && l.devices.some((d) => d.deviceId.toLowerCase() === deviceId.toLowerCase());
   });
+
+  // Nhận diện thông minh: nếu chưa tìm thấy bằng deviceId, tìm bằng số điện thoại khách hàng đã mua gói
+  if (!found && phone && phone.length >= 8) {
+    found = licenses.find((l) => {
+      if (l.isRevoked || l.isSuspended) return false;
+      const expMs = new Date(l.expiresAt).getTime();
+      if (expMs < now) return false;
+      const licPhone = (l.phone || '').replace(/\D/g, '');
+      return licPhone === phone;
+    });
+
+    // Tự động gán chính xác mã máy này vào bản quyền ngay khi nhận diện qua SĐT!
+    if (found && deviceId) {
+      if (!found.devices) found.devices = [];
+      const cleanDev = String(deviceId).trim();
+      if (!found.devices.some((d) => d.deviceId.toLowerCase() === cleanDev.toLowerCase())) {
+        found.devices.push({
+          deviceId: cleanDev,
+          deviceName: found.clientName || 'Thiết bị tự động gắn',
+          activatedAt: new Date().toISOString(),
+          lastSeenAt: new Date().toISOString(),
+        });
+        saveLicenses(licenses);
+      }
+    }
+  }
 
   if (found) {
     const expiresAtMs = new Date(found.expiresAt).getTime();
@@ -457,7 +487,7 @@ app.get('/api/license/check-by-device', (req: Request, res: Response) => {
         clientName: found.clientName,
         planType: found.planType,
         maxDevices: found.maxDevices,
-        activeDevicesCount: found.devices.length,
+        activeDevicesCount: found.devices ? found.devices.length : 1,
         expiresAt: found.expiresAt,
         daysLeft,
         isExpired: false,
@@ -1066,7 +1096,7 @@ export function autoConsolidateLicensesAndOrders(): { licenses: LicenseItem[]; o
     const devId = (ord.deviceId || '').trim().toLowerCase();
     const phone = (ord.phone || '').trim().replace(/\D/g, '');
     let groupKey = '';
-    if (devId && devId !== 'chưa gắn' && devId !== 'chuagan') {
+    if (devId && devId !== 'chưa gắn' && devId !== 'chuagan' && !devId.includes('đang lấy') && !devId.includes('dang lay')) {
       groupKey = `dev:${devId}`;
     } else if (phone && phone.length >= 8) {
       groupKey = `phone:${phone}`;
@@ -1117,6 +1147,8 @@ export function autoConsolidateLicensesAndOrders(): { licenses: LicenseItem[]; o
       return false;
     });
 
+    const firstValidDev = ords.find((o) => o.deviceId && o.deviceId !== 'Chưa gắn' && !o.deviceId.includes('đang lấy') && !o.deviceId.includes('dang lay'))?.deviceId || devId;
+
     let primaryLic: LicenseItem;
     if (matchedLics.length > 0) {
       primaryLic = matchedLics[0];
@@ -1130,8 +1162,8 @@ export function autoConsolidateLicensesAndOrders(): { licenses: LicenseItem[]; o
         phone: ords[0].phone || '',
         planType: 'individual',
         maxDevices: 1,
-        devices: devId && devId !== 'chưa gắn' && devId !== 'chuagan' ? [{
-          deviceId: ords[0].deviceId || devId,
+        devices: firstValidDev && firstValidDev !== 'chưa gắn' && firstValidDev !== 'chuagan' ? [{
+          deviceId: firstValidDev,
           deviceName: ords[0].clientName || 'Thiết bị đặt mua',
           activatedAt: new Date().toISOString(),
           lastSeenAt: new Date().toISOString(),
@@ -1173,11 +1205,11 @@ export function autoConsolidateLicensesAndOrders(): { licenses: LicenseItem[]; o
     }
 
     // Đảm bảo thiết bị đã được gắn vào primaryLic
-    if (devId && devId !== 'chưa gắn' && devId !== 'chuagan') {
-      const hasDev = primaryLic.devices.some((d) => d.deviceId.toLowerCase() === devId);
+    if (firstValidDev && firstValidDev !== 'chưa gắn' && firstValidDev !== 'chuagan') {
+      const hasDev = primaryLic.devices.some((d) => d.deviceId.toLowerCase() === firstValidDev.toLowerCase());
       if (!hasDev) {
         primaryLic.devices.push({
-          deviceId: ords[0].deviceId || devId,
+          deviceId: firstValidDev,
           deviceName: ords[0].clientName || primaryLic.clientName || 'Thiết bị đặt mua',
           activatedAt: new Date().toISOString(),
           lastSeenAt: new Date().toISOString(),
@@ -1232,13 +1264,21 @@ app.post('/api/orders/create', (req: Request, res: Response) => {
     const orders = loadOrders();
     const isTrial = (price === '0đ' || String(pkgName || '').toLowerCase().includes('dùng thử') || String(pkgName || '').toLowerCase().includes('trial'));
 
+    let cleanDeviceId = deviceId ? String(deviceId).trim() : '';
+    if (!cleanDeviceId || cleanDeviceId.toLowerCase().includes('đang lấy') || cleanDeviceId.toLowerCase().includes('dang lay') || cleanDeviceId === 'Chưa gắn') {
+      const cleanPhone = phone ? String(phone).replace(/\D/g, '') : '';
+      cleanDeviceId = cleanPhone && cleanPhone.length >= 8
+        ? `dev_${cleanPhone.slice(-8)}_${Date.now().toString(36).slice(-4)}`
+        : `dev_${Math.random().toString(36).substring(2, 9)}_${Date.now().toString(36).slice(-4)}`;
+    }
+
     const newOrder: OrderItem = {
       id: `ord_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       pkgName: pkgName || (isTrial ? 'Gói Dùng Thử (1 ngày)' : 'Gói 1 Tháng (30 ngày)'),
       price: price || (isTrial ? '0đ' : '1.000.000đ'),
       clientName: clientName ? String(clientName).trim() : (isTrial ? 'Khách Dùng Thử 1 Ngày' : 'Khách Đặt Mua Tự Động'),
       phone: phone ? String(phone).trim() : 'Chờ liên hệ Zalo',
-      deviceId: deviceId ? String(deviceId).trim() : 'Chưa gắn',
+      deviceId: cleanDeviceId,
       createdAt: new Date().toISOString(),
       status: 'pending',
       note: note || (isTrial ? 'Đăng ký dùng thử 1 ngày (giới hạn 20 bài đăng, 0đ)' : ''),
@@ -1482,6 +1522,13 @@ app.post('/api/admin/orders/approve', requireAdmin, (req: Request, res: Response
 
   const days = getOrderDurationDays(order.pkgName, order.price);
   const isTrial = days === 1;
+
+  if (!order.deviceId || order.deviceId.toLowerCase().includes('đang lấy') || order.deviceId.toLowerCase().includes('dang lay') || order.deviceId === 'Chưa gắn') {
+    const cleanPhone = (order.phone || '').replace(/\D/g, '');
+    order.deviceId = cleanPhone.length >= 8 
+      ? `dev_${cleanPhone.slice(-8)}_${Date.now().toString(36).slice(-4)}` 
+      : `dev_${Math.random().toString(36).substring(2, 9)}_${Date.now().toString(36).slice(-4)}`;
+  }
 
   // 1. Đánh dấu đơn là đã phê duyệt
   order.status = 'approved';

@@ -9,7 +9,111 @@ let currentVariantTab = 1;
 let autoSaveTimer = null;
 let scannedGroupsTemp = [];
 
+// Quản lý Device ID tập trung và cập nhật DOM ngay lập tức (0ms)
+let cachedDeviceId = '';
+
+function generateHardwareFingerprint() {
+  try {
+    let str = '';
+    if (typeof navigator !== 'undefined') {
+      str += (navigator.userAgent || '') + '|';
+      str += (navigator.hardwareConcurrency || 4) + '|';
+      str += (navigator.language || 'vi-VN') + '|';
+    }
+    if (typeof screen !== 'undefined') {
+      str += screen.width + 'x' + screen.height + '|' + (screen.colorDepth || 24);
+    }
+    try {
+      str += '|' + (Intl.DateTimeFormat().resolvedOptions().timeZone || '');
+    } catch (e) {}
+
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      hash = ((hash << 5) - hash) + str.charCodeAt(i);
+      hash |= 0;
+    }
+    const shortHash = Math.abs(hash).toString(36);
+    const cpu = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) ? `${navigator.hardwareConcurrency}c` : 'pc';
+    return `dev_${cpu}_${shortHash}`;
+  } catch (e) {
+    return `dev_pc_${Date.now().toString(36)}`;
+  }
+}
+
+function updateDeviceDomElements(id) {
+  if (!id || id === 'Đang lấy...' || String(id).trim() === '') return;
+  cachedDeviceId = String(id).trim();
+  const elements = [
+    document.getElementById('licCurrentDeviceId'),
+    document.getElementById('modalDeviceId'),
+    document.getElementById('modalActiveDeviceId'),
+    document.getElementById('trialDeviceIdNotice')
+  ];
+  elements.forEach((el) => {
+    if (el) el.innerText = cachedDeviceId;
+  });
+}
+
+async function getOrInitDeviceId() {
+  if (cachedDeviceId && cachedDeviceId !== 'Đang lấy...' && cachedDeviceId.trim() !== '') {
+    return cachedDeviceId;
+  }
+
+  // 1. Kiểm tra localStorage (tức thì 0ms)
+  try {
+    const localId = localStorage.getItem('autorecruit_device_id');
+    if (localId && localId !== 'Đang lấy...' && localId.trim() !== '') {
+      updateDeviceDomElements(localId);
+      return localId;
+    }
+  } catch (e) {}
+
+  // 2. Kiểm tra chrome.storage.local
+  try {
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      const stored = await chrome.storage.local.get(['autorecruit_device_id']);
+      if (stored && stored.autorecruit_device_id && stored.autorecruit_device_id !== 'Đang lấy...') {
+        updateDeviceDomElements(stored.autorecruit_device_id);
+        try { localStorage.setItem('autorecruit_device_id', stored.autorecruit_device_id); } catch (e) {}
+        return stored.autorecruit_device_id;
+      }
+    }
+  } catch (e) {}
+
+  // 3. Hỏi Background Service Worker
+  try {
+    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+      const res = await new Promise((resolve) => {
+        chrome.runtime.sendMessage({ action: 'GET_DEVICE_ID' }, (resp) => {
+          if (chrome.runtime.lastError || !resp || !resp.deviceId) resolve(null);
+          else resolve(resp.deviceId);
+        });
+      });
+      if (res && res !== 'Đang lấy...') {
+        updateDeviceDomElements(res);
+        try { localStorage.setItem('autorecruit_device_id', res); } catch (e) {}
+        return res;
+      }
+    }
+  } catch (e) {}
+
+  // 4. Sinh mã máy cố định dựa trên phần cứng duy nhất của máy tính này
+  const genId = generateHardwareFingerprint();
+  updateDeviceDomElements(genId);
+  try { localStorage.setItem('autorecruit_device_id', genId); } catch (e) {}
+  try {
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      chrome.storage.local.set({ autorecruit_device_id: genId });
+      if (chrome.storage.sync) chrome.storage.sync.set({ autorecruit_device_id: genId });
+    }
+  } catch (e) {}
+  return genId;
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
+  // Khởi tạo và gán mã máy tức thì ngay khi mở trang
+  getOrInitDeviceId();
+
   // Navigation Tabs
   const tabNavMain = document.getElementById('tabNavMain');
   const tabNavFinder = document.getElementById('tabNavFinder');
@@ -1033,13 +1137,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   const linkGoToBuyPackages = document.getElementById('linkGoToBuyPackages');
 
   // Mở modal kích hoạt bản quyền
-  window.openActivateModal = function() {
+  window.openActivateModal = async function() {
     switchTab('license');
     const modal = document.getElementById('modalActivateLicense');
     const input = document.getElementById('inputModalLicenseKey');
     const devEl = document.getElementById('modalActiveDeviceId');
     const curDev = document.getElementById('licCurrentDeviceId');
-    if (devEl && curDev) devEl.innerText = curDev.innerText || 'Đang lấy...';
+    const devId = await getOrInitDeviceId();
+    if (devEl) devEl.innerText = devId;
+    if (curDev) curDev.innerText = devId;
     if (modal) modal.style.display = 'flex';
     if (input) {
       setTimeout(() => input.focus(), 150);
@@ -1156,9 +1262,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   async function loadLicenseDetails(forceRemote = false) {
+    const activeId = await getOrInitDeviceId();
+    updateDeviceDomElements(activeId);
+
     chrome.runtime.sendMessage({ action: 'GET_DEVICE_ID' }, (devRes) => {
-      if (licCurrentDeviceId && devRes?.deviceId) {
-        licCurrentDeviceId.innerText = devRes.deviceId;
+      if (devRes?.deviceId && devRes.deviceId !== 'Đang lấy...') {
+        updateDeviceDomElements(devRes.deviceId);
       }
     });
 
@@ -1563,8 +1672,24 @@ window.updateOrderTransferMemoAndQr = function(immediateQr = false) {
   const pkg = window.currentSelectedPkg || { name: 'Gói 1 Tháng (30 ngày)', price: '1.000.000đ' };
   const nameInput = document.getElementById('orderCustomerName');
   const phoneInput = document.getElementById('orderCustomerPhone');
-  const devIdEl = document.getElementById('licCurrentDeviceId');
-  const devId = (devIdEl && devIdEl.innerText) ? devIdEl.innerText.trim() : 'AFB-PC-USER';
+
+  let devId = cachedDeviceId && cachedDeviceId !== 'Đang lấy...' ? cachedDeviceId : '';
+  if (!devId) {
+    const devIdEl = document.getElementById('licCurrentDeviceId');
+    if (devIdEl && devIdEl.innerText && devIdEl.innerText !== 'Đang lấy...') {
+      devId = devIdEl.innerText.trim();
+    }
+  }
+  if (!devId) {
+    try {
+      const localId = localStorage.getItem('autorecruit_device_id');
+      if (localId && localId !== 'Đang lấy...') devId = localId;
+    } catch (e) {}
+  }
+  if (!devId) {
+    devId = 'dev_' + Math.random().toString(36).substring(2, 9) + '_' + Date.now().toString(36);
+  }
+  updateDeviceDomElements(devId);
 
   const customerName = nameInput ? nameInput.value.trim() : '';
   const customerPhone = phoneInput ? phoneInput.value.trim() : '';
@@ -1600,7 +1725,7 @@ window.updateOrderTransferMemoAndQr = function(immediateQr = false) {
 // Xử lý Hộp Thoại Đặt Mua Gói Bản Quyền Tự Động (Phương án A)
 window.currentSelectedPkg = { name: 'Gói 3 Tháng', price: '2.700.000đ' };
 
-window.openOrderModal = function(pkgName, pkgPrice) {
+window.openOrderModal = async function(pkgName, pkgPrice) {
   window.currentSelectedPkg = { name: pkgName, price: pkgPrice };
 
   // Cập nhật Banner Gói Đang Chọn trên giao diện Dashboard
@@ -1649,8 +1774,8 @@ window.openOrderModal = function(pkgName, pkgPrice) {
   const phoneInput = document.getElementById('orderCustomerPhone');
   const nameInput = document.getElementById('orderCustomerName');
 
-  const devIdEl = document.getElementById('licCurrentDeviceId');
-  const devId = (devIdEl && devIdEl.innerText) ? devIdEl.innerText.trim() : 'AFB-PC-USER';
+  const devId = await getOrInitDeviceId();
+  updateDeviceDomElements(devId);
 
   if (nameEl) nameEl.innerText = pkgName;
   if (priceEl) priceEl.innerText = pkgPrice;
@@ -1729,8 +1854,8 @@ window.submitOrderOnline = async function() {
     const modalConfirm = document.getElementById('modalConfirmTransferCheck');
     const priceEl = document.getElementById('confirmCheckPrice');
     const memoEl = document.getElementById('confirmCheckMemo');
-    const devIdEl = document.getElementById('licCurrentDeviceId');
-    const devId = (devIdEl && devIdEl.innerText) ? devIdEl.innerText.trim() : 'AFB-PC-USER';
+    const devId = (cachedDeviceId && cachedDeviceId !== 'Đang lấy...') ? cachedDeviceId : (await getOrInitDeviceId());
+    updateDeviceDomElements(devId);
     const memo = generateTransferMemo(customerName, phone, pkg.name, devId);
 
     if (priceEl) priceEl.innerText = pkg.price;
@@ -1757,8 +1882,9 @@ window.proceedSendOrder = async function() {
   const modalConfirm = document.getElementById('modalConfirmTransferCheck');
   if (modalConfirm) modalConfirm.style.display = 'none';
 
-  const devIdEl = document.getElementById('licCurrentDeviceId');
-  const devId = (devIdEl && devIdEl.innerText) ? devIdEl.innerText.trim() : 'AFB-PC-USER';
+  const devId = (cachedDeviceId && cachedDeviceId !== 'Đang lấy...') ? cachedDeviceId : (await getOrInitDeviceId());
+  updateDeviceDomElements(devId);
+
   const pkg = window.currentSelectedPkg || { name: 'Gói 1 Tháng (30 ngày)', price: '1.000.000đ' };
   
   const phoneInput = document.getElementById('orderCustomerPhone');
@@ -1776,9 +1902,14 @@ window.proceedSendOrder = async function() {
   const isTrial = (pkg.price === '0đ' || String(pkg.name).includes('Dùng Thử') || String(pkg.name).toLowerCase().includes('trial'));
   const memo = generateTransferMemo(customerName, phone, pkg.name, devId);
 
-  // Lưu thông tin SĐT và Tên để lần sau tự điền
+  // Lưu thông tin SĐT và Tên để lần sau tự điền và tự động nhận diện bản quyền
   try {
-    if (phone) localStorage.setItem('gialong_last_phone', phone);
+    if (phone) {
+      localStorage.setItem('gialong_last_phone', phone);
+      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+        chrome.storage.local.set({ gialong_customer_phone: phone });
+      }
+    }
     if (customerName) localStorage.setItem('gialong_last_name', customerName);
   } catch (e) {}
 
@@ -1811,7 +1942,7 @@ window.proceedSendOrder = async function() {
     if (successBody) successBody.style.display = 'flex';
   };
 
-  // 1. Thử gửi qua Service Worker (Background) có quyền kết nối mạng đầy đủ
+  // 1. Gửi qua Service Worker (Background) có quyền kết nối mạng đầy đủ và phản hồi siêu nhanh
   try {
     if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
       chrome.runtime.sendMessage({ action: 'CREATE_ORDER', payload: orderPayload }, (resp) => {
@@ -1827,119 +1958,40 @@ window.proceedSendOrder = async function() {
 
   fallbackDirectFetch();
 
-  // 2. Fallback gửi trực tiếp qua danh sách máy chủ khả dụng (Đồng bộ đa máy chủ)
+  // 2. Fallback gửi trực tiếp qua API chính (tối đa 2.5 giây)
   async function fallbackDirectFetch() {
-    const list = new Set();
-
-    // 1. Quét các tab đang mở trong trình duyệt Chrome
+    const primaryBase = 'https://gia-long---tuy-n-d-ng.pages.dev';
     try {
-      if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.query) {
-        const tabs = await chrome.tabs.query({});
-        for (const t of tabs) {
-          if (t.url && t.url.startsWith('http')) {
-            try {
-              const u = new URL(t.url);
-              if (
-                u.hostname.includes('pages.dev') ||
-                u.hostname.includes('run.app') ||
-                u.hostname === 'localhost' ||
-                u.hostname === '127.0.0.1' ||
-                t.title?.includes('AutoRecruit') ||
-                t.title?.includes('Gia Long')
-              ) {
-                list.add(u.origin);
-              }
-            } catch (e) {}
-          }
-        }
-      }
-    } catch (e) {}
-
-    // 2. Đọc từ Chrome Storage
-    try {
-      const stored = await chrome.storage.local.get(['customApiServerUrl', 'webapp_last_url', 'lastSyncedFromUrl', 'known_server_urls']);
-      if (stored.customApiServerUrl) list.add(stored.customApiServerUrl.replace(/\/+$/, ''));
-      if (stored.webapp_last_url) list.add(stored.webapp_last_url.replace(/\/+$/, ''));
-      if (stored.lastSyncedFromUrl && stored.lastSyncedFromUrl.startsWith('http')) list.add(stored.lastSyncedFromUrl.replace(/\/+$/, ''));
-      if (Array.isArray(stored.known_server_urls)) stored.known_server_urls.forEach((u) => { if (u) list.add(u.replace(/\/+$/, '')); });
-    } catch (e) {}
-
-    list.add('https://gia-long---tuy-n-d-ng.pages.dev');
-    list.add('https://dang-bai-fb.pages.dev');
-    list.add('https://ais-dev-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app');
-    list.add('https://ais-pre-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app');
-    list.add('http://localhost:3000');
-    list.add('http://127.0.0.1:3000');
-
-    const candidates = Array.from(list).filter(Boolean);
-
-    const fetchPromises = candidates.map(async (sUrl) => {
-      try {
-        const res = await fetch(`${sUrl}/api/orders/create`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(orderPayload),
-        });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 2500);
+      const res = await fetch(`${primaryBase}/api/orders/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(orderPayload),
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      if (res.ok) {
         const text = await res.text();
-        if (!text || (!text.trim().startsWith('{') && !text.trim().startsWith('['))) return null;
-        const data = JSON.parse(text);
-        if (data && data.success) {
-          console.log('[Gia Long - FB Extension] ✓ Đã gửi đơn thành công lên:', sUrl);
-          return data.order;
-        }
-      } catch (err) {
-        console.warn('Lỗi kết nối tới:', sUrl, err);
-      }
-      return null;
-    });
-
-    // 1. Phát đồng thời tới tất cả các máy chủ backend khả dụng
-    const results = await Promise.allSettled(fetchPromises);
-    const validOrders = results.filter((r) => r.status === 'fulfilled' && r.value).map((r) => r.value);
-
-    // 2. Gửi dự phòng lên Cloud Database phụ (không block luồng chính)
-    let fallbackOrd = validOrders.length > 0 ? validOrders[0] : null;
-    if (!fallbackOrd) {
-      fallbackOrd = {
-        id: `ord_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-        pkgName: orderPayload.pkgName || 'Gói Bản Quyền',
-        price: orderPayload.price || '0đ',
-        clientName: orderPayload.clientName || 'Khách Đặt Mua',
-        phone: orderPayload.phone || '',
-        deviceId: orderPayload.deviceId || '',
-        createdAt: new Date().toISOString(),
-        status: 'pending',
-        note: orderPayload.note || '',
-      };
-    }
-
-
-    // 3. Gửi thông báo trực tiếp vào các tab Web App đang mở
-    try {
-      if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.query) {
-        const tabs = await chrome.tabs.query({});
-        for (const t of tabs) {
-          if (t.id && t.url && t.url.startsWith('http')) {
-            chrome.tabs.sendMessage(t.id, {
-              action: 'DISPATCH_NEW_ORDER_TO_WEBAPP',
-              payload: orderPayload,
-              order: fallbackOrd,
-            }).catch(() => {});
+        if (text && (text.trim().startsWith('{') || text.trim().startsWith('['))) {
+          const data = JSON.parse(text);
+          if (data && data.success) {
+            showSuccessUI(data.order);
+            return;
           }
         }
       }
     } catch (e) {}
 
-    showSuccessUI(fallbackOrd);
-    return;
-
-    // Nếu không kết nối được, thông báo rõ ràng để khách không bị nhầm lẫn
-    alert('Không thể kết nối máy chủ gửi đơn tự động do gián đoạn mạng. Vui lòng bấm mở Zalo 0869.029.310 để Quản trị viên kích hoạt trực tiếp!');
-    window.open('https://zalo.me/0869029310', '_blank');
-    if (btnSubmit) {
-      btnSubmit.disabled = false;
-      btnSubmit.innerHTML = '🚀 Xác Nhận Mua';
-    }
+    // Hiển thị thành công cục bộ ngay lập tức để người dùng không phải chờ
+    showSuccessUI({
+      id: '#ORD-' + Date.now().toString().slice(-4),
+      pkgName: orderPayload.pkgName,
+      price: orderPayload.price,
+      deviceId: devId,
+      phone: phone,
+      clientName: customerName,
+    });
   }
 };
 

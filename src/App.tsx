@@ -3089,12 +3089,14 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
 
                                       {/* Mã Máy */}
                                       <td className="py-1.5 sm:py-2 px-2.5 whitespace-nowrap">
-                                        {item.deviceId ? (
+                                        {item.deviceId && !item.deviceId.includes('Đang lấy') ? (
                                           <span className="font-mono text-[9.5px] sm:text-[10px] bg-slate-950 px-1.5 py-0.5 rounded border border-slate-700 text-sky-300">
                                             {item.deviceId}
                                           </span>
                                         ) : (
-                                          <span className="text-[10px] text-slate-500 italic">--</span>
+                                          <span className="font-mono text-[9px] sm:text-[9.5px] bg-amber-950/30 text-amber-300 px-1.5 py-0.5 rounded border border-amber-500/30">
+                                            Tự động nhận
+                                          </span>
                                         )}
                                       </td>
 
@@ -3417,7 +3419,7 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
                                   </div>
                                   <div className="text-[9.5px] sm:text-[10px] text-sky-300 mt-0.5 flex items-center gap-1 font-mono">
                                     <Cpu className="w-3 h-3 text-sky-400 shrink-0" />
-                                    <span>Mã máy: <strong className="text-sky-200 bg-sky-950 px-1 py-0.2 rounded border border-sky-500/30">{ord.deviceId || 'Tự động lấy'}</strong></span>
+                                    <span>Mã máy: <strong className={`px-1 py-0.2 rounded border ${!ord.deviceId || ord.deviceId.includes('Đang lấy') || ord.deviceId === 'Chưa gắn' ? 'text-amber-300 bg-amber-950/40 border-amber-500/40' : 'text-sky-200 bg-sky-950 border-sky-500/30'}`}>{!ord.deviceId || ord.deviceId.includes('Đang lấy') || ord.deviceId === 'Chưa gắn' ? 'Chờ máy (Auto-bind)' : ord.deviceId}</strong></span>
                                   </div>
                                 </td>
 
@@ -4398,9 +4400,24 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
 
                         {/* Mã máy tính (Device ID) */}
                         <div>
-                          <label className="block text-slate-300 font-semibold mb-1 text-[11px]">
-                            Mã Thiết Bị Máy Tính (Device ID):
-                          </label>
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="block text-slate-300 font-semibold text-[11px]">
+                              Mã Thiết Bị Máy Tính (Device ID):
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const cleanPhone = (editingOrder.phone || '').replace(/\D/g, '');
+                                const autoId = cleanPhone.length >= 8 
+                                  ? `dev_${cleanPhone.slice(-8)}_${Date.now().toString(36).slice(-4)}` 
+                                  : `dev_${Math.random().toString(36).substring(2, 9)}_${Date.now().toString(36).slice(-4)}`;
+                                setEditingOrder({ ...editingOrder, deviceId: autoId });
+                              }}
+                              className="text-[10px] text-sky-400 hover:text-sky-300 font-semibold underline flex items-center gap-1"
+                            >
+                              ⚡ Tự tạo mã máy chuẩn
+                            </button>
+                          </div>
                           <div className="relative">
                             <Cpu className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
                             <input
