@@ -634,41 +634,6 @@ Hỗ trợ Zalo: 0869.029.310 (Gia Long - FB)`;
             </p>
           </div>
         </div>
-
-        {/* Nạp key nhanh dự phòng */}
-        <div className="pt-0.5">
-          <button
-            type="button"
-            onClick={() => setShowQuickActivate(!showQuickActivate)}
-            className="text-[11px] text-sky-400 hover:text-sky-300 flex items-center gap-1 cursor-pointer"
-          >
-            <Key className="w-3 h-3" />
-            <span>{showQuickActivate ? 'Ẩn ô nạp key nhanh' : 'Đã có mã key từ Admin? Bấm vào đây để nạp nhanh dự phòng'}</span>
-          </button>
-
-          {showQuickActivate && (
-            <div className="mt-2 p-2.5 bg-slate-950 border border-slate-800 rounded-lg space-y-1.5">
-              <div className="flex gap-1.5">
-                <input
-                  type="text"
-                  value={customerActivationKey}
-                  onChange={(e) => setCustomerActivationKey(e.target.value.toUpperCase())}
-                  placeholder="Dán mã bản quyền (VD: GLFB-VIP-XXXXX)..."
-                  className="flex-1 bg-slate-900 border border-slate-700 rounded px-2.5 py-1 text-xs text-white font-mono uppercase focus:outline-none focus:border-emerald-500"
-                />
-                <button
-                  onClick={() => handleActivateViaBridge(customerActivationKey)}
-                  className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-bold cursor-pointer"
-                >
-                  Kích Hoạt
-                </button>
-              </div>
-              {activationStatus && (
-                <p className="text-[11px] text-emerald-400 font-medium">{activationStatus}</p>
-              )}
-            </div>
-          )}
-        </div>
       </section>
 
       {/* HỘP THOẠI HƯỚNG DẪN QUY TRÌNH ĐẶT MUA & TẢI FILE ZIP */}

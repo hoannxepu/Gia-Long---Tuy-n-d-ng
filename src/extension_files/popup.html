@@ -79,13 +79,42 @@
     </div>
   </div>
 
-  <!-- VIP LICENSE STATUS BAR IN POPUP -->
-  <div id="popupLicenseBar" style="background: #091e3a; border: 1px solid #1d4ed8; border-radius: 8px; padding: 6px 9px; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; font-size: 11px;">
-    <div style="display: flex; align-items: center; gap: 6px; min-width: 0;">
-      <span id="popupLicIcon">💎</span>
-      <span id="popupLicTitle" style="color: #6ee7b7; font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 250px;">Đang kiểm tra bản quyền...</span>
+  <!-- VIP LICENSE STATUS CARD IN POPUP (Professional & Rich Information) -->
+  <div id="popupLicenseBar" style="background: linear-gradient(135deg, #091e3a, #0f172a); border: 1px solid #38bdf8; border-radius: 10px; padding: 10px; margin-bottom: 8px; box-shadow: 0 4px 12px rgba(56,189,248,0.15); cursor: pointer;" title="Click để mở bảng quản lý bản quyền">
+    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; border-bottom: 1px solid #1e293b; padding-bottom: 6px;">
+      <div style="display: flex; align-items: center; gap: 6px;">
+        <span id="popupLicIcon" style="font-size: 14px;">💎</span>
+        <span style="font-weight: 900; font-size: 11.5px; color: #38bdf8; letter-spacing: 0.5px;">BẢN QUYỀN VIP ONLINE</span>
+      </div>
+      <span id="popupPlanBadge" class="badge" style="background: rgba(16,185,129,0.2); color: #34d399; border-color: rgba(16,185,129,0.4); font-size: 9px;">ĐÃ KÍCH HOẠT</span>
     </div>
-    <button class="btn-sub btn-sub-emerald" id="btnPopupOpenLicense" style="padding: 2px 7px; font-size: 9.5px; shrink-0;">Quản Lý</button>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 5px; font-size: 11px; margin-bottom: 5px;">
+      <div style="background: rgba(15,23,42,0.8); padding: 4px 7px; border-radius: 6px; border: 1px solid #1e293b;">
+        <span style="color: #64748b; font-size: 9px; display: block; font-weight: bold;">👤 KHÁCH HÀNG</span>
+        <span id="popupClientName" style="color: #f8fafc; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block;">Đang tải...</span>
+      </div>
+      <div style="background: rgba(15,23,42,0.8); padding: 4px 7px; border-radius: 6px; border: 1px solid #1e293b;">
+        <span style="color: #64748b; font-size: 9px; display: block; font-weight: bold;">📞 SỐ ĐIỆN THOẠI</span>
+        <span id="popupClientPhone" style="color: #38bdf8; font-weight: 700; font-family: monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block;">...</span>
+      </div>
+    </div>
+
+    <div style="background: rgba(15,23,42,0.8); padding: 4px 7px; border-radius: 6px; border: 1px solid #1e293b; margin-bottom: 5px; font-size: 11px;">
+      <span style="color: #64748b; font-size: 9px; display: block; font-weight: bold;">💻 MÃ MÁY (DEVICE ID)</span>
+      <span id="popupDeviceId" style="color: #cbd5e1; font-family: monospace; font-size: 10px; font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block;">...</span>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 1fr 1.2fr; gap: 5px; font-size: 11px;">
+      <div style="background: rgba(6,95,70,0.25); padding: 4px 7px; border-radius: 6px; border: 1px solid rgba(16,185,129,0.3);">
+        <span style="color: #34d399; font-size: 9px; display: block; font-weight: bold;">⏳ CÒN LẠI</span>
+        <span id="popupDaysLeft" style="color: #6ee7b7; font-weight: 900; font-size: 11.5px; display: block;">... ngày</span>
+      </div>
+      <div style="background: rgba(30,41,59,0.8); padding: 4px 7px; border-radius: 6px; border: 1px solid #334155;">
+        <span style="color: #94a3b8; font-size: 9px; display: block; font-weight: bold;">📅 HẠN KẾT THÚC</span>
+        <span id="popupExpiresAt" style="color: #f1f5f9; font-weight: 700; font-size: 10px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">...</span>
+      </div>
+    </div>
   </div>
 
   <div id="toast" class="toast-msg"></div>
