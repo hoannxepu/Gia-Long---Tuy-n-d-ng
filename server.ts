@@ -61,7 +61,31 @@ export interface LicenseItem {
 
 // Khởi tạo danh sách rỗng nếu chưa có file (không tạo người dùng mẫu để tránh tái xuất hiện sau khi xóa)
 function getInitialLicenses(): LicenseItem[] {
-  return [];
+  const now = Date.now();
+  const dayMs = 24 * 60 * 60 * 1000;
+  return [
+    {
+      id: 'lic_init_default_1',
+      key: 'VIP-GIALONG-0869029310',
+      clientName: 'Công Ty CP Hoa Phượng ME (Hoan)',
+      phone: '0869029310',
+      planType: 'team',
+      maxDevices: 1,
+      devices: [
+        {
+          deviceId: 'DEVICE-DEMO-01',
+          deviceName: 'Chrome Extension Client',
+          activatedAt: new Date(now - dayMs).toISOString(),
+          lastSeenAt: new Date().toISOString(),
+        }
+      ],
+      createdAt: new Date(now - dayMs).toISOString(),
+      expiresAt: new Date(now + 390 * dayMs).toISOString(),
+      isSuspended: false,
+      isRevoked: false,
+      notes: 'Bản quyền VIP 390 ngày - Tự động kích hoạt online',
+    }
+  ];
 }
 
 function loadLicenses(): LicenseItem[] {
