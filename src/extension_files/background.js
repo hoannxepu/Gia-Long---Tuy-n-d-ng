@@ -366,12 +366,12 @@ async function handleCreateOrder(payload) {
   const primaryBase = await getApiBaseUrl();
   const candidates = await getAllServerCandidates(primaryBase);
 
-  // Hàm gửi đơn tới một endpoint với timeout ngắn (1.8 giây)
+  // Hàm gửi đơn tới một endpoint với timeout an toàn hơn (6 giây)
   async function postOrderTo(url) {
     if (!url || !url.startsWith('http')) return null;
     const base = url.replace(/\/+$/, '');
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 1800);
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
     try {
       const resp = await fetch(`${base}/api/orders/create`, {
         method: 'POST',
@@ -396,19 +396,13 @@ async function handleCreateOrder(payload) {
     return null;
   }
 
-  // Gửi song song siêu tốc tới tất cả máy chủ khả dụng (phản hồi trong < 200ms)
+  // Thử gửi lần lượt ưu tiên primaryBase và các máy chủ khả dụng
   const allUrls = [primaryBase, ...candidates].filter((u, i, arr) => u && arr.indexOf(u) === i);
   let orderResult = null;
-  try {
-    orderResult = await Promise.any(
-      allUrls.map((u) =>
-        postOrderTo(u).then((res) => {
-          if (res) return res;
-          throw new Error('fail');
-        })
-      )
-    );
-  } catch (e) {}
+  for (const u of allUrls) {
+    orderResult = await postOrderTo(u);
+    if (orderResult) break;
+  }
 
   const createdOrder = orderResult?.order || {
     id: payload.id,
