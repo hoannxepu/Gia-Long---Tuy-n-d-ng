@@ -197,6 +197,31 @@ export function OrderModal({
         }),
       });
 
+      // Dual-dispatch trực tiếp sang Google Drive nếu có Webhook (chống mất đơn kể cả khi máy chủ Cloudflare chập chờn)
+      try {
+        const cachedGDrive = localStorage.getItem('glfb_gdrive_webhook');
+        if (cachedGDrive && cachedGDrive.startsWith('http')) {
+          fetch(cachedGDrive, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              event: 'ORDER_SUBMITTED_DIRECT',
+              id: `ord_${Date.now()}`,
+              timestamp: new Date().toISOString(),
+              timeFormatted: new Date().toLocaleString('vi-VN'),
+              clientName: customerName || 'Khách Đăng Ký Web',
+              phone: customerPhone,
+              pkgName,
+              price,
+              deviceId: deviceId || 'Chưa gắn mã',
+              status: 'pending',
+              note,
+              source: 'Modal Đặt Mua Web (Trực tiếp)'
+            })
+          }).catch(() => {});
+        }
+      } catch (e) {}
+
       const data = await res.json();
       if (data.success) {
         setSubmittedOrder(data.order || { id: `ord_${Date.now()}`, pkgName, price, phone: customerPhone, clientName: customerName, deviceId });

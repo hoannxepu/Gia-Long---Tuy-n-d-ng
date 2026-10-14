@@ -11,6 +11,7 @@ interface Env {
   DB?: any;
   GLFB_D1?: any;
   SIGNING_SECRET?: string;
+  GOOGLE_DRIVE_WEBHOOK_URL?: string;
 }
 
 interface LicenseItem {
@@ -198,6 +199,8 @@ let edgeSettings: any = {
   phone: '0869029310',
   supportName: 'Gia Long - FB',
   supportEmail: 'gialonggiaiphapvanhanh@gmail.com',
+  googleDriveSheetWebhookUrl: '',
+  googleDriveSyncEnabled: true,
 };
 
 function corsHeaders() {
@@ -270,14 +273,61 @@ function verifySignedToken(token: string, machineId: string, secret = 'GiaLongFB
   }
 }
 
-// Khởi tạo bảng licenses tự động trong Cloudflare D1 nếu chưa có
+// Gửi dữ liệu đơn hàng tự động sang Google Drive / Google Sheets qua Webhook
+async function syncToGoogleDrive(order: any, webhookUrl?: string): Promise<boolean> {
+  const targetUrl = webhookUrl || edgeSettings.googleDriveSheetWebhookUrl;
+  if (!targetUrl || !targetUrl.startsWith('http')) return false;
+  try {
+    const payload = {
+      event: 'ORDER_UPDATE',
+      id: order.id,
+      timestamp: new Date().toISOString(),
+      timeFormatted: new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }),
+      clientName: order.clientName || 'Khách Đặt Mua',
+      phone: order.phone || '',
+      pkgName: order.pkgName || '',
+      price: order.price || '',
+      deviceId: order.deviceId || '',
+      status: order.status || 'pending',
+      note: order.note || '',
+      source: 'Gia Long FB Web App & Extension',
+    };
+    const resp = await fetch(targetUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return resp.ok;
+  } catch (err) {
+    console.warn('[Google Drive Sync] Lỗi gửi Webhook:', err);
+    return false;
+  }
+}
+
+// Khởi tạo bảng D1 Database tự động (orders, licenses, settings, history)
 async function getD1Db(env: Env) {
   const db = env.DB || env.GLFB_D1;
   if (!db) return null;
   try {
     await db.exec(`
+      CREATE TABLE IF NOT EXISTS orders (
+        id TEXT PRIMARY KEY,
+        pkg_name TEXT NOT NULL,
+        price TEXT NOT NULL,
+        client_name TEXT,
+        phone TEXT,
+        device_id TEXT,
+        created_at TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        note TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_orders_device_id ON orders(device_id);
+      CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
+      CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at);
+
       CREATE TABLE IF NOT EXISTS licenses (
         id TEXT PRIMARY KEY,
+        key TEXT,
         machine_id TEXT NOT NULL,
         pkg_name TEXT NOT NULL,
         client_name TEXT,
@@ -287,10 +337,35 @@ async function getD1Db(env: Env) {
         created_at TEXT NOT NULL,
         expires_at TEXT,
         signed_token TEXT,
-        notes TEXT
+        notes TEXT,
+        is_suspended INTEGER DEFAULT 0,
+        is_revoked INTEGER DEFAULT 0,
+        devices_json TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_licenses_machine_id ON licenses(machine_id);
       CREATE INDEX IF NOT EXISTS idx_licenses_status ON licenses(status);
+
+      CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS history (
+        id TEXT PRIMARY KEY,
+        action TEXT,
+        action_name TEXT,
+        client_name TEXT,
+        phone TEXT,
+        device_id TEXT,
+        key TEXT,
+        plan_type TEXT,
+        pkg_name TEXT,
+        days_added INTEGER,
+        new_expires_at TEXT,
+        amount TEXT,
+        notes TEXT,
+        created_at TEXT NOT NULL
+      );
     `);
     return db;
   } catch (e) {
@@ -349,24 +424,120 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
   let adminPin = env.ADMIN_PIN || 'Ha26062018$';
   const reqPin = String(request.headers.get('x-admin-pin') || url.searchParams.get('pin') || '').trim();
 
-  // Đọc dữ liệu từ KV hoặc REST Cloud Database
+  // Đọc dữ liệu từ Cloudflare D1 Database (hoặc KV / REST Cloud Database)
+  const d1 = await getD1Db(env);
+  if (d1) {
+    try {
+      // 1. Đọc settings từ D1
+      const sRows: any = await d1.prepare(`SELECT key, value FROM settings`).all();
+      if (sRows?.results && sRows.results.length > 0) {
+        for (const row of sRows.results) {
+          try {
+            edgeSettings[row.key] = JSON.parse(row.value);
+          } catch (e) {
+            edgeSettings[row.key] = row.value;
+          }
+        }
+      }
+
+      // 2. Đọc orders từ D1
+      const oRows: any = await d1.prepare(`SELECT * FROM orders ORDER BY created_at DESC LIMIT 300`).all();
+      if (oRows?.results && oRows.results.length > 0) {
+        edgeOrders = oRows.results.map((r: any) => ({
+          id: r.id,
+          pkgName: r.pkg_name,
+          price: r.price,
+          clientName: r.client_name,
+          phone: r.phone,
+          deviceId: r.device_id,
+          createdAt: r.created_at,
+          status: r.status,
+          note: r.note,
+        }));
+      }
+
+      // 3. Đọc licenses từ D1
+      const lRows: any = await d1.prepare(`SELECT * FROM licenses ORDER BY created_at DESC LIMIT 300`).all();
+      if (lRows?.results && lRows.results.length > 0) {
+        edgeLicenses = lRows.results.map((r: any) => {
+          let devices = [];
+          try {
+            if (r.devices_json) devices = JSON.parse(r.devices_json);
+          } catch (e) {}
+          if (!devices.length && r.machine_id) {
+            devices = [{
+              deviceId: r.machine_id,
+              deviceName: r.client_name || 'Thiết bị kích hoạt',
+              activatedAt: r.created_at,
+              lastSeenAt: r.created_at,
+            }];
+          }
+          return {
+            id: r.id,
+            key: r.key || (r.signed_token ? r.signed_token.slice(-12) : `GLFB-VIP-${(r.machine_id || '').slice(-6).toUpperCase()}`),
+            clientName: r.client_name || 'Khách Kích Hoạt',
+            phone: r.phone || '',
+            planType: 'individual',
+            maxDevices: 1,
+            devices,
+            createdAt: r.created_at,
+            expiresAt: r.expires_at || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+            isSuspended: Boolean(r.is_suspended),
+            isRevoked: Boolean(r.is_revoked || r.status === 'revoked'),
+            notes: r.notes || '',
+          };
+        });
+      }
+
+      // 4. Đọc history từ D1
+      const hRows: any = await d1.prepare(`SELECT * FROM history ORDER BY created_at DESC LIMIT 150`).all();
+      if (hRows?.results && hRows.results.length > 0) {
+        edgeHistory = hRows.results.map((r: any) => ({
+          id: r.id,
+          action: r.action,
+          actionName: r.action_name,
+          clientName: r.client_name,
+          phone: r.phone,
+          deviceId: r.device_id,
+          key: r.key,
+          planType: r.plan_type,
+          pkgName: r.pkg_name,
+          daysAdded: r.days_added,
+          newExpiresAt: r.new_expires_at,
+          amount: r.amount,
+          notes: r.notes,
+          createdAt: r.created_at,
+        }));
+      }
+    } catch (e) {
+      console.warn('[Cloudflare D1] Initial load error:', e);
+    }
+  }
+
+  // Đọc dữ liệu từ KV (nếu có KV)
   if (env.GLFB_KV) {
     try {
       const kvPin = await env.GLFB_KV.get('admin_pin', 'text');
       if (kvPin && kvPin.trim()) {
         adminPin = kvPin.trim();
       }
-      const kvLic = await env.GLFB_KV.get('licenses', 'json');
-      if (kvLic && Array.isArray(kvLic)) edgeLicenses = kvLic;
-      const kvOrd = await env.GLFB_KV.get('orders', 'json');
-      if (kvOrd && Array.isArray(kvOrd)) edgeOrders = kvOrd;
-      const kvHist = await env.GLFB_KV.get('history', 'json');
-      if (kvHist && Array.isArray(kvHist)) edgeHistory = kvHist;
-      const kvRev = await env.GLFB_KV.get('revokedKeys', 'json');
-      if (kvRev && Array.isArray(kvRev)) edgeRevokedKeys = kvRev;
-      const kvSet = await env.GLFB_KV.get('settings', 'json');
-      if (kvSet) edgeSettings = kvSet;
+      if (!d1) {
+        const kvLic = await env.GLFB_KV.get('licenses', 'json');
+        if (kvLic && Array.isArray(kvLic)) edgeLicenses = kvLic;
+        const kvOrd = await env.GLFB_KV.get('orders', 'json');
+        if (kvOrd && Array.isArray(kvOrd)) edgeOrders = kvOrd;
+        const kvHist = await env.GLFB_KV.get('history', 'json');
+        if (kvHist && Array.isArray(kvHist)) edgeHistory = kvHist;
+        const kvRev = await env.GLFB_KV.get('revokedKeys', 'json');
+        if (kvRev && Array.isArray(kvRev)) edgeRevokedKeys = kvRev;
+        const kvSet = await env.GLFB_KV.get('settings', 'json');
+        if (kvSet) edgeSettings = kvSet;
+      }
     } catch (e) {}
+  }
+
+  if (env.GOOGLE_DRIVE_WEBHOOK_URL && !edgeSettings.googleDriveSheetWebhookUrl) {
+    edgeSettings.googleDriveSheetWebhookUrl = env.GOOGLE_DRIVE_WEBHOOK_URL;
   }
 
   const syncKV = async () => {
@@ -391,6 +562,34 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
     };
     edgeHistory.unshift(item);
     if (edgeHistory.length > 300) edgeHistory.length = 300;
+
+    // Lưu bền vững vào Cloudflare D1 history table
+    if (d1) {
+      try {
+        await d1.prepare(`
+          INSERT OR REPLACE INTO history (id, action, action_name, client_name, phone, device_id, key, plan_type, pkg_name, days_added, new_expires_at, amount, notes, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).bind(
+          item.id,
+          item.action || '',
+          item.actionName || '',
+          item.clientName || '',
+          item.phone || '',
+          item.deviceId || '',
+          item.key || '',
+          item.planType || '',
+          item.pkgName || '',
+          item.daysAdded || 0,
+          item.newExpiresAt || '',
+          item.amount || '',
+          item.notes || '',
+          item.createdAt
+        ).run();
+      } catch (d1Err) {
+        console.warn('[D1 addHistory Error]', d1Err);
+      }
+    }
+
     await syncKV();
     return item;
   };
@@ -431,11 +630,11 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
           VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)
         `).bind(regId, machineId, pkgName, clientName, phone, price, createdAt, notes).run();
       } catch (d1Err) {
-        console.warn('[D1 Register] Error inserting into D1:', d1Err);
+        console.warn('[D1 Register] Error inserting into D1 licenses:', d1Err);
       }
     }
 
-    // 2. Đồng thời tạo Order để hiển thị ngay trên Web Admin và đồng bộ KV
+    // 2. Đồng thời tạo Order để hiển thị ngay trên Web Admin và lưu D1 + KV
     const newOrd: OrderItem = {
       id: `ord_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       pkgName,
@@ -448,6 +647,24 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
       note: notes || `Đăng ký ${pkgName} từ máy ${machineId}`,
     };
     edgeOrders.unshift(newOrd);
+
+    if (d1) {
+      try {
+        await d1.prepare(`
+          INSERT OR REPLACE INTO orders (id, pkg_name, price, client_name, phone, device_id, created_at, status, note)
+          VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+        `).bind(newOrd.id, newOrd.pkgName, newOrd.price, newOrd.clientName, newOrd.phone, newOrd.deviceId, newOrd.createdAt, newOrd.note).run();
+      } catch (d1OrdErr) {
+        console.warn('[D1 Register] Error inserting into D1 orders:', d1OrdErr);
+      }
+    }
+
+    // 3. Tự động đẩy sang Google Drive / Google Sheets (nếu đã cấu hình)
+    const gDriveUrl = edgeSettings.googleDriveSheetWebhookUrl || env.GOOGLE_DRIVE_WEBHOOK_URL;
+    if (gDriveUrl && edgeSettings.googleDriveSyncEnabled !== false) {
+      syncToGoogleDrive(newOrd, gDriveUrl);
+    }
+
     await syncKV();
 
     return jsonResponse({
@@ -619,12 +836,22 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
           message: 'Đơn đăng ký đang chờ Quản trị viên phê duyệt.',
         });
       }
-      if (d1Lic.status === 'revoked') {
+      if (d1Lic.status === 'revoked' || d1Lic.is_revoked) {
         return jsonResponse({
           success: false,
           status: 'revoked',
+          isRevoked: true,
           machine_id: machineId,
           message: '🚨 Bản quyền của thiết bị này đã bị Quản trị viên thu hồi!',
+        });
+      }
+      if (d1Lic.status === 'suspended' || d1Lic.is_suspended) {
+        return jsonResponse({
+          success: false,
+          status: 'suspended',
+          isSuspended: true,
+          machine_id: machineId,
+          message: '⏸️ Bản quyền của thiết bị đang bị Quản trị viên tạm khóa!',
         });
       }
       if (d1Lic.status === 'active') {
@@ -655,7 +882,44 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
       }
     }
 
-    // 2. Fallback sang Edge Memory / KV (nếu D1 chưa có hoặc dữ liệu cũ)
+    // 2. Kiểm tra trên Google Drive / Google Sheets (nếu đã cấu hình Webhook)
+    const gDriveUrl = edgeSettings.googleDriveSheetWebhookUrl || env.GOOGLE_DRIVE_WEBHOOK_URL;
+    if (gDriveUrl && gDriveUrl.startsWith('http')) {
+      try {
+        const gRes = await fetch(`${gDriveUrl}?action=check&machine_id=${encodeURIComponent(machineId)}`);
+        if (gRes.ok) {
+          const gData: any = await gRes.json();
+          if (gData && gData.success && gData.status === 'active') {
+            const expDate = gData.expires_at || new Date(Date.now() + 30 * 86400000).toISOString();
+            const token = generateSignedToken(machineId, expDate, env.SIGNING_SECRET);
+            return jsonResponse({
+              success: true,
+              status: 'active',
+              machine_id: machineId,
+              pkg_name: gData.pkg_name || 'Gói VIP Google Drive',
+              client_name: gData.client_name || 'Khách Google Drive',
+              expires_at: expDate,
+              days_left: gData.days_left || 30,
+              token,
+              message: '✓ Bản quyền hợp lệ từ Google Drive!',
+            });
+          }
+          if (gData && gData.status === 'pending') {
+            return jsonResponse({
+              success: true,
+              status: 'pending',
+              machine_id: machineId,
+              pkg_name: gData.pkg_name || 'Gói Đăng Ký',
+              message: 'Đơn đăng ký đang chờ Quản trị viên phê duyệt trên Google Drive.',
+            });
+          }
+        }
+      } catch (gErr) {
+        console.warn('[Google Drive Check Error]', gErr);
+      }
+    }
+
+    // 3. Fallback sang Edge Memory / KV (nếu D1 chưa có hoặc dữ liệu cũ)
     const cleanId = machineId.toLowerCase();
     const matchedLic = edgeLicenses.find((l) =>
       !l.isRevoked && l.devices?.some((d) => d.deviceId.toLowerCase() === cleanId)
@@ -666,8 +930,18 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
         return jsonResponse({
           success: false,
           status: 'revoked',
+          isRevoked: true,
           machine_id: machineId,
           message: '🚨 Bản quyền máy này đã bị Quản trị viên thu hồi!',
+        });
+      }
+      if (matchedLic.isSuspended) {
+        return jsonResponse({
+          success: false,
+          status: 'suspended',
+          isSuspended: true,
+          machine_id: machineId,
+          message: '⏸️ Bản quyền máy này đang bị Quản trị viên tạm khóa!',
         });
       }
       const expMs = new Date(matchedLic.expiresAt).getTime();
@@ -993,6 +1267,25 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
     };
 
     edgeOrders.unshift(newOrder);
+
+    // 1. Lưu đơn đặt mua vào Cloudflare D1 Database (nếu có D1)
+    if (d1) {
+      try {
+        await d1.prepare(`
+          INSERT OR REPLACE INTO orders (id, pkg_name, price, client_name, phone, device_id, created_at, status, note)
+          VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+        `).bind(newOrder.id, newOrder.pkgName, newOrder.price, newOrder.clientName, newOrder.phone, newOrder.deviceId, newOrder.createdAt, newOrder.note).run();
+      } catch (d1Err) {
+        console.warn('[D1 Orders Create] Lỗi lưu đơn vào D1:', d1Err);
+      }
+    }
+
+    // 2. Tự động đồng bộ ngay lập tức sang Google Drive / Google Sheets
+    const gDriveUrl = edgeSettings.googleDriveSheetWebhookUrl || env.GOOGLE_DRIVE_WEBHOOK_URL;
+    if (gDriveUrl && edgeSettings.googleDriveSyncEnabled !== false) {
+      syncToGoogleDrive(newOrder, gDriveUrl);
+    }
+
     await addHistory({
       action: 'create',
       actionName: isTrial ? 'Đơn đăng ký dùng thử' : 'Đơn đặt mua mới',
@@ -1020,6 +1313,23 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
 
   // ROUTE: Lấy số lượng đơn hàng chờ duyệt
   if (pathname === '/api/orders/pending-count' && method === 'GET') {
+    if (d1) {
+      try {
+        const countRes: any = await d1.prepare(`SELECT COUNT(*) as c FROM orders WHERE status = 'pending'`).first();
+        const latestPending: any = await d1.prepare(`SELECT * FROM orders WHERE status = 'pending' ORDER BY created_at DESC LIMIT 1`).first();
+        return jsonResponse({
+          success: true,
+          pendingCount: countRes?.c ?? 0,
+          latestPending: latestPending ? {
+            id: latestPending.id,
+            pkgName: latestPending.pkg_name,
+            clientName: latestPending.client_name,
+            price: latestPending.price,
+            createdAt: latestPending.created_at,
+          } : null,
+        });
+      } catch (e) {}
+    }
     const pendingOrders = edgeOrders.filter((o) => o.status === 'pending');
     return jsonResponse({
       success: true,
@@ -1141,6 +1451,24 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
     }
 
     if (pathname === '/api/admin/orders' && method === 'GET') {
+      if (d1) {
+        try {
+          const rows: any = await d1.prepare(`SELECT * FROM orders ORDER BY created_at DESC LIMIT 300`).all();
+          if (rows?.results && rows.results.length > 0) {
+            edgeOrders = rows.results.map((r: any) => ({
+              id: r.id,
+              pkgName: r.pkg_name,
+              price: r.price,
+              clientName: r.client_name,
+              phone: r.phone,
+              deviceId: r.device_id,
+              createdAt: r.created_at,
+              status: r.status,
+              note: r.note,
+            }));
+          }
+        } catch (e) {}
+      }
       return jsonResponse({ success: true, orders: edgeOrders });
     }
 
@@ -1150,8 +1478,13 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
 
     if (pathname === '/api/admin/history/clear' && method === 'POST') {
       edgeHistory = [];
+      if (d1) {
+        try {
+          await d1.exec(`DELETE FROM history`);
+        } catch (e) {}
+      }
       await syncKV();
-      return jsonResponse({ success: true, message: 'Đã xóa toàn bộ lịch sử!' });
+      return jsonResponse({ success: true, message: 'Đã xóa toàn bộ lịch sử!', history: [] });
     }
 
     if (pathname === '/api/admin/orders/approve' && method === 'POST') {
@@ -1230,28 +1563,53 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
       });
 
       // Đồng bộ kích hoạt tức thì vào Cloudflare D1 Database
-      const d1 = await getD1Db(env);
-      if (d1 && cleanDeviceId) {
+      if (d1) {
         try {
-          const d1Token = generateSignedToken(cleanDeviceId, approvedLicense?.expiresAt || new Date(Date.now() + days * 86400000).toISOString(), env.SIGNING_SECRET);
-          await d1.prepare(`
-            INSERT OR REPLACE INTO licenses (id, machine_id, pkg_name, client_name, phone, price, status, created_at, expires_at, signed_token, notes)
-            VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)
-          `).bind(
-            `lic_${order.id}`,
-            cleanDeviceId,
-            order.pkgName || 'Gói VIP',
-            order.clientName || 'Khách Đặt Mua',
-            order.phone || '',
-            order.price || '0đ',
-            new Date().toISOString(),
-            approvedLicense?.expiresAt,
-            d1Token,
-            `Duyệt từ đơn ${order.id}`
-          ).run();
+          await d1.prepare(`UPDATE orders SET status = 'approved' WHERE id = ?`).bind(order.id).run();
+          if (cleanDeviceId) {
+            const d1Token = generateSignedToken(cleanDeviceId, approvedLicense?.expiresAt || new Date(Date.now() + days * 86400000).toISOString(), env.SIGNING_SECRET);
+            await d1.prepare(`
+              INSERT OR REPLACE INTO licenses (id, key, machine_id, pkg_name, client_name, phone, price, status, created_at, expires_at, signed_token, notes, is_suspended, is_revoked, devices_json)
+              VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, 0, 0, ?)
+            `).bind(
+              approvedLicense?.id || `lic_${order.id}`,
+              approvedLicense?.key || `GLFB-VIP-${cleanDeviceId.slice(-6).toUpperCase()}`,
+              cleanDeviceId,
+              order.pkgName || 'Gói VIP',
+              order.clientName || 'Khách Đặt Mua',
+              order.phone || '',
+              order.price || '0đ',
+              new Date().toISOString(),
+              approvedLicense?.expiresAt,
+              d1Token,
+              `Duyệt từ đơn ${order.id}`,
+              JSON.stringify(approvedLicense?.devices || [{ deviceId: cleanDeviceId, activatedAt: new Date().toISOString() }])
+            ).run();
+          }
         } catch (d1Err) {
           console.warn('[D1 Order Approve Sync]', d1Err);
         }
+      }
+
+      // Thông báo cập nhật sang Google Drive / Google Sheets
+      const gDriveUrl = edgeSettings.googleDriveSheetWebhookUrl || env.GOOGLE_DRIVE_WEBHOOK_URL;
+      if (gDriveUrl && edgeSettings.googleDriveSyncEnabled !== false) {
+        syncToGoogleDrive({ ...order, status: 'approved' }, gDriveUrl);
+        try {
+          fetch(gDriveUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'approve',
+              deviceId: cleanDeviceId || order.deviceId,
+              clientName: order.clientName,
+              phone: order.phone,
+              pkgName: order.pkgName,
+              days: days || 30,
+              expiresAt: approvedLicense?.expiresAt,
+            }),
+          }).catch(() => {});
+        } catch (e) {}
       }
 
       await syncKV();
@@ -1314,7 +1672,7 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
     if (pathname === '/api/admin/licenses/extend' && method === 'POST') {
       const { id, addDays } = body;
       const days = parseInt(addDays, 10) || 30;
-      const found = edgeLicenses.find((l) => l.id === id);
+      const found = edgeLicenses.find((l) => l.id === id || l.key === id);
       if (!found) return jsonResponse({ success: false, error: 'Không tìm thấy mã!' }, 404);
 
       const now = Date.now();
@@ -1322,6 +1680,43 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
       const baseTime = curExp > now ? curExp : now;
       const newExp = new Date(baseTime + days * 24 * 60 * 60 * 1000).toISOString();
       found.expiresAt = newExp;
+      found.isSuspended = false;
+
+      // Đồng bộ vào Cloudflare D1
+      if (d1) {
+        try {
+          const mainDevId = found.devices?.[0]?.deviceId || found.id;
+          const d1Token = generateSignedToken(mainDevId, newExp, env.SIGNING_SECRET);
+          await d1.prepare(`
+            UPDATE licenses
+            SET expires_at = ?, signed_token = ?, status = 'active', is_suspended = 0, is_revoked = 0
+            WHERE id = ? OR key = ?
+          `).bind(newExp, d1Token, found.id, found.key).run();
+        } catch (d1Err) {
+          console.warn('[D1 Extend Error]', d1Err);
+        }
+      }
+
+      // Thông báo sang Google Drive / Google Sheets nếu bật
+      const gDriveUrl = edgeSettings.googleDriveSheetWebhookUrl || env.GOOGLE_DRIVE_WEBHOOK_URL;
+      if (gDriveUrl && edgeSettings.googleDriveSyncEnabled !== false) {
+        try {
+          fetch(gDriveUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'extend',
+              event: 'LICENSE_EXTEND',
+              key: found.key,
+              clientName: found.clientName,
+              phone: found.phone || '',
+              daysAdded: days,
+              newExpiresAt: newExp,
+              timestamp: new Date().toISOString(),
+            }),
+          }).catch(() => {});
+        } catch (e) {}
+      }
 
       await addHistory({
         action: 'extend',
@@ -1334,15 +1729,176 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
         pkgName: normalizePkgSymbol(days),
         daysAdded: days,
         newExpiresAt: newExp,
+        notes: `Gia hạn thêm ${days} ngày. Hạn mới: ${new Date(newExp).toLocaleDateString('vi-VN')}`,
       });
       await syncKV();
 
-      return jsonResponse({ success: true, message: `✓ Đã gia hạn thêm ${days} ngày!`, license: found });
+      return jsonResponse({
+        success: true,
+        message: `✓ Đã gia hạn thêm ${days} ngày cho khách ${found.clientName}! Hạn mới: ${new Date(newExp).toLocaleDateString('vi-VN')}`,
+        license: found,
+        licenses: edgeLicenses,
+        history: edgeHistory,
+      });
+    }
+
+    // Cập nhật thông tin bản quyền (Sửa trực tiếp ngày hết hạn, tên, sđt, ghi chú)
+    if (pathname === '/api/admin/licenses/update' && method === 'POST') {
+      const { id, clientName, phone, expiresAt, maxDevices, notes, planType } = body;
+      const found = edgeLicenses.find((l) => l.id === id || l.key === id);
+      if (!found) return jsonResponse({ success: false, error: 'Không tìm thấy mã bản quyền!' }, 404);
+
+      const prevExp = found.expiresAt;
+      if (clientName !== undefined) found.clientName = String(clientName).trim();
+      if (phone !== undefined) found.phone = String(phone).trim();
+      if (expiresAt !== undefined && !isNaN(new Date(expiresAt).getTime())) {
+        found.expiresAt = new Date(expiresAt).toISOString();
+      }
+      if (maxDevices !== undefined) {
+        const slots = parseInt(maxDevices, 10);
+        if (slots >= 1) found.maxDevices = slots;
+      }
+      if (notes !== undefined) found.notes = String(notes);
+      if (planType !== undefined && ['individual', 'team', 'trial'].includes(planType)) {
+        found.planType = planType;
+      }
+
+      if (d1) {
+        try {
+          const mainDevId = found.devices?.[0]?.deviceId || found.id;
+          const d1Token = generateSignedToken(mainDevId, found.expiresAt, env.SIGNING_SECRET);
+          await d1.prepare(`
+            UPDATE licenses
+            SET client_name = ?, phone = ?, expires_at = ?, signed_token = ?, notes = ?
+            WHERE id = ? OR key = ?
+          `).bind(found.clientName, found.phone, found.expiresAt, d1Token, found.notes, found.id, found.key).run();
+        } catch (d1Err) {
+          console.warn('[D1 Update License]', d1Err);
+        }
+      }
+
+      if (expiresAt && expiresAt !== prevExp) {
+        await addHistory({
+          action: 'update_date',
+          actionName: 'Sửa hạn dùng',
+          clientName: found.clientName,
+          phone: found.phone || '',
+          deviceId: found.devices?.[0]?.deviceId || '',
+          key: found.key,
+          planType: found.planType,
+          newExpiresAt: found.expiresAt,
+          notes: `Đổi ngày hết hạn sang ${new Date(found.expiresAt).toLocaleDateString('vi-VN')}`,
+        });
+      }
+
+      await syncKV();
+      return jsonResponse({
+        success: true,
+        message: `✓ Đã cập nhật thông tin cho khách "${found.clientName}"!`,
+        license: found,
+        licenses: edgeLicenses,
+        history: edgeHistory,
+      });
+    }
+
+    // Cấp đổi sang một mã Key mới
+    if (pathname === '/api/admin/licenses/regenerate-key' && method === 'POST') {
+      const { id } = body;
+      const found = edgeLicenses.find((l) => l.id === id || l.key === id);
+      if (!found) return jsonResponse({ success: false, error: 'Không tìm thấy mã bản quyền!' }, 404);
+
+      const randomCode = Math.random().toString(36).substring(2, 7).toUpperCase();
+      let prefix = 'GLFB-VIP';
+      if (found.planType === 'team') prefix = 'GLFB-TEAM';
+      else if (found.planType === 'trial') prefix = 'GLFB-TRIAL';
+
+      const oldKey = found.key;
+      const newKey = `${prefix}-${randomCode}`;
+      if (!found.aliasKeys) found.aliasKeys = [];
+      if (!found.aliasKeys.includes(oldKey)) found.aliasKeys.push(oldKey);
+      found.key = newKey;
+
+      if (d1) {
+        try {
+          await d1.prepare(`UPDATE licenses SET key = ? WHERE id = ? OR key = ?`).bind(newKey, found.id, oldKey).run();
+        } catch (e) {}
+      }
+
+      await addHistory({
+        action: 'create',
+        actionName: 'Đổi mã Key mới',
+        clientName: found.clientName,
+        phone: found.phone || '',
+        deviceId: found.devices?.[0]?.deviceId || '',
+        key: newKey,
+        planType: found.planType,
+        notes: `Đổi mã từ ${oldKey} sang ${newKey}`,
+      });
+
+      await syncKV();
+      return jsonResponse({
+        success: true,
+        message: `✓ Đã đổi mã Key mới thành công: ${newKey}`,
+        newKey,
+        license: found,
+        licenses: edgeLicenses,
+        history: edgeHistory,
+      });
+    }
+
+    // Cập nhật thông tin đơn hàng
+    if (pathname === '/api/admin/orders/update' && method === 'POST') {
+      const { orderId, clientName, phone, pkgName, price, note, deviceId, status } = body;
+      if (!orderId) return jsonResponse({ success: false, error: 'Thiếu mã đơn hàng!' }, 400);
+
+      const order = edgeOrders.find((o) => o.id === orderId);
+      if (!order) return jsonResponse({ success: false, error: 'Không tìm thấy đơn hàng cần cập nhật!' }, 404);
+
+      if (clientName !== undefined) order.clientName = String(clientName).trim();
+      if (phone !== undefined) order.phone = String(phone).trim();
+      if (pkgName !== undefined) order.pkgName = String(pkgName).trim();
+      if (price !== undefined) order.price = String(price).trim();
+      if (note !== undefined) order.note = String(note).trim();
+      if (deviceId !== undefined) order.deviceId = String(deviceId).trim();
+      if (status !== undefined) order.status = status;
+
+      if (d1) {
+        try {
+          await d1.prepare(`
+            UPDATE orders
+            SET client_name = ?, phone = ?, pkg_name = ?, price = ?, note = ?, device_id = ?, status = ?
+            WHERE id = ?
+          `).bind(order.clientName, order.phone, order.pkgName, order.price, order.note, order.deviceId, order.status, order.id).run();
+        } catch (e) {}
+      }
+
+      const orderShortId = order.id.slice(-8).toUpperCase();
+      await addHistory({
+        action: 'update_date',
+        actionName: 'Cập nhật đơn mua',
+        clientName: order.clientName || 'Khách đặt mua',
+        phone: order.phone || '',
+        deviceId: order.deviceId || '',
+        key: orderShortId,
+        planType: 'individual',
+        pkgName: normalizePkgSymbol(order.pkgName),
+        amount: order.price,
+        notes: `Cập nhật đơn ${orderShortId}: ${order.clientName} - ${order.pkgName} (${order.price})`,
+      });
+
+      await syncKV();
+      return jsonResponse({
+        success: true,
+        message: '✓ Đã cập nhật đơn đặt mua và đồng bộ lịch sử thành công!',
+        order,
+        orders: edgeOrders,
+        history: edgeHistory,
+      });
     }
 
     if (pathname === '/api/admin/licenses/revoke' && method === 'POST') {
       const { id, reason } = body;
-      const found = edgeLicenses.find((l) => l.id === id);
+      const found = edgeLicenses.find((l) => l.id === id || l.key === id);
       if (!found) return jsonResponse({ success: false, error: 'Không tìm thấy mã!' }, 404);
 
       found.isRevoked = true;
@@ -1350,6 +1906,17 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
       found.revokedAt = new Date().toISOString();
       found.revokeReason = reason || 'Vi phạm điều khoản sử dụng';
       found.devices = [];
+
+      if (d1) {
+        try {
+          await d1.prepare(`
+            UPDATE licenses
+            SET is_revoked = 1, is_suspended = 1, status = 'revoked', devices_json = '[]'
+            WHERE id = ? OR key = ?
+          `).bind(found.id, found.key).run();
+        } catch (e) {}
+      }
+
       await addHistory({
         action: 'revoke',
         actionName: 'Thu hồi quyền',
@@ -1362,18 +1929,35 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
       });
       await syncKV();
 
-      return jsonResponse({ success: true, message: `🚫 Đã thu hồi bản quyền của "${found.clientName}"!`, license: found });
+      return jsonResponse({
+        success: true,
+        message: `🚫 Đã thu hồi bản quyền của "${found.clientName}"!`,
+        license: found,
+        licenses: edgeLicenses,
+        history: edgeHistory,
+      });
     }
 
     if (pathname === '/api/admin/licenses/unrevoke' && method === 'POST') {
       const { id } = body;
-      const found = edgeLicenses.find((l) => l.id === id);
+      const found = edgeLicenses.find((l) => l.id === id || l.key === id);
       if (!found) return jsonResponse({ success: false, error: 'Không tìm thấy mã!' }, 404);
 
       found.isRevoked = false;
       found.isSuspended = false;
       delete found.revokedAt;
       delete found.revokeReason;
+
+      if (d1) {
+        try {
+          await d1.prepare(`
+            UPDATE licenses
+            SET is_revoked = 0, is_suspended = 0, status = 'active'
+            WHERE id = ? OR key = ?
+          `).bind(found.id, found.key).run();
+        } catch (e) {}
+      }
+
       await addHistory({
         action: 'unrevoke',
         actionName: 'Khôi phục quyền',
@@ -1385,32 +1969,63 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
       });
       await syncKV();
 
-      return jsonResponse({ success: true, message: `✓ Đã khôi phục hoạt động cho "${found.clientName}"!`, license: found });
+      return jsonResponse({
+        success: true,
+        message: `✓ Đã khôi phục hoạt động cho "${found.clientName}"!`,
+        license: found,
+        licenses: edgeLicenses,
+        history: edgeHistory,
+      });
     }
 
     if (pathname === '/api/admin/licenses/toggle' && method === 'POST') {
       const { id } = body;
-      const found = edgeLicenses.find((l) => l.id === id);
+      const found = edgeLicenses.find((l) => l.id === id || l.key === id);
       if (!found) return jsonResponse({ success: false, error: 'Không tìm thấy mã!' }, 404);
 
       found.isSuspended = !found.isSuspended;
+
+      if (d1) {
+        try {
+          await d1.prepare(`
+            UPDATE licenses
+            SET is_suspended = ?
+            WHERE id = ? OR key = ?
+          `).bind(found.isSuspended ? 1 : 0, found.id, found.key).run();
+        } catch (e) {}
+      }
+
       await syncKV();
       return jsonResponse({
         success: true,
         message: found.isSuspended ? 'Đã tạm khóa mã này!' : 'Đã mở khóa mã hoạt động bình thường!',
         isSuspended: found.isSuspended,
+        licenses: edgeLicenses,
+        history: edgeHistory,
       });
     }
 
     if (pathname === '/api/admin/licenses/reset-devices' && method === 'POST') {
       const { id } = body;
-      const found = edgeLicenses.find((l) => l.id === id);
+      const found = edgeLicenses.find((l) => l.id === id || l.key === id);
       if (!found) return jsonResponse({ success: false, error: 'Không tìm thấy mã!' }, 404);
 
       const count = found.devices.length;
       found.devices = [];
+
+      if (d1) {
+        try {
+          await d1.prepare(`UPDATE licenses SET devices_json = '[]' WHERE id = ? OR key = ?`).bind(found.id, found.key).run();
+        } catch (e) {}
+      }
+
       await syncKV();
-      return jsonResponse({ success: true, message: `✓ Đã xóa ${count} thiết bị liên kết cũ!` });
+      return jsonResponse({
+        success: true,
+        message: `✓ Đã xóa ${count} thiết bị liên kết cũ!`,
+        licenses: edgeLicenses,
+        history: edgeHistory,
+      });
     }
 
     if (pathname === '/api/admin/licenses/delete' && method === 'POST') {
@@ -1463,7 +2078,16 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
           notes: `Quản trị viên xóa người dùng "${toDelete.clientName}" khỏi danh sách`,
         });
       }
+
       edgeLicenses = edgeLicenses.filter((l) => l.id !== targetId && l.key !== targetId);
+
+      // Xóa vĩnh viễn khỏi Cloudflare D1
+      if (d1 && targetId) {
+        try {
+          await d1.prepare(`DELETE FROM licenses WHERE id = ? OR key = ?`).bind(targetId, targetId).run();
+        } catch (e) {}
+      }
+
       await syncKV();
       return jsonResponse({
         success: true,
@@ -1512,6 +2136,12 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
         });
       }
 
+      if (d1 && targetId) {
+        try {
+          await d1.prepare(`DELETE FROM orders WHERE id = ?`).bind(targetId).run();
+        } catch (e) {}
+      }
+
       autoConsolidateEdgeLicensesAndOrders();
       await syncKV();
       return jsonResponse({
@@ -1525,8 +2155,147 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
 
     if (pathname === '/api/admin/settings' && method === 'POST') {
       edgeSettings = { ...edgeSettings, ...body };
+      if (d1) {
+        try {
+          for (const [k, v] of Object.entries(edgeSettings)) {
+            await d1.prepare(`INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)`).bind(k, JSON.stringify(v)).run();
+          }
+        } catch (e) {}
+      }
       await syncKV();
-      return jsonResponse({ success: true, settings: edgeSettings, message: 'Đã lưu cài đặt!' });
+      return jsonResponse({ success: true, settings: edgeSettings, message: 'Đã lưu cài đặt và đồng bộ hệ thống thành công!' });
+    }
+
+    // ROUTE: Kiểm tra kết nối Google Drive / Google Sheets Webhook
+    if (pathname === '/api/admin/google-drive/test' && method === 'POST') {
+      const testUrl = body.webhookUrl || edgeSettings.googleDriveSheetWebhookUrl || env.GOOGLE_DRIVE_WEBHOOK_URL;
+      if (!testUrl || !testUrl.startsWith('http')) {
+        return jsonResponse({ success: false, error: 'Chưa nhập Webhook URL của Google Sheet!' }, 400);
+      }
+      const testOrder = {
+        id: `test_${Date.now()}`,
+        pkgName: 'Gói Thử Nghiệm Kết Nối',
+        price: '0đ',
+        clientName: 'Khách Test Google Drive',
+        phone: '0869029310',
+        deviceId: 'TEST-PC-DEVICE',
+        createdAt: new Date().toISOString(),
+        status: 'pending',
+        note: 'Đơn hàng kiểm tra kết nối từ Quản trị viên Gia Long FB',
+      };
+      const ok = await syncToGoogleDrive(testOrder, testUrl);
+      if (ok) {
+        return jsonResponse({ success: true, message: '✓ Kết nối Google Drive & Google Sheets thành công! Đã gửi đơn mẫu vào trang tính.' });
+      } else {
+        return jsonResponse({ success: false, error: 'Không thể gửi đến Webhook Google Drive. Vui lòng kiểm tra lại URL triển khai Apps Script (Web App) của bạn.' }, 500);
+      }
+    }
+
+    // ROUTE: Đồng bộ toàn bộ đơn hàng sang Google Drive
+    if (pathname === '/api/admin/google-drive/sync-all' && method === 'POST') {
+      const syncUrl = body.webhookUrl || edgeSettings.googleDriveSheetWebhookUrl || env.GOOGLE_DRIVE_WEBHOOK_URL;
+      if (!syncUrl || !syncUrl.startsWith('http')) {
+        return jsonResponse({ success: false, error: 'Chưa nhập Webhook URL của Google Sheet!' }, 400);
+      }
+      let sentCount = 0;
+      for (const ord of edgeOrders) {
+        try {
+          await syncToGoogleDrive(ord, syncUrl);
+          sentCount++;
+        } catch (e) {}
+      }
+      return jsonResponse({ success: true, message: `✓ Đã đồng bộ thành công ${sentCount} đơn hàng sang Google Sheet trên Google Drive!`, count: sentCount });
+    }
+
+    // ROUTE: Kéo toàn bộ đơn hàng và bản quyền từ Google Drive về trang Admin (Đáp ứng 2 chiều)
+    if (pathname === '/api/admin/google-drive/pull' && (method === 'GET' || method === 'POST')) {
+      const gUrl = body.webhookUrl || edgeSettings.googleDriveSheetWebhookUrl || env.GOOGLE_DRIVE_WEBHOOK_URL;
+      if (!gUrl || !gUrl.startsWith('http')) {
+        return jsonResponse({ success: false, error: 'Chưa cấu hình Webhook URL của Google Sheet!' }, 400);
+      }
+      try {
+        const resp = await fetch(`${gUrl}?action=get_all`);
+        if (!resp.ok) {
+          return jsonResponse({ success: false, error: `Không thể kết nối đến Google Drive (HTTP ${resp.status})` }, 500);
+        }
+        const gData: any = await resp.json();
+        const ordersRaw = Array.isArray(gData.orders) ? gData.orders : [];
+        const licensesRaw = Array.isArray(gData.licenses) ? gData.licenses : [];
+
+        // Đọc danh sách đơn từ tab Orders
+        const pulledOrders: OrderItem[] = [];
+        for (let i = 1; i < ordersRaw.length; i++) {
+          const row = ordersRaw[i];
+          if (!row || !row[1]) continue;
+          pulledOrders.push({
+            createdAt: row[0] || new Date().toISOString(),
+            id: String(row[1]),
+            clientName: row[2] || '',
+            phone: row[3] || '',
+            pkgName: row[4] || 'Gói VIP',
+            price: row[5] || '1.000.000đ',
+            deviceId: row[6] || '',
+            status: String(row[7] || 'pending').toLowerCase() === 'approved' || String(row[7]).includes('ĐÃ DUYỆT') ? 'approved' : 'pending',
+            note: row[8] || '',
+          });
+        }
+
+        if (pulledOrders.length > 0) {
+          const existingIds = new Set(edgeOrders.map((o) => o.id));
+          for (const po of pulledOrders) {
+            if (!existingIds.has(po.id)) {
+              edgeOrders.unshift(po);
+            }
+          }
+        }
+
+        // Đọc danh sách bản quyền từ tab Licenses
+        const pulledLicenses: LicenseItem[] = [];
+        for (let j = 1; j < licensesRaw.length; j++) {
+          const lRow = licensesRaw[j];
+          if (!lRow || !lRow[0]) continue;
+          const devId = String(lRow[0]).trim();
+          const expDate = lRow[4] || new Date(Date.now() + 30 * 86400000).toISOString();
+          pulledLicenses.push({
+            id: `lic_gdrive_${devId}`,
+            key: `GLFB-VIP-${devId.slice(-6).toUpperCase()}`,
+            clientName: lRow[1] || 'Khách Google Drive',
+            phone: lRow[2] || '',
+            planType: 'individual',
+            maxDevices: 1,
+            devices: [{
+              deviceId: devId,
+              deviceName: lRow[1] || 'Thiết bị Google Drive',
+              activatedAt: lRow[6] || new Date().toISOString(),
+              lastSeenAt: new Date().toISOString(),
+            }],
+            createdAt: lRow[6] || new Date().toISOString(),
+            expiresAt: expDate,
+            isSuspended: false,
+            isRevoked: String(lRow[5] || '').toLowerCase() === 'revoked',
+            notes: lRow[7] || 'Đồng bộ từ Google Drive',
+          });
+        }
+
+        if (pulledLicenses.length > 0) {
+          const existingLicKeys = new Set(edgeLicenses.map((l) => l.devices?.[0]?.deviceId?.toLowerCase()));
+          for (const pl of pulledLicenses) {
+            const d = pl.devices?.[0]?.deviceId?.toLowerCase();
+            if (d && !existingLicKeys.has(d)) {
+              edgeLicenses.unshift(pl);
+            }
+          }
+        }
+
+        return jsonResponse({
+          success: true,
+          message: `✓ Đã kéo thành công ${pulledOrders.length} đơn và ${pulledLicenses.length} bản quyền từ Google Drive!`,
+          orders: edgeOrders,
+          licenses: edgeLicenses,
+        });
+      } catch (pullErr: any) {
+        return jsonResponse({ success: false, error: pullErr.message || 'Lỗi đọc dữ liệu từ Google Drive' }, 500);
+      }
     }
 
     if (pathname === '/api/admin/change-pin' && method === 'POST') {

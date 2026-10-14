@@ -433,6 +433,24 @@ app.all(['/api/check', '/check'], (req: Request, res: Response) => {
   const matchedLic = licenses.find((l) => !l.isRevoked && l.devices?.some((d) => d.deviceId.toLowerCase() === cleanDev));
 
   if (matchedLic) {
+    if (matchedLic.isRevoked) {
+      return res.json({
+        success: false,
+        status: 'revoked',
+        isRevoked: true,
+        machine_id: machineId,
+        message: '🚨 Bản quyền của thiết bị này đã bị Quản trị viên thu hồi!',
+      });
+    }
+    if (matchedLic.isSuspended) {
+      return res.json({
+        success: false,
+        status: 'suspended',
+        isSuspended: true,
+        machine_id: machineId,
+        message: '⏸️ Bản quyền của thiết bị này đang bị Quản trị viên tạm khóa!',
+      });
+    }
     const expMs = new Date(matchedLic.expiresAt).getTime();
     const now = Date.now();
     if (!isNaN(expMs) && expMs < now) {
@@ -966,10 +984,33 @@ app.post('/api/admin/licenses/extend', requireAdmin, (req: Request, res: Respons
     notes: `Gia hạn thêm ${days} ngày. Hạn mới: ${new Date(newExp).toLocaleDateString('vi-VN')}`,
   });
 
+  // Thông báo sang Google Drive / Sheets nếu có
+  const currentSettings = loadSettings();
+  if (currentSettings.googleDriveSyncEnabled !== false && currentSettings.googleDriveSheetWebhookUrl) {
+    try {
+      fetch(currentSettings.googleDriveSheetWebhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'extend',
+          event: 'LICENSE_EXTEND',
+          key: found.key,
+          clientName: found.clientName,
+          phone: found.phone || '',
+          daysAdded: days,
+          newExpiresAt: newExp,
+          timestamp: new Date().toISOString(),
+        }),
+      }).catch(() => {});
+    } catch (e) {}
+  }
+
   res.json({
     success: true,
     message: `✓ Đã gia hạn thêm ${days} ngày cho khách ${found.clientName}! Hạn mới: ${new Date(newExp).toLocaleDateString('vi-VN')}`,
     license: found,
+    licenses: loadLicenses(),
+    history: loadHistory(),
   });
 });
 
@@ -1014,7 +1055,13 @@ app.post('/api/admin/licenses/update', requireAdmin, (req: Request, res: Respons
     });
   }
 
-  res.json({ success: true, message: `✓ Đã cập nhật thông tin cho khách "${found.clientName}"!`, license: found });
+  res.json({
+    success: true,
+    message: `✓ Đã cập nhật thông tin cho khách "${found.clientName}"!`,
+    license: found,
+    licenses: loadLicenses(),
+    history: loadHistory(),
+  });
 });
 
 // Bật / Tắt tạm khóa mã
@@ -1034,6 +1081,8 @@ app.post('/api/admin/licenses/toggle', requireAdmin, (req: Request, res: Respons
     success: true,
     message: found.isSuspended ? 'Đã tạm khóa mã này!' : 'Đã mở khóa mã hoạt động bình thường!',
     isSuspended: found.isSuspended,
+    licenses: loadLicenses(),
+    history: loadHistory(),
   });
 });
 
@@ -1541,6 +1590,12 @@ app.post('/api/orders/create', (req: Request, res: Response) => {
 
     console.log(`[Order API] Nhận đơn mới: ${newOrder.pkgName} từ khách ${newOrder.clientName} (SĐT: ${newOrder.phone})`);
 
+    // Tự động đồng bộ sang Google Drive / Google Sheets nếu bật
+    const currentSettings = loadSettings();
+    if (currentSettings.googleDriveSyncEnabled !== false && currentSettings.googleDriveSheetWebhookUrl) {
+      syncOrderToGoogleDrive(newOrder, currentSettings.googleDriveSheetWebhookUrl);
+    }
+
     res.json({
       success: true,
       message: isTrial
@@ -1841,6 +1896,31 @@ app.post('/api/admin/orders/approve', requireAdmin, (req: Request, res: Response
     notes: `Duyệt đơn ${order.pkgName} (+${days} ngày). Hạn mới: ${expFormatted} (Mã: ${assignedKey})`,
   });
 
+  // Tự động đồng bộ sang Google Drive / Google Sheets nếu bật
+  const currentSettings = loadSettings();
+  if (currentSettings.googleDriveSyncEnabled !== false && currentSettings.googleDriveSheetWebhookUrl) {
+    syncOrderToGoogleDrive({ ...order, status: 'approved', generatedKey: assignedKey }, currentSettings.googleDriveSheetWebhookUrl);
+    try {
+      fetch(currentSettings.googleDriveSheetWebhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'approve',
+          event: 'ORDER_APPROVED',
+          id: order.id,
+          deviceId: order.deviceId,
+          clientName: order.clientName,
+          phone: order.phone,
+          pkgName: order.pkgName,
+          days: days || 30,
+          expiresAt: finalExpiresAt,
+          generatedKey: assignedKey,
+          timestamp: new Date().toISOString(),
+        }),
+      }).catch(() => {});
+    } catch (e) {}
+  }
+
   res.json({
     success: true,
     message: `✓ Đã phê duyệt và CỘNG DỒN THÀNH CÔNG ${days} ngày cho máy! Hạn mới: ${expFormatted} (Mã: ${assignedKey})`,
@@ -1944,6 +2024,8 @@ function loadSettings() {
     phone: '0869029310',
     supportName: 'Gia Long - FB',
     supportEmail: 'gialonggiaiphapvanhanh@gmail.com',
+    googleDriveSheetWebhookUrl: process.env.GOOGLE_DRIVE_WEBHOOK_URL || '',
+    googleDriveSyncEnabled: true,
   };
 }
 
@@ -1951,6 +2033,37 @@ function saveSettings(data: any) {
   try {
     fs.writeFileSync(SETTINGS_FILE, JSON.stringify(data, null, 2), 'utf-8');
   } catch (e) {}
+}
+
+async function syncOrderToGoogleDrive(order: any, webhookUrl?: string): Promise<boolean> {
+  const settings = loadSettings();
+  const targetUrl = webhookUrl || settings.googleDriveSheetWebhookUrl || process.env.GOOGLE_DRIVE_WEBHOOK_URL;
+  if (!targetUrl || !targetUrl.startsWith('http')) return false;
+  try {
+    const payload = {
+      event: 'ORDER_UPDATE',
+      id: order.id,
+      timestamp: new Date().toISOString(),
+      timeFormatted: new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }),
+      clientName: order.clientName || 'Khách Đặt Mua',
+      phone: order.phone || '',
+      pkgName: order.pkgName || '',
+      price: order.price || '',
+      deviceId: order.deviceId || '',
+      status: order.status || 'pending',
+      note: order.note || '',
+      source: 'Gia Long FB Web App & Extension (Node Server)',
+    };
+    const resp = await fetch(targetUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return resp.ok;
+  } catch (err) {
+    console.warn('[Google Drive Sync Server] Lỗi gửi webhook:', err);
+    return false;
+  }
 }
 
 app.get('/api/settings', (_req: Request, res: Response) => {
@@ -1984,6 +2097,142 @@ app.post('/api/admin/settings', requireAdmin, async (req: Request, res: Response
   }
 
   res.json({ success: true, settings: updated, message: 'Đã lưu cài đặt thành công!' });
+});
+
+// ROUTE: Kiểm tra kết nối Google Drive / Google Sheets Webhook
+app.post('/api/admin/google-drive/test', requireAdmin, async (req: Request, res: Response) => {
+  const { webhookUrl } = req.body;
+  const settings = loadSettings();
+  const targetUrl = webhookUrl || settings.googleDriveSheetWebhookUrl;
+  if (!targetUrl || !targetUrl.startsWith('http')) {
+    return res.status(400).json({ success: false, error: 'Chưa nhập Webhook URL của Google Sheet!' });
+  }
+  const testOrder = {
+    id: `test_${Date.now()}`,
+    pkgName: 'Gói Thử Nghiệm Kết Nối',
+    price: '0đ',
+    clientName: 'Khách Test Google Drive',
+    phone: '0869029310',
+    deviceId: 'TEST-PC-DEVICE',
+    createdAt: new Date().toISOString(),
+    status: 'pending',
+    note: 'Đơn hàng kiểm tra kết nối từ Quản trị viên Gia Long FB',
+  };
+  const ok = await syncOrderToGoogleDrive(testOrder, targetUrl);
+  if (ok) {
+    res.json({ success: true, message: '✓ Kết nối Google Drive & Google Sheets thành công! Đã gửi đơn mẫu vào trang tính.' });
+  } else {
+    res.status(500).json({ success: false, error: 'Không thể kết nối đến Webhook Google Drive. Vui lòng kiểm tra lại URL triển khai Apps Script của bạn.' });
+  }
+});
+
+// ROUTE: Đồng bộ toàn bộ đơn hàng sang Google Drive
+app.post('/api/admin/google-drive/sync-all', requireAdmin, async (req: Request, res: Response) => {
+  const { webhookUrl } = req.body;
+  const settings = loadSettings();
+  const targetUrl = webhookUrl || settings.googleDriveSheetWebhookUrl;
+  if (!targetUrl || !targetUrl.startsWith('http')) {
+    return res.status(400).json({ success: false, error: 'Chưa nhập Webhook URL của Google Sheet!' });
+  }
+  const orders = loadOrders();
+  let count = 0;
+  for (const ord of orders) {
+    try {
+      await syncOrderToGoogleDrive(ord, targetUrl);
+      count++;
+    } catch (e) {}
+  }
+  res.json({ success: true, message: `✓ Đã đồng bộ thành công ${count} đơn hàng sang Google Sheet trên Google Drive!`, count });
+});
+
+// ROUTE: Kéo toàn bộ đơn hàng và bản quyền từ Google Drive về trang Admin (Đáp ứng 2 chiều)
+app.all(['/api/admin/google-drive/pull', '/admin/google-drive/pull'], requireAdmin, async (req: Request, res: Response) => {
+  const { webhookUrl } = req.body || {};
+  const settings = loadSettings();
+  const targetUrl = webhookUrl || settings.googleDriveSheetWebhookUrl || process.env.GOOGLE_DRIVE_WEBHOOK_URL;
+  if (!targetUrl || !targetUrl.startsWith('http')) {
+    return res.status(400).json({ success: false, error: 'Chưa cấu hình Webhook URL của Google Sheet!' });
+  }
+  try {
+    const resp = await fetch(`${targetUrl}?action=get_all`);
+    if (!resp.ok) {
+      return res.status(500).json({ success: false, error: `Không thể kết nối đến Google Drive (HTTP ${resp.status})` });
+    }
+    const gData: any = await resp.json();
+    const ordersRaw = Array.isArray(gData.orders) ? gData.orders : [];
+    const licensesRaw = Array.isArray(gData.licenses) ? gData.licenses : [];
+
+    const orders = loadOrders();
+    const existingOrderIds = new Set(orders.map((o) => o.id));
+    let pulledOrdersCount = 0;
+
+    for (let i = 1; i < ordersRaw.length; i++) {
+      const row = ordersRaw[i];
+      if (!row || !row[1]) continue;
+      const oId = String(row[1]);
+      if (!existingOrderIds.has(oId)) {
+        orders.unshift({
+          createdAt: row[0] || new Date().toISOString(),
+          id: oId,
+          clientName: row[2] || '',
+          phone: row[3] || '',
+          pkgName: row[4] || 'Gói VIP',
+          price: row[5] || '1.000.000đ',
+          deviceId: row[6] || '',
+          status: String(row[7] || 'pending').toLowerCase() === 'approved' || String(row[7]).includes('ĐÃ DUYỆT') ? 'approved' : 'pending',
+          note: row[8] || '',
+        });
+        existingOrderIds.add(oId);
+        pulledOrdersCount++;
+      }
+    }
+    if (pulledOrdersCount > 0) saveOrders(orders);
+
+    const licenses = loadLicenses();
+    const existingDeviceIds = new Set(licenses.flatMap((l) => (l.devices || []).map((d) => d.deviceId.toLowerCase())));
+    let pulledLicensesCount = 0;
+
+    for (let j = 1; j < licensesRaw.length; j++) {
+      const lRow = licensesRaw[j];
+      if (!lRow || !lRow[0]) continue;
+      const devId = String(lRow[0]).trim();
+      if (!existingDeviceIds.has(devId.toLowerCase())) {
+        const expDate = lRow[4] || new Date(Date.now() + 30 * 86400000).toISOString();
+        licenses.unshift({
+          id: `lic_gdrive_${devId}`,
+          key: `GLFB-VIP-${devId.slice(-6).toUpperCase()}`,
+          clientName: lRow[1] || 'Khách Google Drive',
+          phone: lRow[2] || '',
+          planType: 'individual',
+          maxDevices: 1,
+          devices: [{
+            deviceId: devId,
+            deviceName: lRow[1] || 'Thiết bị Google Drive',
+            activatedAt: lRow[6] || new Date().toISOString(),
+            lastSeenAt: new Date().toISOString(),
+          }],
+          createdAt: lRow[6] || new Date().toISOString(),
+          expiresAt: expDate,
+          isSuspended: false,
+          isRevoked: String(lRow[5] || '').toLowerCase() === 'revoked',
+          notes: lRow[7] || 'Đồng bộ từ Google Drive',
+        });
+        existingDeviceIds.add(devId.toLowerCase());
+        pulledLicensesCount++;
+      }
+    }
+    if (pulledLicensesCount > 0) saveLicenses(licenses);
+
+    res.json({
+      success: true,
+      message: `✓ Đã kéo thành công ${pulledOrdersCount} đơn và ${pulledLicensesCount} bản quyền từ Google Drive!`,
+      orders: loadOrders(),
+      licenses: loadLicenses(),
+      history: loadHistory(),
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: 'Lỗi kéo dữ liệu: ' + err.message });
+  }
 });
 
 // API Tải Lên Ảnh Mã QR Zalo Chuẩn 100% từ thiết bị của Quản trị viên

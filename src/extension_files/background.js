@@ -327,11 +327,13 @@ async function checkServerBackground(machineId, token) {
         });
         if (!resp.ok) continue;
         const data = await resp.json();
-        if (data) {
-          if (data.status === 'revoked' || data.isRevoked) {
-            console.warn('[Cache Sync] 🚨 Bản quyền đã bị thu hồi!');
-            await chrome.storage.local.set({ isRevoked: true });
-            await chrome.storage.local.remove(['signedToken', 'licenseKey', 'licenseData', 'isVip']);
+          if (data.status === 'revoked' || data.isRevoked || data.status === 'suspended' || data.isSuspended) {
+            console.warn('[Cache Sync] 🚨 Bản quyền đã bị thu hồi hoặc tạm khóa!');
+            await chrome.storage.local.set({
+              isRevoked: Boolean(data.status === 'revoked' || data.isRevoked),
+              isSuspended: Boolean(data.status === 'suspended' || data.isSuspended),
+            });
+            await chrome.storage.local.remove(['signedToken', 'licenseKey', 'licenseData', 'isVip', 'currentLicense', 'licenseInfo']);
             chrome.alarms.clearAll(() => {});
             return;
           }
@@ -343,7 +345,6 @@ async function checkServerBackground(machineId, token) {
             });
             return;
           }
-        }
       } catch (e) {}
     }
   } finally {
@@ -532,6 +533,22 @@ async function checkLicenseStatus(forceRemote = false) {
           const resp = await fetch(`${baseUrl}/api/check?machine_id=${encodeURIComponent(deviceId)}`, { cache: 'no-store' });
           if (!resp.ok) continue;
           const checkRes = await resp.json();
+          if (checkRes && (checkRes.status === 'revoked' || checkRes.isRevoked || checkRes.status === 'suspended' || checkRes.isSuspended)) {
+            await chrome.storage.local.set({
+              isRevoked: Boolean(checkRes.status === 'revoked' || checkRes.isRevoked),
+              isSuspended: Boolean(checkRes.status === 'suspended' || checkRes.isSuspended),
+            });
+            await chrome.storage.local.remove(['signedToken', 'licenseKey', 'licenseData', 'isVip', 'currentLicense', 'licenseInfo']);
+            chrome.alarms.clearAll(() => {});
+            return {
+              isValid: false,
+              isActivated: false,
+              isRevoked: Boolean(checkRes.status === 'revoked' || checkRes.isRevoked),
+              isSuspended: Boolean(checkRes.status === 'suspended' || checkRes.isSuspended),
+              message: checkRes.message || '🚨 Bản quyền đã bị Quản trị viên thu hồi hoặc tạm khóa!',
+              license: null,
+            };
+          }
           if (checkRes && checkRes.success && checkRes.status === 'active') {
             const cacheData = {
               signedToken: checkRes.token,
@@ -542,6 +559,7 @@ async function checkLicenseStatus(forceRemote = false) {
               isVip: true,
               licenseKey: checkRes.token || 'GLFB-VIP-ACTIVE',
               isRevoked: false,
+              isSuspended: false,
               licenseData: {
                 key: checkRes.token || 'GLFB-VIP-ACTIVE',
                 expiresAt: checkRes.expires_at,

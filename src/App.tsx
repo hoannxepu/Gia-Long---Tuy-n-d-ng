@@ -59,7 +59,12 @@ import {
   Laptop,
   Edit3,
   EyeOff,
-  Bell
+  Bell,
+  HardDrive,
+  FileSpreadsheet,
+  Cloud,
+  Link2,
+  CheckCheck
 } from 'lucide-react';
 import { DEFAULT_EXTENSION_BUNDLE, ExtensionFileDef } from './extension_files/index.ts';
 import { CustomerDownloadPortal } from './CustomerDownloadPortal.tsx';
@@ -311,6 +316,19 @@ export default function App() {
   const [chromeStoreUrl, setChromeStoreUrl] = useState<string>('https://chromewebstore.google.com/detail/gia-long-fb/');
   const [edgeStoreUrl, setEdgeStoreUrl] = useState<string>('https://microsoftedge.microsoft.com/addons/detail/gia-long-fb/blpkghkjimacggjlgiklkaddldbcnebo');
   const [isSavingSettings, setIsSavingSettings] = useState<boolean>(false);
+  const [googleDriveWebhookUrl, setGoogleDriveWebhookUrl] = useState<string>(() => {
+    try {
+      return localStorage.getItem('glfb_gdrive_webhook') || '';
+    } catch (e) {
+      return '';
+    }
+  });
+  const [googleDriveSyncEnabled, setGoogleDriveSyncEnabled] = useState<boolean>(true);
+  const [isTestingGoogleDrive, setIsTestingGoogleDrive] = useState<boolean>(false);
+  const [isSyncingAllGoogleDrive, setIsSyncingAllGoogleDrive] = useState<boolean>(false);
+  const [showGoogleDriveGuide, setShowGoogleDriveGuide] = useState<boolean>(false);
+  const [copiedScript, setCopiedScript] = useState<boolean>(false);
+  const [isPullingFromGoogleDrive, setIsPullingFromGoogleDrive] = useState<boolean>(false);
 
   // Kích hoạt tự động 1-Click qua URL (?kich_hoat=KEY hoặc ?activate=KEY)
   const [autoActivateKey, setAutoActivateKey] = useState<string | null>(null);
@@ -432,13 +450,16 @@ export default function App() {
       });
       const data = await res.json();
       if (data.success) {
-        alert(data.message);
-        fetchLicenses();
+        triggerToast(data.message || '✓ Đã cập nhật ngày hết hạn!');
+        if (data.licenses) setLicenses(data.licenses);
+        if (data.history) setHistoryList(data.history);
+        fetchLicenses(adminPin, true);
+        fetchHistory(adminPin, true);
         setActionModalLicense((prev) =>
           prev ? { ...prev, expiresAt: new Date(actionEditDate + 'T23:59:59').toISOString() } : null
         );
       } else {
-        alert('Lỗi: ' + data.error);
+        alert('Lỗi: ' + (data.error || 'Không thể lưu ngày'));
       }
     } catch (err: any) {
       alert('Lỗi: ' + err.message);
@@ -463,8 +484,131 @@ export default function App() {
         if (data.settings.chromeStoreUrl) setChromeStoreUrl(data.settings.chromeStoreUrl);
         if (data.settings.edgeStoreUrl) setEdgeStoreUrl(data.settings.edgeStoreUrl);
         if (data.settings.zaloUrl) setAdminZaloUrl(data.settings.zaloUrl);
+        if (data.settings.googleDriveSheetWebhookUrl) {
+          setGoogleDriveWebhookUrl(data.settings.googleDriveSheetWebhookUrl);
+          try {
+            localStorage.setItem('glfb_gdrive_webhook', data.settings.googleDriveSheetWebhookUrl);
+          } catch (e) {}
+        }
+        if (typeof data.settings.googleDriveSyncEnabled === 'boolean') {
+          setGoogleDriveSyncEnabled(data.settings.googleDriveSyncEnabled);
+        }
       }
     } catch (e) {}
+  };
+
+  // Lưu cấu hình Google Drive / Google Sheets CRM
+  const handleSaveGoogleDriveSettings = async () => {
+    setIsSavingSettings(true);
+    try {
+      const cleanUrl = googleDriveWebhookUrl.trim();
+      const res = await fetch('/api/admin/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-admin-pin': adminPin },
+        body: JSON.stringify({
+          googleDriveSheetWebhookUrl: cleanUrl,
+          googleDriveSyncEnabled,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        try {
+          if (cleanUrl) localStorage.setItem('glfb_gdrive_webhook', cleanUrl);
+          else localStorage.removeItem('glfb_gdrive_webhook');
+        } catch (e) {}
+        triggerToast('✓ Đã lưu cấu hình Google Drive / Google Sheets CRM thành công!');
+      } else {
+        alert('Lỗi lưu cấu hình: ' + (data.error || data.message));
+      }
+    } catch (e: any) {
+      alert('Lỗi: ' + e.message);
+    } finally {
+      setIsSavingSettings(false);
+    }
+  };
+
+  // Gửi thử đơn hàng mẫu vào Google Drive
+  const handleTestGoogleDrive = async () => {
+    const cleanUrl = googleDriveWebhookUrl.trim();
+    if (!cleanUrl) {
+      alert('Vui lòng dán Webhook URL của Google Apps Script (Web App) trước khi thử nghiệm!');
+      return;
+    }
+    setIsTestingGoogleDrive(true);
+    try {
+      const res = await fetch('/api/admin/google-drive/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-admin-pin': adminPin },
+        body: JSON.stringify({ webhookUrl: cleanUrl }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        triggerToast(data.message || '✓ Đã kết nối Google Drive thành công!');
+        alert('🎉 KẾT NỐI GOOGLE DRIVE THÀNH CÔNG!\n\nHệ thống đã gửi một dòng đơn mẫu vào Google Sheet trên Google Drive của bạn.\n\nVui lòng mở Google Sheet để kiểm tra dòng dữ liệu mới!');
+      } else {
+        alert('Lỗi kết nối: ' + (data.error || 'Không thể gửi đến Google Drive. Vui lòng kiểm tra lại URL triển khai Apps Script.'));
+      }
+    } catch (e: any) {
+      alert('Lỗi: ' + e.message);
+    } finally {
+      setIsTestingGoogleDrive(false);
+    }
+  };
+
+  // Đồng bộ toàn bộ đơn hàng sang Google Drive
+  const handleSyncAllToGoogleDrive = async () => {
+    const cleanUrl = googleDriveWebhookUrl.trim();
+    if (!cleanUrl) {
+      alert('Vui lòng cấu hình Webhook URL của Google Sheet trước!');
+      return;
+    }
+    setIsSyncingAllGoogleDrive(true);
+    try {
+      const res = await fetch('/api/admin/google-drive/sync-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-admin-pin': adminPin },
+        body: JSON.stringify({ webhookUrl: cleanUrl }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        triggerToast(data.message || '✓ Đã đồng bộ toàn bộ đơn sang Google Drive!');
+      } else {
+        alert('Lỗi đồng bộ: ' + (data.error || 'Thao tác không thành công'));
+      }
+    } catch (e: any) {
+      alert('Lỗi: ' + e.message);
+    } finally {
+      setIsSyncingAllGoogleDrive(false);
+    }
+  };
+
+  // Kéo dữ liệu từ Google Drive về Web App Admin (Đáp ứng 2 chiều)
+  const handlePullFromGoogleDrive = async () => {
+    const cleanUrl = googleDriveWebhookUrl.trim();
+    if (!cleanUrl) {
+      alert('Vui lòng cấu hình Webhook URL của Google Sheet trước!');
+      return;
+    }
+    setIsPullingFromGoogleDrive(true);
+    try {
+      const res = await fetch('/api/admin/google-drive/pull', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-admin-pin': adminPin },
+        body: JSON.stringify({ webhookUrl: cleanUrl }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        triggerToast(data.message || '✓ Đã kéo dữ liệu từ Google Drive thành công!');
+        fetchOrders(adminPin, true);
+        fetchLicenses(adminPin);
+      } else {
+        alert('Lỗi kéo dữ liệu: ' + (data.error || 'Thao tác không thành công'));
+      }
+    } catch (e: any) {
+      alert('Lỗi: ' + e.message);
+    } finally {
+      setIsPullingFromGoogleDrive(false);
+    }
   };
 
   // Lưu link Chrome Web Store & Edge Store
@@ -1164,8 +1308,14 @@ export default function App() {
       });
       const data = await res.json();
       if (data.success) {
-        fetchLicenses();
-        if (actionModalLicense && actionModalLicense.id === id && data.license) {
+        if (data.licenses) setLicenses(data.licenses);
+        else if (data.license) {
+          setLicenses((prev) => prev.map((l) => (l.id === id || l.key === id ? { ...l, ...data.license } : l)));
+        }
+        if (data.history) setHistoryList(data.history);
+        fetchLicenses(adminPin, true);
+        fetchHistory(adminPin, true);
+        if (actionModalLicense && (actionModalLicense.id === id || actionModalLicense.key === id) && data.license) {
           setActionModalLicense((prev) => (prev ? { ...prev, ...data.license } : null));
           try {
             const d = new Date(data.license.expiresAt);
@@ -1175,7 +1325,9 @@ export default function App() {
             setActionEditDate(`${yyyy}-${mm}-${dd}`);
           } catch (e) {}
         }
-        alert(data.message);
+        triggerToast(data.message || `✓ Đã gia hạn thêm ${addDays} ngày thành công!`);
+      } else {
+        alert('Lỗi: ' + (data.error || 'Không thể gia hạn'));
       }
     } catch (err: any) {
       alert('Lỗi: ' + err.message);
@@ -1194,11 +1346,16 @@ export default function App() {
       });
       const data = await res.json();
       if (data.success) {
-        fetchLicenses();
-        if (actionModalLicense && actionModalLicense.id === id) {
+        if (data.licenses) setLicenses(data.licenses);
+        if (data.history) setHistoryList(data.history);
+        fetchLicenses(adminPin, true);
+        fetchHistory(adminPin, true);
+        if (actionModalLicense && (actionModalLicense.id === id || actionModalLicense.key === id)) {
           setActionModalLicense((prev) => (prev ? { ...prev, isSuspended: data.isSuspended } : null));
         }
-        alert(data.message);
+        triggerToast(data.message);
+      } else {
+        alert('Lỗi: ' + (data.error || 'Không thể thay đổi trạng thái'));
       }
     } catch (err: any) {
       alert('Lỗi: ' + err.message);
@@ -2930,6 +3087,226 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
                     </div>
                     <p className="text-[9px] text-slate-500 mt-0.5 truncate">Nhấp để xem và gia hạn</p>
                   </div>
+                </div>
+
+                {/* ================= KHỐI TÍCH HỢP GOOGLE DRIVE / GOOGLE SHEETS & CLOUD DATABASE ================= */}
+                <div className="bg-gradient-to-r from-slate-900 via-blue-950/30 to-slate-900 border border-blue-500/30 rounded-xl p-3 sm:p-4 shadow-lg space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-2.5">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center shrink-0">
+                        <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="text-xs sm:text-sm font-bold text-white flex items-center gap-1.5">
+                            <span>Tích Hợp Google Drive &amp; Google Sheets CRM</span>
+                          </h3>
+                          {googleDriveWebhookUrl.trim() ? (
+                            <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                              Đang Kết Nối Google Sheet
+                            </span>
+                          ) : (
+                            <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                              Chưa Cấu Hình Google Drive
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[10.5px] text-slate-300 mt-0.5">
+                          Tự động ghi mọi đơn đặt mua &amp; yêu cầu bản quyền thành từng dòng vào Google Sheet trên Google Drive của bạn (chống mất đơn, không lo lỗi Cloudflare)
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowGoogleDriveGuide(!showGoogleDriveGuide)}
+                      className="px-2.5 py-1 bg-blue-600/30 hover:bg-blue-600/50 text-blue-300 border border-blue-500/40 rounded-lg text-[11px] font-bold transition flex items-center gap-1 shrink-0 self-start sm:self-auto"
+                    >
+                      <HelpCircle className="w-3.5 h-3.5 text-blue-400" />
+                      <span>{showGoogleDriveGuide ? 'Đóng Hướng Dẫn' : 'Hướng Dẫn Cài Đặt 30s'}</span>
+                    </button>
+                  </div>
+
+                  {/* Form Nhập Webhook URL */}
+                  <div className="space-y-2">
+                    <div className="flex flex-col md:flex-row items-stretch md:items-center gap-2">
+                      <div className="relative flex-1">
+                        <Link2 className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                        <input
+                          type="url"
+                          value={googleDriveWebhookUrl}
+                          onChange={(e) => setGoogleDriveWebhookUrl(e.target.value)}
+                          placeholder="Dán URL Google Apps Script Web App (https://script.google.com/macros/s/.../exec)"
+                          className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-8 pr-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 font-mono"
+                        />
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={handleSaveGoogleDriveSettings}
+                          disabled={isSavingSettings}
+                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-sm active:scale-98 disabled:opacity-50"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                          <span>{isSavingSettings ? 'Đang lưu...' : 'Lưu URL'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleTestGoogleDrive}
+                          disabled={isTestingGoogleDrive}
+                          className="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-sm active:scale-98 disabled:opacity-50"
+                          title="Gửi 1 đơn hàng thử nghiệm vào Google Sheet"
+                        >
+                          <Send className={`w-3.5 h-3.5 ${isTestingGoogleDrive ? 'animate-bounce' : ''}`} />
+                          <span>{isTestingGoogleDrive ? 'Đang thử...' : 'Gửi Thử Đơn Mẫu'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleSyncAllToGoogleDrive}
+                          disabled={isSyncingAllGoogleDrive}
+                          className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-500/30 rounded-lg text-xs font-medium transition flex items-center gap-1 active:scale-98 disabled:opacity-50"
+                          title="Đẩy toàn bộ đơn hàng hiện có sang Google Drive"
+                        >
+                          <Cloud className={`w-3.5 h-3.5 ${isSyncingAllGoogleDrive ? 'animate-spin' : ''}`} />
+                          <span>{isSyncingAllGoogleDrive ? 'Đang đẩy...' : 'Đồng Bộ Toàn Bộ'}</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between text-[11px] text-slate-400 pt-0.5">
+                      <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={googleDriveSyncEnabled}
+                          onChange={(e) => setGoogleDriveSyncEnabled(e.target.checked)}
+                          className="rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-0"
+                        />
+                        <span>Tự động đẩy đơn mới sang Google Drive ngay khi khách bấm Đặt Mua / Kích Hoạt</span>
+                      </label>
+                      <span className="text-[10px] text-slate-500 hidden sm:inline">
+                        Dữ liệu lưu an toàn trên Google Drive cá nhân của bạn
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Khối Hướng Dẫn 30 Giây (Thu gọn / Mở rộng) */}
+                  {showGoogleDriveGuide && (
+                    <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 sm:p-4 space-y-3 animate-in fade-in zoom-in-98 text-xs">
+                      <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                        <h4 className="font-bold text-emerald-400 flex items-center gap-1.5">
+                          <Zap className="w-3.5 h-3.5 text-amber-400" />
+                          <span>Hướng Dẫn Kết Nối Google Sheet Trên Google Drive Trong 30 Giây (Miễn Phí 100%)</span>
+                        </h4>
+                        <button
+                          type="button"
+                          onClick={() => setShowGoogleDriveGuide(false)}
+                          className="text-slate-400 hover:text-white"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
+                      <div className="space-y-2 text-slate-300 text-[11.5px] leading-relaxed">
+                        <p>
+                          <strong className="text-white">Bước 1:</strong> Mở <a href="https://drive.google.com" target="_blank" rel="noreferrer" className="text-emerald-400 underline font-bold">Google Drive</a> của bạn &rarr; Bấm <strong>Mới (New)</strong> &rarr; Chọn <strong>Google Trang tính (Google Sheets)</strong>.
+                        </p>
+                        <p>
+                          <strong className="text-white">Bước 2:</strong> Trên menu của Google Sheet, bấm <strong>Tiện ích mở rộng (Extensions)</strong> &rarr; <strong>Apps Script</strong>.
+                        </p>
+                        <p>
+                          <strong className="text-white">Bước 3:</strong> Xóa toàn bộ nội dung trong Apps Script và dán đoạn mã tự động bên dưới:
+                        </p>
+
+                        <div className="relative bg-slate-900 border border-slate-800 rounded-lg p-2.5 font-mono text-[11px] text-emerald-300">
+                          <pre className="overflow-x-auto whitespace-pre max-h-40">
+{`function doPost(e) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName("Đơn Hàng") || ss.getActiveSheet();
+    if (sheet.getLastRow() === 0) {
+      sheet.appendRow([
+        "Thời Gian", "Mã Đơn", "Tên Khách", "Số Điện Thoại",
+        "Gói Đăng Ký", "Giá Tiền", "Mã Máy (Device ID)", "Trạng Thái", "Ghi Chú", "Nguồn"
+      ]);
+      sheet.getRange(1, 1, 1, 10).setFontWeight("bold").setBackground("#0f172a").setFontColor("#38bdf8");
+    }
+    var data = JSON.parse(e.postData.contents);
+    sheet.appendRow([
+      data.timeFormatted || new Date().toLocaleString("vi-VN"),
+      data.id,
+      data.clientName,
+      data.phone,
+      data.pkgName,
+      data.price,
+      data.deviceId,
+      data.status === "approved" ? "ĐÃ DUYỆT" : "CHỜ DUYỆT",
+      data.note || "",
+      data.source || "Gia Long FB"
+    ]);
+    return ContentService.createTextOutput(JSON.stringify({ success: true, message: "OK" })).setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({ success: false, error: err.toString() })).setMimeType(ContentService.MimeType.JSON);
+  }
+}`}
+                          </pre>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const code = `function doPost(e) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName("Đơn Hàng") || ss.getActiveSheet();
+    if (sheet.getLastRow() === 0) {
+      sheet.appendRow([
+        "Thời Gian", "Mã Đơn", "Tên Khách", "Số Điện Thoại",
+        "Gói Đăng Ký", "Giá Tiền", "Mã Máy (Device ID)", "Trạng Thái", "Ghi Chú", "Nguồn"
+      ]);
+      sheet.getRange(1, 1, 1, 10).setFontWeight("bold").setBackground("#0f172a").setFontColor("#38bdf8");
+    }
+    var data = JSON.parse(e.postData.contents);
+    sheet.appendRow([
+      data.timeFormatted || new Date().toLocaleString("vi-VN"),
+      data.id,
+      data.clientName,
+      data.phone,
+      data.pkgName,
+      data.price,
+      data.deviceId,
+      data.status === "approved" ? "ĐÃ DUYỆT" : "CHỜ DUYỆT",
+      data.note || "",
+      data.source || "Gia Long FB"
+    ]);
+    return ContentService.createTextOutput(JSON.stringify({ success: true, message: "OK" })).setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({ success: false, error: err.toString() })).setMimeType(ContentService.MimeType.JSON);
+  }
+}`;
+                              navigator.clipboard.writeText(code);
+                              setCopiedScript(true);
+                              setTimeout(() => setCopiedScript(false), 2500);
+                              triggerToast('✓ Đã sao chép mã Google Apps Script vào Clipboard!');
+                            }}
+                            className="absolute top-2 right-2 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[10px] font-bold transition flex items-center gap-1 shadow"
+                          >
+                            {copiedScript ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                            <span>{copiedScript ? 'Đã Sao Chép!' : 'Sao Chép Mã 1-Click'}</span>
+                          </button>
+                        </div>
+
+                        <p>
+                          <strong className="text-white">Bước 4:</strong> Bấm <strong>Triển khai (Deploy)</strong> ở góc trên bên phải &rarr; <strong>Tùy chọn triển khai mới (New deployment)</strong>:
+                          <br />• Loại: <strong>Ứng dụng web (Web app)</strong>
+                          <br />• Người có quyền truy cập (Who has access): Chọn <strong className="text-amber-300">Bất kỳ ai (Anyone)</strong> *(rất quan trọng)*.
+                          <br />• Bấm <strong>Triển khai (Deploy)</strong> &rarr; <strong>Cấp quyền (Authorize access)</strong> &rarr; Sao chép <strong>URL ứng dụng web</strong>.
+                        </p>
+                        <p>
+                          <strong className="text-white">Bước 5:</strong> Dán URL vào ô trên, bấm <strong>Lưu URL</strong> và <strong>Gửi Thử Đơn Mẫu</strong> để kiểm tra kết nối ngay!
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* ================= KHỐI LỊCH SỬ THEO DÕI CẤP MÃ & GIA HẠN (MỞ / THU GỌN - MẶC ĐỊNH THU GỌN) ================= */}

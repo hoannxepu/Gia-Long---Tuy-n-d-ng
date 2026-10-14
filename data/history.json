@@ -1,5 +1,20 @@
 [
   {
+    "id": "hist_1791985822808_7bg3",
+    "createdAt": "2026-10-14T13:50:22.808Z",
+    "action": "extend",
+    "actionName": "Gia hạn thêm",
+    "clientName": "củ tỏidfdsffdfds",
+    "phone": "164645464",
+    "deviceId": "dev_49omswx_mv370ms3",
+    "key": "GLFB-VIP-QU9IY",
+    "planType": "individual",
+    "pkgName": "1TH",
+    "daysAdded": 30,
+    "newExpiresAt": "2029-04-08T16:00:12.181Z",
+    "notes": "Gia hạn thêm 30 ngày. Hạn mới: 8/4/2029"
+  },
+  {
     "id": "hist_1791969458285_1hpv",
     "createdAt": "2026-10-14T09:17:38.285Z",
     "action": "revoke",
