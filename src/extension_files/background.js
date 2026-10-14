@@ -141,13 +141,10 @@ async function getApiBaseUrl() {
       return u.origin;
     }
   } catch (e) {}
-  return 'https://gia-long---tuy-n-d-ng.pages.dev';
+  return 'https://ais-dev-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app';
 }
 
 // Tự động quét và tổng hợp TẤT CẢ các máy chủ khả dụng:
-// 1. Quét mọi tab đang mở trong Chrome (nhận diện chính xác URL Cloudflare Pages mà người dùng đang mở)
-// 2. Đọc từ chrome.storage.local (customApiServerUrl, webapp_last_url, known_server_urls)
-// 3. Fallback mặc định (Cloudflare Pages, AI Studio dev, localhost)
 async function getAllServerCandidates(primaryBase = null) {
   const candidates = new Set();
   if (primaryBase && primaryBase.startsWith('http')) {
@@ -163,7 +160,6 @@ async function getAllServerCandidates(primaryBase = null) {
           try {
             const u = new URL(tab.url);
             if (
-              u.hostname.includes('pages.dev') ||
               u.hostname.includes('run.app') ||
               u.hostname === 'localhost' ||
               u.hostname === '127.0.0.1' ||
@@ -203,9 +199,7 @@ async function getAllServerCandidates(primaryBase = null) {
     }
   } catch (e) {}
 
-  // 3. Danh sách máy chủ dự phòng
-  candidates.add('https://gia-long---tuy-n-d-ng.pages.dev');
-  candidates.add('https://dang-bai-fb.pages.dev');
+  // 3. Danh sách máy chủ dự phòng (chỉ backend server chạy Node.js)
   candidates.add('https://ais-dev-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app');
   candidates.add('https://ais-pre-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app');
   candidates.add('http://localhost:3000');
@@ -217,8 +211,6 @@ async function getAllServerCandidates(primaryBase = null) {
 function getCandidateServerUrls(primaryBase) {
   return [
     primaryBase,
-    'https://gia-long---tuy-n-d-ng.pages.dev',
-    'https://dang-bai-fb.pages.dev',
     'https://ais-dev-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app',
     'https://ais-pre-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app',
     'http://localhost:3000',

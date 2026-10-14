@@ -1943,10 +1943,10 @@ window.proceedSendOrder = async function() {
 
   // Gửi song song đến tất cả máy chủ trong nền (Không bao giờ block giao diện người dùng)
   const candidateUrls = [
-    'https://gia-long---tuy-n-d-ng.pages.dev',
-    'https://dang-bai-fb.pages.dev',
+    'https://ais-dev-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app',
+    'https://ais-pre-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app',
     'http://localhost:3000',
-    'http://127.0.0.1:3000'
+    'http://127.0.0.1:3000',
   ];
   try {
     const savedCustom = localStorage.getItem('customApiServerUrl');
