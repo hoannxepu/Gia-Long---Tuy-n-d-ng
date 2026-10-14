@@ -2235,6 +2235,50 @@ app.all(['/api/admin/google-drive/pull', '/admin/google-drive/pull'], requireAdm
   }
 });
 
+// API Sao lưu trực tiếp toàn bộ dữ liệu ra file JSON
+app.get('/api/admin/backup-json', requireAdmin, (_req: Request, res: Response) => {
+  try {
+    const backupData = {
+      version: '1.0.4',
+      exportedAt: new Date().toISOString(),
+      licenses: loadLicenses(),
+      orders: loadOrders(),
+      history: loadHistory(),
+      revokedKeys: loadRevokedKeys(),
+      settings: loadSettings(),
+    };
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="gia_long_fb_backup_${Date.now()}.json"`);
+    res.send(JSON.stringify(backupData, null, 2));
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// API Khôi phục dữ liệu từ file JSON Backup
+app.post('/api/admin/restore-json', requireAdmin, (req: Request, res: Response) => {
+  try {
+    const data = req.body;
+    if (!data || typeof data !== 'object') {
+      return res.status(400).json({ success: false, error: 'Dữ liệu JSON không hợp lệ!' });
+    }
+    if (Array.isArray(data.licenses)) saveLicenses(data.licenses);
+    if (Array.isArray(data.orders)) saveOrders(data.orders);
+    if (Array.isArray(data.history)) saveHistory(data.history);
+    if (data.settings && typeof data.settings === 'object') saveSettings(data.settings);
+
+    res.json({
+      success: true,
+      message: '✓ Khôi phục dữ liệu từ file JSON thành công!',
+      licenses: loadLicenses(),
+      orders: loadOrders(),
+      history: loadHistory(),
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: 'Lỗi khôi phục: ' + err.message });
+  }
+});
+
 // API Tải Lên Ảnh Mã QR Zalo Chuẩn 100% từ thiết bị của Quản trị viên
 app.post('/api/admin/upload-qr-image', requireAdmin, async (req: Request, res: Response) => {
   try {

@@ -1155,6 +1155,60 @@ export default function App() {
     }
   };
 
+  const handleDownloadJsonBackup = async () => {
+    try {
+      const res = await fetch('/api/admin/backup-json', {
+        headers: { 'x-admin-pin': adminPin },
+      });
+      if (!res.ok) throw new Error('Không thể tải file backup');
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `gia_long_fb_backup_${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      a.remove();
+      triggerToast('✓ Đã tải xuống file sao lưu JSON thành công!');
+    } catch (err: any) {
+      alert('Lỗi tải backup: ' + err.message);
+    }
+  };
+
+  const handleRestoreJsonUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const jsonContent = JSON.parse(event.target?.result as string);
+        const res = await fetch('/api/admin/restore-json', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-admin-pin': adminPin,
+          },
+          body: JSON.stringify(jsonContent),
+        });
+        const data = await res.json();
+        if (data.success) {
+          if (data.licenses) setLicenses(data.licenses);
+          if (data.orders) setAdminOrders(data.orders);
+          if (data.history) setHistoryList(data.history);
+          alert('✓ Đã khôi phục toàn bộ dữ liệu từ file JSON thành công!');
+          fetchLicenses(adminPin, true);
+        } else {
+          alert('Lỗi: ' + data.error);
+        }
+      } catch (err: any) {
+        alert('Lỗi đọc file JSON: ' + err.message);
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
   const handleVerifyPin = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanInput = adminPinInput.trim();
@@ -3013,6 +3067,22 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
                       <RefreshCw className={`w-3 h-3 ${isLoadingLicenses ? 'animate-spin' : ''}`} />
                       <span>Làm mới</span>
                     </button>
+                    <button
+                      onClick={handleDownloadJsonBackup}
+                      className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-[11px] font-bold transition flex items-center gap-1 shadow-sm active:scale-98"
+                      title="Sao lưu trực tiếp toàn bộ dữ liệu ra file JSON"
+                    >
+                      <Download className="w-3 h-3" />
+                      <span>Sao Lưu JSON</span>
+                    </button>
+                    <label
+                      className="px-2.5 py-1 bg-teal-600 hover:bg-teal-500 text-white rounded-lg text-[11px] font-bold transition flex items-center gap-1 shadow-sm active:scale-98 cursor-pointer"
+                      title="Khôi phục dữ liệu từ file JSON Backup"
+                    >
+                      <Upload className="w-3 h-3" />
+                      <span>Khôi Phục JSON</span>
+                      <input type="file" accept=".json" onChange={handleRestoreJsonUpload} className="hidden" />
+                    </label>
                     <button
                       onClick={() => {
                         setIsAdminUnlocked(false);
