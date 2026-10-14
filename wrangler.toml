@@ -3,13 +3,16 @@ compatibility_date = "2024-09-23"
 pages_build_output_dir = "dist"
 
 # ========================================================
-# Cloudflare D1 Database Binding (Thay thế hoàn toàn KV)
-# Tốc độ đọc ghi SQLite siêu tốc, không giới hạn rate limit
+# Cloudflare D1 Database Binding (Dành cho Cloudflare Pages)
+# Khuyên dùng: Liên kết trực tiếp qua giao diện Cloudflare Pages Dashboard:
+#   Settings -> Functions -> D1 Database Bindings -> Add binding: Variable name = "DB"
+# Nếu bạn muốn khai báo qua wrangler.toml thì bỏ dấu # và điền đúng mã UUID 36 ký tự
+# (Lấy từ Cloudflare Dashboard > Storage & Databases > D1 > Chọn database của bạn > Database ID)
 # ========================================================
-[[d1_databases]]
-binding = "DB"
-database_name = "gia-long-db"
-database_id = "gia-long-d1-db" # Thay bằng ID D1 database thực tế sau khi chạy: npx wrangler d1 create gia-long-db
+# [[d1_databases]]
+# binding = "DB"
+# database_name = "gia-long-db"
+# database_id = "DIEN_UUID_36_KY_TU_VAO_DAY"
 
 [vars]
 ADMIN_PIN = "Ha26062018$"
