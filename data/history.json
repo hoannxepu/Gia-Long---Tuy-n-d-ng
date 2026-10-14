@@ -1,5 +1,47 @@
 [
   {
+    "id": "hist_1791969458285_1hpv",
+    "createdAt": "2026-10-14T09:17:38.285Z",
+    "action": "revoke",
+    "actionName": "Xóa người dùng",
+    "clientName": "Test Client",
+    "phone": "0987654321",
+    "deviceId": "GLFB-PC-TEST01",
+    "key": "GLFB-VIP-Z5PIM",
+    "planType": "individual",
+    "notes": "Quản trị viên xóa người dùng \"Test Client\" khỏi danh sách"
+  },
+  {
+    "id": "hist_1791969446684_kh3f",
+    "createdAt": "2026-10-14T09:17:26.684Z",
+    "action": "revoke",
+    "actionName": "Hủy/Xóa đơn mua",
+    "clientName": "Test Client",
+    "phone": "0987654321",
+    "deviceId": "GLFB-PC-TEST01",
+    "key": "805_CUH4",
+    "planType": "individual",
+    "pkgName": "1TH",
+    "amount": "1.000.000đ",
+    "notes": "Quản trị viên xóa đơn đặt mua: Test Client (Gói 1 Tháng (30 ngày))"
+  },
+  {
+    "id": "hist_1791969435823_h037",
+    "createdAt": "2026-10-14T09:17:15.823Z",
+    "action": "approve",
+    "actionName": "Duyệt gói D1 Database",
+    "clientName": "Test Client",
+    "phone": "0987654321",
+    "deviceId": "GLFB-PC-TEST01",
+    "key": "GLFB-VIP-Z5PIM",
+    "planType": "individual",
+    "pkgName": "1TH",
+    "daysAdded": 30,
+    "newExpiresAt": "2026-11-13T09:17:15.821Z",
+    "amount": "1.000.000đ",
+    "notes": "Duyệt cấp Token D1 và kích hoạt: GLFB-PC-TEST01"
+  },
+  {
     "id": "hist_1791884937166_69y5",
     "createdAt": "2026-10-13T09:48:57.166Z",
     "action": "revoke",

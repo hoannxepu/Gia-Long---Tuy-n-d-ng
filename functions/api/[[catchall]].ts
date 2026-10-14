@@ -8,6 +8,9 @@ interface Env {
   BACKEND_URL?: string;
   ADMIN_PIN?: string;
   GLFB_KV?: any;
+  DB?: any;
+  GLFB_D1?: any;
+  SIGNING_SECRET?: string;
 }
 
 interface LicenseItem {
@@ -224,6 +227,78 @@ function normalizePkgSymbol(pkgOrDays: any): string {
   return '1TH';
 }
 
+// ========================================================
+// HỆ THỐNG MÃ XÁC NHẬN BẢO MẬT (SIGNED TOKEN) CHO EXTENSION
+// Đảm bảo Extension chạy offline/cache 100% không tốn request
+// ========================================================
+function generateSignedToken(machineId: string, expiresAt: string, secret = 'GiaLongFB_D1_Secret_2026'): string {
+  const cleanId = String(machineId || '').trim();
+  const cleanExp = String(expiresAt || '').trim();
+  const payload = `${cleanId}:::${cleanExp}:::${secret}`;
+  let hash1 = 0;
+  for (let i = 0; i < payload.length; i++) {
+    hash1 = ((hash1 << 5) - hash1) + payload.charCodeAt(i);
+    hash1 |= 0;
+  }
+  const h1 = Math.abs(hash1).toString(36).toUpperCase();
+  let hash2 = 5381;
+  for (let i = payload.length - 1; i >= 0; i--) {
+    hash2 = ((hash2 << 5) + hash2) + payload.charCodeAt(i);
+    hash2 |= 0;
+  }
+  const h2 = Math.abs(hash2).toString(36).toUpperCase();
+  const rawToken = `${cleanId}__${cleanExp}__${h1}${h2}`;
+  return 'GLFB_SIG_' + (typeof btoa !== 'undefined' ? btoa(rawToken) : Buffer.from(rawToken).toString('base64'));
+}
+
+function verifySignedToken(token: string, machineId: string, secret = 'GiaLongFB_D1_Secret_2026'): { valid: boolean; expiresAt?: string } {
+  try {
+    if (!token || !token.startsWith('GLFB_SIG_')) return { valid: false };
+    const raw = typeof atob !== 'undefined' 
+      ? atob(token.replace('GLFB_SIG_', '')) 
+      : Buffer.from(token.replace('GLFB_SIG_', ''), 'base64').toString('utf8');
+    const parts = raw.split('__');
+    if (parts.length < 3) return { valid: false };
+    const [tMachineId, tExpiresAt] = parts;
+    if (tMachineId.toLowerCase() !== machineId.toLowerCase()) return { valid: false };
+    const expected = generateSignedToken(tMachineId, tExpiresAt, secret);
+    if (expected !== token) return { valid: false };
+    if (new Date(tExpiresAt).getTime() < Date.now()) return { valid: false, expiresAt: tExpiresAt };
+    return { valid: true, expiresAt: tExpiresAt };
+  } catch (e) {
+    return { valid: false };
+  }
+}
+
+// Khởi tạo bảng licenses tự động trong Cloudflare D1 nếu chưa có
+async function getD1Db(env: Env) {
+  const db = env.DB || env.GLFB_D1;
+  if (!db) return null;
+  try {
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS licenses (
+        id TEXT PRIMARY KEY,
+        machine_id TEXT NOT NULL,
+        pkg_name TEXT NOT NULL,
+        client_name TEXT,
+        phone TEXT,
+        price TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        created_at TEXT NOT NULL,
+        expires_at TEXT,
+        signed_token TEXT,
+        notes TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_licenses_machine_id ON licenses(machine_id);
+      CREATE INDEX IF NOT EXISTS idx_licenses_status ON licenses(status);
+    `);
+    return db;
+  } catch (e) {
+    console.warn('[Cloudflare D1] Init check warning:', e);
+    return db;
+  }
+}
+
 export async function onRequest(context: { request: Request; env: Env }): Promise<Response> {
   const { request, env } = context;
   const url = new URL(request.url);
@@ -326,6 +401,321 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
       const text = await request.text();
       if (text) body = JSON.parse(text);
     } catch (e) {}
+  }
+
+  // ========================================================
+  // ROUTE 1: ĐĂNG KÝ GÓI BẢN QUYỀN TỪ EXTENSION (/register & /api/register)
+  // Nhận yêu cầu mua gói, lưu vào D1 Database trạng thái 'pending'
+  // ========================================================
+  if ((pathname === '/api/register' || pathname === '/register') && method === 'POST') {
+    const machineId = String(body.machine_id || body.deviceId || '').trim();
+    const pkgName = String(body.pkg_name || body.pkgName || 'Gói 1 Tháng (30 ngày)').trim();
+    const clientName = String(body.client_name || body.clientName || 'Khách Đặt Mua').trim();
+    const phone = String(body.phone || '').trim();
+    const price = String(body.price || '').trim();
+    const notes = String(body.notes || body.note || '').trim();
+
+    if (!machineId) {
+      return jsonResponse({ success: false, error: 'Thiếu thông tin machine_id!' }, 400);
+    }
+
+    const regId = `lic_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const createdAt = new Date().toISOString();
+
+    // 1. Lưu vào Cloudflare D1 Database (nếu có D1)
+    const d1 = await getD1Db(env);
+    if (d1) {
+      try {
+        await d1.prepare(`
+          INSERT INTO licenses (id, machine_id, pkg_name, client_name, phone, price, status, created_at, notes)
+          VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+        `).bind(regId, machineId, pkgName, clientName, phone, price, createdAt, notes).run();
+      } catch (d1Err) {
+        console.warn('[D1 Register] Error inserting into D1:', d1Err);
+      }
+    }
+
+    // 2. Đồng thời tạo Order để hiển thị ngay trên Web Admin và đồng bộ KV
+    const newOrd: OrderItem = {
+      id: `ord_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      pkgName,
+      price: price || '1.000.000đ',
+      clientName,
+      phone,
+      deviceId: machineId,
+      createdAt,
+      status: 'pending',
+      note: notes || `Đăng ký ${pkgName} từ máy ${machineId}`,
+    };
+    edgeOrders.unshift(newOrd);
+    await syncKV();
+
+    return jsonResponse({
+      success: true,
+      message: 'Đăng ký gói thành công, vui lòng chờ Quản trị viên duyệt!',
+      license: {
+        id: regId,
+        machine_id: machineId,
+        pkg_name: pkgName,
+        status: 'pending',
+        created_at: createdAt,
+      },
+      order: newOrd,
+    });
+  }
+
+  // ========================================================
+  // ROUTE 2: DUYỆT GÓI & CẤP MÃ XÁC NHẬN BẢO MẬT (/admin/approve & /api/admin/approve)
+  // Chuyển trạng thái sang 'active', tính hạn dùng, cấp Signed Token
+  // ========================================================
+  if ((pathname === '/api/admin/approve' || pathname === '/admin/approve') && method === 'POST') {
+    // Xác thực quyền Quản trị viên qua Header hoặc Body
+    if (reqPin !== adminPin && body.pin !== adminPin) {
+      return jsonResponse({ success: false, error: 'Sai mã PIN hoặc chưa có quyền Quản trị!' }, 401);
+    }
+
+    const machineId = String(body.machine_id || body.deviceId || '').trim();
+    const pkgName = String(body.pkg_name || body.pkgName || '').trim();
+    let days = Number(body.days) || 0;
+    if (!days && pkgName) {
+      days = getOrderDurationDays(pkgName, body.price);
+    }
+    if (!days) days = 30;
+
+    const expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+    const token = generateSignedToken(machineId, expiresAt, env.SIGNING_SECRET);
+
+    // 1. Cập nhật Cloudflare D1 Database
+    const d1 = await getD1Db(env);
+    if (d1) {
+      try {
+        const existing = await d1.prepare(`
+          SELECT * FROM licenses WHERE machine_id = ? ORDER BY created_at DESC LIMIT 1
+        `).bind(machineId).first();
+
+        if (existing) {
+          await d1.prepare(`
+            UPDATE licenses 
+            SET status = 'active', expires_at = ?, signed_token = ?, notes = ?
+            WHERE machine_id = ?
+          `).bind(expiresAt, token, `Admin duyệt gói ${pkgName || existing.pkg_name} (+${days}n)`, machineId).run();
+        } else {
+          await d1.prepare(`
+            INSERT INTO licenses (id, machine_id, pkg_name, client_name, status, created_at, expires_at, signed_token, notes)
+            VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?)
+          `).bind(
+            `lic_${Date.now()}`,
+            machineId,
+            pkgName || 'Gói VIP 1 Tháng',
+            body.client_name || 'Khách Kích Hoạt',
+            new Date().toISOString(),
+            expiresAt,
+            token,
+            `Admin trực tiếp cấp gói (+${days}n)`
+          ).run();
+        }
+      } catch (d1Err) {
+        console.warn('[D1 Approve] Update error:', d1Err);
+      }
+    }
+
+    // 2. Đồng bộ đơn hàng tương ứng sang 'approved' và cập nhật License
+    const ord = edgeOrders.find((o) => (o.deviceId || '').toLowerCase() === machineId.toLowerCase() && o.status === 'pending');
+    if (ord) ord.status = 'approved';
+
+    const cleanId = machineId.toLowerCase();
+    let edgeLic = edgeLicenses.find((l) => !l.isRevoked && l.devices?.some((d) => d.deviceId.toLowerCase() === cleanId));
+    if (!edgeLic) {
+      const randomCode = Math.random().toString(36).substring(2, 7).toUpperCase();
+      edgeLic = {
+        id: `lic_${Date.now()}_${randomCode}`,
+        key: `GLFB-VIP-${randomCode}`,
+        clientName: body.client_name || ord?.clientName || 'Khách Đặt Mua Gói',
+        phone: body.phone || ord?.phone || '',
+        planType: days === 1 ? 'trial' : 'individual',
+        maxDevices: 1,
+        devices: [{
+          deviceId: machineId,
+          deviceName: 'Thiết bị kích hoạt D1',
+          activatedAt: new Date().toISOString(),
+          lastSeenAt: new Date().toISOString(),
+        }],
+        createdAt: new Date().toISOString(),
+        expiresAt,
+        isSuspended: false,
+        aliasKeys: [],
+        notes: `Kích hoạt D1: ${pkgName} (+${days} ngày)`,
+      };
+      edgeLicenses.unshift(edgeLic);
+    } else {
+      edgeLic.expiresAt = expiresAt;
+    }
+
+    await addHistory({
+      action: 'approve',
+      actionName: 'Duyệt gói D1 Database',
+      clientName: body.client_name || ord?.clientName || 'Khách Đặt Mua',
+      phone: body.phone || ord?.phone || '',
+      deviceId: machineId,
+      key: edgeLic?.key || machineId,
+      planType: 'individual',
+      pkgName: normalizePkgSymbol(pkgName),
+      daysAdded: days,
+      newExpiresAt: expiresAt,
+      amount: body.price || ord?.price || '0đ',
+      notes: `Duyệt cấp Token D1 và kích hoạt: ${machineId}`,
+    });
+
+    await syncKV();
+
+    return jsonResponse({
+      success: true,
+      message: `✓ Đã phê duyệt gói và cấp Signed Token cho máy ${machineId}!`,
+      machine_id: machineId,
+      expires_at: expiresAt,
+      token,
+      license: edgeLic,
+      orders: edgeOrders,
+    });
+  }
+
+  // ========================================================
+  // ROUTE 3: KIỂM TRA TRẠNG THÁI MÁY & CẤP MÃ XÁC NHẬN (/check & /api/check)
+  // Extension gọi kiểm tra: Nếu active trả về Signed Token và hạn dùng
+  // ========================================================
+  if ((pathname === '/api/check' || pathname === '/check') && (method === 'GET' || method === 'POST')) {
+    const machineId = String(
+      url.searchParams.get('machine_id') || 
+      url.searchParams.get('deviceId') || 
+      body.machine_id || 
+      body.deviceId || 
+      ''
+    ).trim();
+
+    if (!machineId) {
+      return jsonResponse({ success: false, status: 'error', message: 'Thiếu tham số machine_id!' }, 400);
+    }
+
+    // 1. Kiểm tra trên Cloudflare D1 Database trước
+    const d1 = await getD1Db(env);
+    let d1Lic: any = null;
+    if (d1) {
+      try {
+        d1Lic = await d1.prepare(`
+          SELECT * FROM licenses WHERE machine_id = ? ORDER BY created_at DESC LIMIT 1
+        `).bind(machineId).first();
+      } catch (d1Err) {
+        console.warn('[D1 Check] Query error:', d1Err);
+      }
+    }
+
+    if (d1Lic) {
+      if (d1Lic.status === 'pending') {
+        return jsonResponse({
+          success: true,
+          status: 'pending',
+          machine_id: machineId,
+          pkg_name: d1Lic.pkg_name,
+          message: 'Đơn đăng ký đang chờ Quản trị viên phê duyệt.',
+        });
+      }
+      if (d1Lic.status === 'revoked') {
+        return jsonResponse({
+          success: false,
+          status: 'revoked',
+          machine_id: machineId,
+          message: '🚨 Bản quyền của thiết bị này đã bị Quản trị viên thu hồi!',
+        });
+      }
+      if (d1Lic.status === 'active') {
+        const expMs = new Date(d1Lic.expires_at).getTime();
+        const now = Date.now();
+        if (!isNaN(expMs) && expMs < now) {
+          return jsonResponse({
+            success: false,
+            status: 'expired',
+            machine_id: machineId,
+            expires_at: d1Lic.expires_at,
+            message: 'Bản quyền của máy đã hết hạn sử dụng. Vui lòng gia hạn thêm!',
+          });
+        }
+        const daysLeft = Math.max(1, Math.ceil((expMs - now) / (24 * 60 * 60 * 1000)));
+        const token = d1Lic.signed_token || generateSignedToken(machineId, d1Lic.expires_at, env.SIGNING_SECRET);
+        return jsonResponse({
+          success: true,
+          status: 'active',
+          machine_id: machineId,
+          pkg_name: d1Lic.pkg_name,
+          client_name: d1Lic.client_name,
+          expires_at: d1Lic.expires_at,
+          days_left: daysLeft,
+          token: token,
+          message: '✓ Bản quyền hợp lệ và đang hoạt động!',
+        });
+      }
+    }
+
+    // 2. Fallback sang Edge Memory / KV (nếu D1 chưa có hoặc dữ liệu cũ)
+    const cleanId = machineId.toLowerCase();
+    const matchedLic = edgeLicenses.find((l) =>
+      !l.isRevoked && l.devices?.some((d) => d.deviceId.toLowerCase() === cleanId)
+    );
+
+    if (matchedLic) {
+      if (matchedLic.isRevoked) {
+        return jsonResponse({
+          success: false,
+          status: 'revoked',
+          machine_id: machineId,
+          message: '🚨 Bản quyền máy này đã bị Quản trị viên thu hồi!',
+        });
+      }
+      const expMs = new Date(matchedLic.expiresAt).getTime();
+      const now = Date.now();
+      if (!isNaN(expMs) && expMs < now) {
+        return jsonResponse({
+          success: false,
+          status: 'expired',
+          machine_id: machineId,
+          expires_at: matchedLic.expiresAt,
+          message: 'Bản quyền đã hết hạn sử dụng!',
+        });
+      }
+      const daysLeft = Math.max(1, Math.ceil((expMs - now) / (24 * 60 * 60 * 1000)));
+      const token = generateSignedToken(machineId, matchedLic.expiresAt, env.SIGNING_SECRET);
+      return jsonResponse({
+        success: true,
+        status: 'active',
+        machine_id: machineId,
+        pkg_name: matchedLic.notes || 'Gói VIP Gia Long',
+        client_name: matchedLic.clientName,
+        expires_at: matchedLic.expiresAt,
+        days_left: daysLeft,
+        token: token,
+        license_key: matchedLic.key,
+        message: '✓ Bản quyền hợp lệ!',
+      });
+    }
+
+    const pendingOrd = edgeOrders.find((o) =>
+      o.status === 'pending' && (o.deviceId || '').toLowerCase() === cleanId
+    );
+    if (pendingOrd) {
+      return jsonResponse({
+        success: true,
+        status: 'pending',
+        machine_id: machineId,
+        pkg_name: pendingOrd.pkgName,
+        message: 'Đơn mua gói đang chờ Quản trị viên duyệt.',
+      });
+    }
+
+    return jsonResponse({
+      success: false,
+      status: 'not_found',
+      machine_id: machineId,
+      message: 'Mã máy chưa đăng ký gói bản quyền nào trên hệ thống.',
+    });
   }
 
   // ROUTE: Xác thực bản quyền (Verify)
@@ -838,6 +1228,32 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
         amount: order.price,
         notes: `Duyệt đơn cộng dồn và cấp mã: ${approvedLicense?.key}`,
       });
+
+      // Đồng bộ kích hoạt tức thì vào Cloudflare D1 Database
+      const d1 = await getD1Db(env);
+      if (d1 && cleanDeviceId) {
+        try {
+          const d1Token = generateSignedToken(cleanDeviceId, approvedLicense?.expiresAt || new Date(Date.now() + days * 86400000).toISOString(), env.SIGNING_SECRET);
+          await d1.prepare(`
+            INSERT OR REPLACE INTO licenses (id, machine_id, pkg_name, client_name, phone, price, status, created_at, expires_at, signed_token, notes)
+            VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)
+          `).bind(
+            `lic_${order.id}`,
+            cleanDeviceId,
+            order.pkgName || 'Gói VIP',
+            order.clientName || 'Khách Đặt Mua',
+            order.phone || '',
+            order.price || '0đ',
+            new Date().toISOString(),
+            approvedLicense?.expiresAt,
+            d1Token,
+            `Duyệt từ đơn ${order.id}`
+          ).run();
+        } catch (d1Err) {
+          console.warn('[D1 Order Approve Sync]', d1Err);
+        }
+      }
+
       await syncKV();
 
       return jsonResponse({

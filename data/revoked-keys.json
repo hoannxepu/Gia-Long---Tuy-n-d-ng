@@ -1,0 +1,37 @@
+[
+  {
+    "key": "PHONE:0987654321",
+    "reason": "Quản trị viên đã xóa SĐT này khỏi danh sách",
+    "revokedAt": "2026-10-14T09:17:38.284Z"
+  },
+  {
+    "key": "0987654321",
+    "reason": "Quản trị viên đã xóa SĐT này khỏi danh sách",
+    "revokedAt": "2026-10-14T09:17:38.284Z"
+  },
+  {
+    "key": "DEV:GLFB-PC-TEST01",
+    "reason": "Quản trị viên đã xóa thiết bị này khỏi danh sách",
+    "revokedAt": "2026-10-14T09:17:38.284Z"
+  },
+  {
+    "key": "GLFB-PC-TEST01",
+    "reason": "Quản trị viên đã xóa thiết bị này khỏi danh sách",
+    "revokedAt": "2026-10-14T09:17:38.284Z"
+  },
+  {
+    "key": "LIC_1791969435822_Z5PIM",
+    "reason": "Quản trị viên đã xóa người dùng khỏi danh sách",
+    "revokedAt": "2026-10-14T09:17:38.284Z"
+  },
+  {
+    "key": "GLFB-VIP-Z5PIM",
+    "reason": "Quản trị viên đã xóa người dùng khỏi danh sách",
+    "revokedAt": "2026-10-14T09:17:38.284Z"
+  },
+  {
+    "key": "ORD_1791969425805_CUH4",
+    "reason": "Đơn hàng đã bị Quản trị viên xóa khỏi hệ thống",
+    "revokedAt": "2026-10-14T09:17:26.683Z"
+  }
+]

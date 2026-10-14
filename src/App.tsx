@@ -694,7 +694,7 @@ export default function App() {
           const latest = newPending[0];
           triggerToast(`🔔 Có đơn đặt mua mới: ${latest.pkgName} từ ${latest.clientName || 'Khách'} (${latest.phone || ''})!`);
         }
-        return newOrders;
+        return areArraysEqual(prev, newOrders) ? prev : newOrders;
       });
     } catch (e) {
       console.warn('Lỗi lấy orders:', e);
@@ -724,15 +724,9 @@ export default function App() {
 
   useEffect(() => {
     fetchPendingCount();
-    if (isAdminUnlocked) {
-      fetchOrders(adminPin, true);
-    }
     const timer = setInterval(() => {
       fetchPendingCount();
-      if (isAdminUnlocked) {
-        fetchOrders(adminPin, true);
-      }
-    }, 4000);
+    }, 8000);
 
     const onOrderFromExtension = (e: any) => {
       const order = e.detail || e.data?.order;
@@ -1010,8 +1004,6 @@ export default function App() {
         try { localStorage.setItem('glfb_admin_licenses', JSON.stringify(filteredLics)); } catch (e) {}
         setLicenses((prev) => (areArraysEqual(prev, filteredLics) ? prev : filteredLics));
       }
-      fetchOrders(pin, isSilent);
-      fetchHistory(pin, isSilent);
     } catch (err) {
       console.warn('Lỗi lấy danh sách license:', err);
     } finally {

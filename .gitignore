@@ -8,3 +8,6 @@ coverage/
 .env*
 !.env.example
 bun.lock*
+.wrangler/
+_worker*
+

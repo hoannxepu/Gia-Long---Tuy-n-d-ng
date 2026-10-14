@@ -1963,19 +1963,78 @@ window.proceedSendOrder = async function() {
     }
   } catch (e) {}
 
-  // 2. Direct fetch song song nhanh đến các máy chủ khả dụng
+  // 2. Direct fetch song song nhanh đến các máy chủ khả dụng (Cả /api/register cho D1 và /api/orders/create)
+  const registerPayload = {
+    machine_id: devId,
+    deviceId: devId,
+    pkg_name: pkg.name,
+    client_name: customerName || `Khách ${phone}`,
+    phone: phone,
+    price: pkg.price,
+    notes: orderPayload.note,
+  };
+
   candidateUrls.forEach((base) => {
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 2000);
+      fetch(`${base}/api/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(registerPayload),
+        signal: controller.signal,
+      }).then(() => clearTimeout(timeoutId)).catch(() => clearTimeout(timeoutId));
+
       fetch(`${base}/api/orders/create`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(orderPayload),
-        signal: controller.signal,
-      }).then(() => clearTimeout(timeoutId)).catch(() => clearTimeout(timeoutId));
+      }).catch(() => {});
     } catch (e) {}
   });
+
+  // 3. Khởi động kiểm tra nhanh phía Dashboard (3s/lần trong 5 phút)
+  let dashFastPollCount = 0;
+  const dashFastPollInterval = setInterval(async () => {
+    dashFastPollCount += 3;
+    if (dashFastPollCount >= 300) {
+      clearInterval(dashFastPollInterval);
+      return;
+    }
+    for (const base of candidateUrls) {
+      try {
+        const resp = await fetch(`${base}/api/check?machine_id=${encodeURIComponent(devId)}`, { cache: 'no-store' });
+        if (!resp.ok) continue;
+        const res = await resp.json();
+        if (res && res.success && res.status === 'active') {
+          clearInterval(dashFastPollInterval);
+          if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+            await chrome.storage.local.set({
+              signedToken: res.token,
+              licenseStatus: 'active',
+              expiresAt: res.expires_at,
+              lastCheckedAt: Date.now(),
+              cachedPkgName: res.pkg_name,
+              isVip: true,
+              licenseKey: res.token || 'GLFB-VIP-ACTIVE',
+              isRevoked: false,
+            });
+          }
+          const successNotice = document.getElementById('orderSuccessBody');
+          if (successNotice) {
+            successNotice.innerHTML = `
+              <div style="text-align: center; padding: 20px; background: #064e3b; border: 1px solid #10b981; border-radius: 12px; color: #fff;">
+                <h3 style="font-size: 18px; font-weight: bold; margin-bottom: 8px;">🎉 QUẢN TRỊ VIÊN ĐÃ PHÊ DUYỆT!</h3>
+                <p style="font-size: 14px; color: #a7f3d0; margin-bottom: 12px;">Bản quyền VIP của bạn đã được kích hoạt thành công (Hạn đến: ${new Date(res.expires_at).toLocaleDateString('vi-VN')}).</p>
+                <button onclick="window.location.reload()" style="background: #10b981; color: #000; font-weight: bold; padding: 8px 18px; border: none; border-radius: 8px; cursor: pointer;">Sử Dụng Ngay</button>
+              </div>
+            `;
+          }
+          break;
+        }
+      } catch (e) {}
+    }
+  }, 3000);
 };
 
 // Gắn sự kiện cho các nút trong Modal khi DOM sẵn sàng

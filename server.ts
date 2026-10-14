@@ -263,8 +263,222 @@ function requireAdmin(req: Request, res: Response, next: () => void) {
 }
 
 // ============================================================================
-// 1. API DÀNH CHO EXTENSION (XÁC THỰC & KÍCH HOẠT BẢN QUYỀN)
+// 1. API DÀNH CHO EXTENSION (XÁC THỰC, ĐĂNG KÝ & KÍCH HOẠT D1 / CACHE)
 // ============================================================================
+
+// Sinh Signed Token bảo mật cho Extension lưu Cache 100% miễn phí
+function generateSignedToken(machineId: string, expiresAt: string, secret = process.env.SIGNING_SECRET || 'GiaLongFB_D1_Secret_2026'): string {
+  const cleanId = String(machineId || '').trim();
+  const cleanExp = String(expiresAt || '').trim();
+  const payload = `${cleanId}:::${cleanExp}:::${secret}`;
+  let hash1 = 0;
+  for (let i = 0; i < payload.length; i++) {
+    hash1 = ((hash1 << 5) - hash1) + payload.charCodeAt(i);
+    hash1 |= 0;
+  }
+  const h1 = Math.abs(hash1).toString(36).toUpperCase();
+  let hash2 = 5381;
+  for (let i = payload.length - 1; i >= 0; i--) {
+    hash2 = ((hash2 << 5) + hash2) + payload.charCodeAt(i);
+    hash2 |= 0;
+  }
+  const h2 = Math.abs(hash2).toString(36).toUpperCase();
+  const rawToken = `${cleanId}__${cleanExp}__${h1}${h2}`;
+  return 'GLFB_SIG_' + Buffer.from(rawToken).toString('base64');
+}
+
+// 1. API Đăng Ký Gói (/register & /api/register)
+app.post(['/api/register', '/register'], (req: Request, res: Response) => {
+  const { machine_id, deviceId, pkg_name, pkgName, client_name, clientName, phone, price, notes, note } = req.body;
+  const targetDev = String(machine_id || deviceId || '').trim();
+  if (!targetDev) {
+    return res.status(400).json({ success: false, error: 'Thiếu mã máy machine_id!' });
+  }
+  const targetPkg = String(pkg_name || pkgName || 'Gói 1 Tháng (30 ngày)').trim();
+  const targetClient = String(client_name || clientName || 'Khách Đặt Mua').trim();
+  const targetPhone = String(phone || '').trim();
+  const targetPrice = String(price || '1.000.000đ').trim();
+  const targetNote = String(notes || note || `Đăng ký gói ${targetPkg} từ máy ${targetDev}`).trim();
+
+  const orders = loadOrders();
+  const stableId = 'ord_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
+  const newOrder: OrderItem = {
+    id: stableId,
+    pkgName: targetPkg,
+    price: targetPrice,
+    clientName: targetClient,
+    phone: targetPhone,
+    deviceId: targetDev,
+    createdAt: new Date().toISOString(),
+    status: 'pending',
+    note: targetNote,
+  };
+  orders.unshift(newOrder);
+  saveOrders(orders);
+
+  res.json({
+    success: true,
+    message: 'Đăng ký gói thành công, vui lòng chờ Quản trị viên duyệt!',
+    license: {
+      machine_id: targetDev,
+      pkg_name: targetPkg,
+      status: 'pending',
+      created_at: newOrder.createdAt,
+    },
+    order: newOrder,
+  });
+});
+
+// 2. API Duyệt Gói (/admin/approve & /api/admin/approve)
+app.post(['/api/admin/approve', '/admin/approve'], requireAdmin, (req: Request, res: Response) => {
+  const { machine_id, deviceId, pkg_name, pkgName, price, client_name } = req.body;
+  const targetDev = String(machine_id || deviceId || '').trim();
+  if (!targetDev) {
+    return res.status(400).json({ success: false, error: 'Thiếu machine_id!' });
+  }
+
+  let days = Number(req.body.days) || 0;
+  const targetPkg = String(pkg_name || pkgName || 'Gói 1 Tháng (30 ngày)').trim();
+  if (!days && targetPkg) {
+    days = getOrderDurationDays(targetPkg, price);
+  }
+  if (!days) days = 30;
+
+  const expiresAt = new Date(Date.now() + days * 86400000).toISOString();
+  const token = generateSignedToken(targetDev, expiresAt);
+
+  const orders = loadOrders();
+  const pendingOrd = orders.find((o) => (o.deviceId || '').toLowerCase() === targetDev.toLowerCase() && o.status === 'pending');
+  if (pendingOrd) {
+    pendingOrd.status = 'approved';
+    saveOrders(orders);
+  }
+
+  const { licenses } = autoConsolidateLicensesAndOrders();
+  let matchedLic = licenses.find((l) => !l.isRevoked && l.devices?.some((d) => d.deviceId.toLowerCase() === targetDev.toLowerCase()));
+  if (!matchedLic) {
+    const randomCode = Math.random().toString(36).substring(2, 7).toUpperCase();
+    const newLic: LicenseItem = {
+      id: `lic_${Date.now()}_${randomCode}`,
+      key: `GLFB-VIP-${randomCode}`,
+      clientName: client_name || pendingOrd?.clientName || 'Khách Đặt Mua Gói',
+      phone: req.body.phone || pendingOrd?.phone || '',
+      planType: days === 1 ? 'trial' : 'individual',
+      maxDevices: 1,
+      devices: [{
+        deviceId: targetDev,
+        deviceName: 'Thiết bị kích hoạt D1',
+        activatedAt: new Date().toISOString(),
+        lastSeenAt: new Date().toISOString(),
+      }],
+      createdAt: new Date().toISOString(),
+      expiresAt,
+      isSuspended: false,
+      aliasKeys: [],
+      notes: `Kích hoạt D1: ${targetPkg} (+${days} ngày)`,
+    };
+    const allLics = loadLicenses();
+    allLics.unshift(newLic);
+    saveLicenses(allLics);
+    matchedLic = newLic;
+  } else {
+    matchedLic.expiresAt = expiresAt;
+    saveLicenses(licenses);
+  }
+
+  addHistoryEntry({
+    action: 'approve',
+    actionName: 'Duyệt gói D1 Database',
+    clientName: client_name || pendingOrd?.clientName || 'Khách Đặt Mua',
+    phone: req.body.phone || pendingOrd?.phone || '',
+    deviceId: targetDev,
+    key: matchedLic.key,
+    planType: 'individual',
+    pkgName: normalizePkgSymbol(targetPkg),
+    daysAdded: days,
+    newExpiresAt: expiresAt,
+    amount: price || pendingOrd?.price || '0đ',
+    notes: `Duyệt cấp Token D1 và kích hoạt: ${targetDev}`,
+  });
+
+  res.json({
+    success: true,
+    message: `✓ Đã phê duyệt gói và cấp Signed Token cho máy ${targetDev}!`,
+    machine_id: targetDev,
+    expires_at: expiresAt,
+    token,
+    license: matchedLic,
+  });
+});
+
+// 3. API Kiểm Tra Trạng Thái Máy (/check & /api/check)
+app.all(['/api/check', '/check'], (req: Request, res: Response) => {
+  const machineId = String(req.query.machine_id || req.query.deviceId || req.body?.machine_id || req.body?.deviceId || '').trim();
+  if (!machineId) {
+    return res.status(400).json({ success: false, status: 'error', message: 'Thiếu tham số machine_id!' });
+  }
+
+  const cleanDev = machineId.toLowerCase();
+  const revoked = loadRevokedKeys();
+  if (revoked.some((r) => r.key.toLowerCase() === cleanDev || r.key.toLowerCase() === `dev:${cleanDev}`)) {
+    return res.json({
+      success: false,
+      status: 'revoked',
+      machine_id: machineId,
+      message: '🚨 Bản quyền của thiết bị này đã bị Quản trị viên thu hồi!',
+    });
+  }
+
+  const { licenses } = autoConsolidateLicensesAndOrders();
+  const matchedLic = licenses.find((l) => !l.isRevoked && l.devices?.some((d) => d.deviceId.toLowerCase() === cleanDev));
+
+  if (matchedLic) {
+    const expMs = new Date(matchedLic.expiresAt).getTime();
+    const now = Date.now();
+    if (!isNaN(expMs) && expMs < now) {
+      return res.json({
+        success: false,
+        status: 'expired',
+        machine_id: machineId,
+        expires_at: matchedLic.expiresAt,
+        message: 'Bản quyền máy đã hết hạn sử dụng. Vui lòng gia hạn thêm!',
+      });
+    }
+    const daysLeft = Math.max(1, Math.ceil((expMs - now) / 86400000));
+    const token = generateSignedToken(machineId, matchedLic.expiresAt);
+    return res.json({
+      success: true,
+      status: 'active',
+      machine_id: machineId,
+      pkg_name: matchedLic.notes || 'Gói VIP Gia Long',
+      client_name: matchedLic.clientName,
+      expires_at: matchedLic.expiresAt,
+      days_left: daysLeft,
+      token,
+      license_key: matchedLic.key,
+      message: '✓ Bản quyền hợp lệ và đang hoạt động!',
+    });
+  }
+
+  const orders = loadOrders();
+  const pendingOrd = orders.find((o) => o.status === 'pending' && (o.deviceId || '').toLowerCase() === cleanDev);
+  if (pendingOrd) {
+    return res.json({
+      success: true,
+      status: 'pending',
+      machine_id: machineId,
+      pkg_name: pendingOrd.pkgName,
+      message: 'Đơn đăng ký đang chờ Quản trị viên duyệt.',
+    });
+  }
+
+  return res.json({
+    success: false,
+    status: 'not_found',
+    machine_id: machineId,
+    message: 'Mã máy chưa đăng ký gói bản quyền nào trên hệ thống.',
+  });
+});
 
 // Kiểm tra bản quyền (Heartbeat verification)
 app.post('/api/license/verify', (req: Request, res: Response) => {
