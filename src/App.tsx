@@ -5319,6 +5319,34 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
                       )}
                     </div>
 
+                    {/* KHỐI GÙI/KÉO QUA LINK JSON GOOGLE DRIVE (Tránh tuyệt đối lỗi origin_mismatch của Google OAuth) */}
+                    <div className="p-3.5 bg-slate-950/70 border border-slate-800 rounded-xl space-y-2.5">
+                      <div className="text-[11.5px] font-bold text-sky-400 flex items-center gap-1.5">
+                        <Link2 className="w-4 h-4 text-sky-400" />
+                        <span>Kéo dữ liệu từ Link File JSON Google Drive (Không cần Đăng nhập OAuth):</span>
+                      </div>
+                      <p className="text-[10.5px] text-slate-400 leading-relaxed">
+                        Nếu gặp lỗi <em>origin_mismatch</em> khi đăng nhập Google, hãy dán trực tiếp link chia sẻ công khai của file JSON trên Google Drive vào đây:
+                      </p>
+                      <div className="flex gap-2">
+                        <input
+                          type="url"
+                          value={googleDriveJsonLink}
+                          onChange={(e) => setGoogleDriveJsonLink(e.target.value)}
+                          placeholder="https://drive.google.com/file/d/.../view"
+                          className="flex-1 bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-sky-300 font-mono focus:border-sky-500 focus:outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handlePullFromGoogleDrive()}
+                          disabled={isPullingFromGoogleDrive}
+                          className="px-3.5 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-xs font-bold transition shrink-0 active:scale-95 disabled:opacity-50"
+                        >
+                          {isPullingFromGoogleDrive ? 'Đang kéo...' : 'Kéo Dữ Liệu'}
+                        </button>
+                      </div>
+                    </div>
+
                     {/* KHỐI 2: SAO LƯU THỦ CÔNG & KHÔI PHỤC FILE JSON */}
                     <div className="p-3 bg-slate-950/70 border border-slate-800 rounded-xl space-y-2.5">
                       <div className="text-[11.5px] font-bold text-slate-200 flex items-center gap-1.5">
