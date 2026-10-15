@@ -1,5 +1,65 @@
 [
   {
+    "key": "ORD_1792060053288_UZ3F",
+    "reason": "Đơn hàng liên kết với bản quyền đã xóa",
+    "revokedAt": "2026-10-15T10:27:33.325Z"
+  },
+  {
+    "key": "DEV:DEVICE_SIGNAL_MV9EAARC",
+    "reason": "Quản trị viên đã xóa thiết bị này khỏi danh sách",
+    "revokedAt": "2026-10-15T10:27:33.325Z"
+  },
+  {
+    "key": "DEVICE_SIGNAL_MV9EAARC",
+    "reason": "Quản trị viên đã xóa thiết bị này khỏi danh sách",
+    "revokedAt": "2026-10-15T10:27:33.325Z"
+  },
+  {
+    "key": "LIC_1792060053302_Y234B",
+    "reason": "Quản trị viên đã xóa người dùng khỏi danh sách",
+    "revokedAt": "2026-10-15T10:27:33.325Z"
+  },
+  {
+    "key": "GLFB-VIP-Y234B",
+    "reason": "Quản trị viên đã xóa người dùng khỏi danh sách",
+    "revokedAt": "2026-10-15T10:27:33.324Z"
+  },
+  {
+    "key": "ORD_1792059996079_X3IF",
+    "reason": "Đơn hàng liên kết với bản quyền đã xóa",
+    "revokedAt": "2026-10-15T10:26:36.121Z"
+  },
+  {
+    "key": "PHONE:0988112233",
+    "reason": "Quản trị viên đã xóa SĐT này khỏi danh sách",
+    "revokedAt": "2026-10-15T10:26:36.121Z"
+  },
+  {
+    "key": "0988112233",
+    "reason": "Quản trị viên đã xóa SĐT này khỏi danh sách",
+    "revokedAt": "2026-10-15T10:26:36.121Z"
+  },
+  {
+    "key": "DEV:DEVICE_SIGNAL_MV9E92LX",
+    "reason": "Quản trị viên đã xóa thiết bị này khỏi danh sách",
+    "revokedAt": "2026-10-15T10:26:36.121Z"
+  },
+  {
+    "key": "DEVICE_SIGNAL_MV9E92LX",
+    "reason": "Quản trị viên đã xóa thiết bị này khỏi danh sách",
+    "revokedAt": "2026-10-15T10:26:36.121Z"
+  },
+  {
+    "key": "LIC_1792059996094_6C2TV",
+    "reason": "Quản trị viên đã xóa người dùng khỏi danh sách",
+    "revokedAt": "2026-10-15T10:26:36.121Z"
+  },
+  {
+    "key": "GLFB-VIP-6C2TV",
+    "reason": "Quản trị viên đã xóa người dùng khỏi danh sách",
+    "revokedAt": "2026-10-15T10:26:36.121Z"
+  },
+  {
     "key": "PHONE:0987654321",
     "reason": "Quản trị viên đã xóa SĐT này khỏi danh sách",
     "revokedAt": "2026-10-14T09:17:38.284Z"
