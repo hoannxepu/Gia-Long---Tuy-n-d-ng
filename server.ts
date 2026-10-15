@@ -2058,6 +2058,7 @@ function loadSettings() {
     supportEmail: 'gialonggiaiphapvanhanh@gmail.com',
     googleDriveSheetWebhookUrl: process.env.GOOGLE_DRIVE_WEBHOOK_URL || '',
     googleDriveSyncEnabled: true,
+    googleDriveJsonLink: '',
   };
   try {
     if (fs.existsSync(SETTINGS_FILE)) {
@@ -2227,14 +2228,73 @@ app.post('/api/admin/google-drive/sync-all', requireAdmin, async (req: Request, 
   });
 });
 
-// ROUTE: Kéo toàn bộ đơn hàng và bản quyền từ Google Drive về trang Admin (Đáp ứng 2 chiều)
+// Helper trích xuất File ID từ link Google Drive
+function extractGoogleDriveFileId(link: string): string | null {
+  if (!link) return null;
+  const match = link.match(/\/d\/([a-zA-Z0-9_-]+)/) || link.match(/id=([a-zA-Z0-9_-]+)/);
+  if (match) return match[1];
+  if (/^[a-zA-Z0-9_-]{25,}$/.test(link.trim())) return link.trim();
+  return null;
+}
+
+// ROUTE: Kéo toàn bộ đơn hàng và bản quyền từ Google Drive về trang Admin (Đáp ứng 2 chiều & File JSON Google Drive)
 app.all(['/api/admin/google-drive/pull', '/admin/google-drive/pull'], requireAdmin, async (req: Request, res: Response) => {
-  const { webhookUrl } = req.body || {};
+  const { webhookUrl, driveUrlOrId } = req.body || {};
   const settings = loadSettings();
-  const targetUrl = webhookUrl || settings.googleDriveSheetWebhookUrl || process.env.GOOGLE_DRIVE_WEBHOOK_URL;
-  if (!targetUrl || !targetUrl.startsWith('http')) {
-    return res.status(400).json({ success: false, error: 'Chưa cấu hình Webhook URL của Google Sheet!' });
+  const targetUrl = (driveUrlOrId || webhookUrl || settings.googleDriveJsonLink || settings.googleDriveSheetWebhookUrl || process.env.GOOGLE_DRIVE_WEBHOOK_URL || '').trim();
+  if (!targetUrl || (!targetUrl.startsWith('http') && !extractGoogleDriveFileId(targetUrl))) {
+    return res.status(400).json({ success: false, error: 'Chưa cấu hình link file JSON Google Drive hoặc Webhook!' });
   }
+
+  // Nếu là link file JSON từ Google Drive (drive.google.com/file/d/...) hoặc File ID
+  const fileId = extractGoogleDriveFileId(targetUrl);
+  if (targetUrl.includes('drive.google.com') || targetUrl.includes('docs.google.com') || fileId || targetUrl.endsWith('.json')) {
+    try {
+      const downloadUrl = fileId
+        ? `https://drive.google.com/uc?export=download&id=${fileId}`
+        : targetUrl;
+      const jsonResp = await fetch(downloadUrl);
+      if (!jsonResp.ok) {
+        return res.status(400).json({
+          success: false,
+          error: `Không thể tải file JSON từ Google Drive (HTTP ${jsonResp.status}). Hãy đảm bảo quyền chia sẻ là 'Bất kỳ ai có liên kết'!`,
+        });
+      }
+      const text = await jsonResp.text();
+      let gData: any;
+      try {
+        gData = JSON.parse(text);
+      } catch (e) {
+        return res.status(400).json({ success: false, error: 'File trên Google Drive không đúng định dạng JSON!' });
+      }
+
+      let pOrders = 0;
+      let pLicenses = 0;
+      if (Array.isArray(gData.orders)) {
+        saveOrders(gData.orders);
+        pOrders = gData.orders.length;
+      }
+      if (Array.isArray(gData.licenses)) {
+        saveLicenses(gData.licenses);
+        pLicenses = gData.licenses.length;
+      }
+      if (Array.isArray(gData.history)) saveHistory(gData.history);
+
+      const cur = loadSettings();
+      saveSettings({ ...cur, googleDriveJsonLink: targetUrl });
+
+      return res.json({
+        success: true,
+        message: `✓ Đã nạp thành công ${pOrders} đơn và ${pLicenses} bản quyền từ file JSON trên Google Drive!`,
+        orders: loadOrders(),
+        licenses: loadLicenses(),
+        history: loadHistory(),
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: 'Lỗi tải file JSON từ Google Drive: ' + err.message });
+    }
+  }
+
   try {
     const resp = await fetch(`${targetUrl}?action=get_all`);
     if (!resp.ok) {
@@ -2315,6 +2375,21 @@ app.all(['/api/admin/google-drive/pull', '/admin/google-drive/pull'], requireAdm
   } catch (err: any) {
     res.status(500).json({ success: false, error: 'Lỗi kéo dữ liệu: ' + err.message });
   }
+});
+
+// API Xuất dữ liệu Database JSON trực tiếp (Live JSON Database)
+app.get(['/api/database/export.json', '/database.json'], (_req: Request, res: Response) => {
+  const data = {
+    app: 'Gia Long - FB',
+    version: '1.0.4',
+    updatedAt: new Date().toISOString(),
+    licenses: loadLicenses(),
+    orders: loadOrders(),
+    history: loadHistory(),
+    settings: loadSettings(),
+  };
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.send(JSON.stringify(data, null, 2));
 });
 
 // API Sao lưu trực tiếp toàn bộ dữ liệu ra file JSON

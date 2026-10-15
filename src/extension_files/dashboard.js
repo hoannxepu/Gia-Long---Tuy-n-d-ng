@@ -1104,12 +1104,15 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnHeaderLicenseAction = document.getElementById('btnHeaderLicenseAction');
 
   const licClientName = document.getElementById('licClientName');
+  const licClientPhone = document.getElementById('licClientPhone');
   const licKeyDisplay = document.getElementById('licKeyDisplay');
   const licBadgeStatus = document.getElementById('licBadgeStatus');
   const licDaysLeftText = document.getElementById('licDaysLeftText');
+  const licExpiresAtText = document.getElementById('licExpiresAtText');
   const licPlanTypeText = document.getElementById('licPlanTypeText');
   const licDevicesCount = document.getElementById('licDevicesCount');
   const licCurrentDeviceId = document.getElementById('licCurrentDeviceId');
+  const licDeviceId = document.getElementById('licDeviceId');
 
   const inputNewLicenseKey = document.getElementById('inputNewLicenseKey');
   const btnSubmitActivateLicense = document.getElementById('btnSubmitActivateLicense');
@@ -1296,7 +1299,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Cập nhật Trang License
         if (licClientName) licClientName.innerText = lic.clientName || (isTrialPlan ? 'Khách Hàng Dùng Thử' : 'Khách Hàng VIP');
-        if (licKeyDisplay) licKeyDisplay.innerText = `Mã Bản Quyền: ${lic.key}`;
+        if (licClientPhone) licClientPhone.innerText = lic.phone || 'Chưa cập nhật';
+        if (licKeyDisplay) licKeyDisplay.innerText = lic.key;
+        if (licDeviceId) licDeviceId.innerText = activeId;
         if (licBadgeStatus) {
           licBadgeStatus.innerText = isExpiringSoon
             ? `⚠️ SẮP HẾT HẠN (CÒN ${daysLeft} NGÀY)`
@@ -1304,10 +1309,14 @@ document.addEventListener('DOMContentLoaded', () => {
           licBadgeStatus.className = isExpiringSoon ? 'badge-failed' : 'badge-success';
         }
         if (licDaysLeftText) {
-          const expDate = new Date(lic.expiresAt).toLocaleDateString('vi-VN');
-          licDaysLeftText.innerText = isTrialPlan
-            ? `Dùng thử 1 ngày (Hết hạn: ${expDate}) • Giới hạn 20 bài`
-            : `Còn ${daysLeft} ngày (Hết hạn: ${expDate})`;
+          licDaysLeftText.innerText = `${daysLeft} ngày`;
+        }
+        if (licExpiresAtText) {
+          try {
+            licExpiresAtText.innerText = new Date(lic.expiresAt).toLocaleDateString('vi-VN');
+          } catch (e) {
+            licExpiresAtText.innerText = lic.expiresAt || '---';
+          }
         }
         if (licPlanTypeText) {
           licPlanTypeText.innerText = isTrialPlan
@@ -1360,21 +1369,30 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (licClientName) licClientName.innerText = lic?.clientName ? `${lic.clientName} (${isRevoked ? 'Đã Thu Hồi' : 'Hết Hạn'})` : (isRevoked ? 'Bản Quyền Bị Thu Hồi' : 'Chưa Kích Hoạt');
-        if (licKeyDisplay) licKeyDisplay.innerText = lic?.key ? `Mã: ${lic.key}` : 'Vui lòng đặt mua gói bên dưới';
+        if (licClientPhone) licClientPhone.innerText = lic?.phone || '---';
+        if (licKeyDisplay) licKeyDisplay.innerText = lic?.key ? lic.key : 'Chưa có mã';
+        if (licDeviceId) licDeviceId.innerText = activeId;
+        if (licExpiresAtText) licExpiresAtText.innerText = isRevoked ? 'Đã thu hồi' : (isExp ? 'Đã hết hạn' : 'Cần đặt mua / duyệt gói');
         if (licBadgeStatus) {
           licBadgeStatus.innerText = isRevoked ? '🚫 ĐÃ THU HỒI (NGẮT MÁY)' : isExp ? '🚨 HẾT HẠN' : 'CHƯA KÍCH HOẠT';
           licBadgeStatus.className = 'badge-failed';
         }
         if (licDaysLeftText) {
-          licDaysLeftText.innerText = isRevoked
-            ? (res.message || '🚨 Bản quyền của máy tính này đã bị Quản trị viên thu hồi và ngắt kết nối!')
-            : (res.message || 'Cần kích hoạt hoặc mua gói bản quyền');
+          licDaysLeftText.innerText = '0 ngày';
         }
         if (licPlanTypeText) licPlanTypeText.innerText = isRevoked ? 'Bị ngắt kết nối' : 'Chưa xác định';
         if (licDevicesCount) licDevicesCount.innerText = '0 / 0 máy';
       }
     });
   }
+
+  btnRefreshLicenseStatus?.addEventListener('click', () => {
+    loadLicenseDetails(true);
+    chrome.runtime.sendMessage({ action: 'SYNC_ADMIN_STATUS' }, () => {
+      loadLicenseDetails(true);
+    });
+    showToast('🔄 Đang kiểm tra và đồng bộ lại bản quyền với máy chủ...');
+  });
 
   // ==========================================
   // LỊCH SỬ ĐƠN ĐẶT MUA & ĐỒNG BỘ HAI CHIỀU VỚI QUẢN TRỊ (ẨN & TỰ ĐỘNG KÍCH HOẠT)

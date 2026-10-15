@@ -272,6 +272,9 @@ function startFastLicensePolling(machineId, maxSeconds = 300) {
                 key: data.token || data.license_key || 'GLFB-VIP-ACTIVE',
                 expiresAt: data.expires_at,
                 clientName: data.client_name || 'Khách Đặt Mua',
+                phone: data.phone || data.license?.phone || '',
+                planType: data.plan_type || data.license?.planType || 'individual',
+                maxDevices: data.max_devices || data.license?.maxDevices || 1,
                 notes: data.pkg_name || 'Bản quyền VIP Gia Long',
                 daysLeft: data.days_left || 30,
                 lastVerifiedAt: Date.now(),
@@ -330,10 +333,23 @@ async function checkServerBackground(machineId, token) {
             return;
           }
           if (data.success && data.status === 'active') {
+            const currentLic = (await chrome.storage.local.get(['licenseData'])).licenseData || {};
+            const updatedLic = {
+              ...currentLic,
+              key: data.token || token || data.license_key || currentLic.key,
+              expiresAt: data.expires_at || currentLic.expiresAt,
+              clientName: data.client_name || currentLic.clientName || 'Khách Hàng VIP',
+              phone: data.phone || data.license?.phone || currentLic.phone || '',
+              daysLeft: data.days_left || currentLic.daysLeft,
+              planType: data.plan_type || data.license?.planType || currentLic.planType || 'individual',
+              maxDevices: data.max_devices || data.license?.maxDevices || currentLic.maxDevices || 1,
+              lastVerifiedAt: Date.now(),
+            };
             await chrome.storage.local.set({
               lastCheckedAt: Date.now(),
               expiresAt: data.expires_at,
               signedToken: data.token || token,
+              licenseData: updatedLic,
             });
             return;
           }
@@ -590,6 +606,9 @@ async function checkLicenseStatus(forceRemote = false) {
                 key: checkRes.token || 'GLFB-VIP-ACTIVE',
                 expiresAt: checkRes.expires_at,
                 clientName: checkRes.client_name || 'Khách Kích Hoạt',
+                phone: checkRes.phone || checkRes.license?.phone || '',
+                planType: checkRes.plan_type || checkRes.license?.planType || 'individual',
+                maxDevices: checkRes.max_devices || checkRes.license?.maxDevices || 1,
                 notes: checkRes.pkg_name,
                 daysLeft: checkRes.days_left || 30,
                 lastVerifiedAt: Date.now(),

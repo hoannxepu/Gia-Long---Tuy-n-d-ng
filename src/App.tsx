@@ -477,6 +477,13 @@ export default function App() {
   const [copiedScript, setCopiedScript] = useState<boolean>(false);
   const [isPullingFromGoogleDrive, setIsPullingFromGoogleDrive] = useState<boolean>(false);
   const [showGoogleDriveModal, setShowGoogleDriveModal] = useState<boolean>(false);
+  const [googleDriveJsonLink, setGoogleDriveJsonLink] = useState<string>(() => {
+    try {
+      return localStorage.getItem('glfb_gdrive_json_link') || '';
+    } catch (e) {
+      return '';
+    }
+  });
 
   // Kích hoạt tự động 1-Click qua URL (?kich_hoat=KEY hoặc ?activate=KEY)
   const [autoActivateKey, setAutoActivateKey] = useState<string | null>(null);
@@ -638,6 +645,12 @@ export default function App() {
             localStorage.setItem('glfb_gdrive_webhook', data.settings.googleDriveSheetWebhookUrl);
           } catch (e) {}
         }
+        if (data.settings.googleDriveJsonLink) {
+          setGoogleDriveJsonLink(data.settings.googleDriveJsonLink);
+          try {
+            localStorage.setItem('glfb_gdrive_json_link', data.settings.googleDriveJsonLink);
+          } catch (e) {}
+        }
         if (typeof data.settings.googleDriveSyncEnabled === 'boolean') {
           setGoogleDriveSyncEnabled(data.settings.googleDriveSyncEnabled);
         }
@@ -730,11 +743,11 @@ export default function App() {
     }
   };
 
-  // Kéo dữ liệu từ Google Drive về Web App Admin (Đáp ứng 2 chiều)
-  const handlePullFromGoogleDrive = async () => {
-    const cleanUrl = googleDriveWebhookUrl.trim();
-    if (!cleanUrl) {
-      alert('Vui lòng cấu hình Webhook URL của Google Sheet trước!');
+  // Kéo dữ liệu từ Google Drive về Web App Admin (Hỗ trợ cả file JSON Google Drive & Webhook)
+  const handlePullFromGoogleDrive = async (overrideUrl?: string) => {
+    const target = (overrideUrl || googleDriveJsonLink || googleDriveWebhookUrl).trim();
+    if (!target) {
+      alert('Vui lòng nhập link file JSON trên Google Drive hoặc Webhook URL!');
       return;
     }
     setIsPullingFromGoogleDrive(true);
@@ -742,10 +755,15 @@ export default function App() {
       const res = await fetch('/api/admin/google-drive/pull', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-admin-pin': adminPin },
-        body: JSON.stringify({ webhookUrl: cleanUrl }),
+        body: JSON.stringify({ driveUrlOrId: target, webhookUrl: target }),
       });
       const data = await res.json();
       if (data.success) {
+        try {
+          if (target.includes('drive.google.com') || target.includes('docs.google.com') || target.endsWith('.json')) {
+            localStorage.setItem('glfb_gdrive_json_link', target);
+          }
+        } catch (e) {}
         triggerToast(data.message || '✓ Đã kéo dữ liệu từ Google Drive thành công!');
         fetchOrders(adminPin, true);
         fetchLicenses(adminPin);
@@ -3195,16 +3213,12 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
                     </button>
                     <button
                       onClick={() => setShowGoogleDriveModal(true)}
-                      className={`px-2.5 py-1 ${googleDriveWebhookUrl ? 'bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-500/50' : 'bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30'} rounded-lg text-[11px] font-bold transition flex items-center gap-1.5 shadow-sm active:scale-98`}
-                      title="Cấu hình & kiểm tra đồng bộ Google Drive / Google Sheets CRM"
+                      className="px-2.5 py-1 bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-500/50 rounded-lg text-[11px] font-bold transition flex items-center gap-1.5 shadow-sm active:scale-98"
+                      title="Cơ sở dữ liệu tự động JSON & Lưu trữ Google Drive"
                     >
-                      <FileSpreadsheet className="w-3 h-3 text-emerald-400" />
-                      <span>Google Drive CRM</span>
-                      {googleDriveWebhookUrl ? (
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                      ) : (
-                        <span className="text-[9px] bg-amber-500/20 text-amber-300 px-1 rounded font-normal">Chưa nối</span>
-                      )}
+                      <HardDrive className="w-3 h-3 text-emerald-400" />
+                      <span>Lưu Trữ Tự Động JSON</span>
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
                     </button>
                     <button
                       onClick={() => {
@@ -5026,29 +5040,24 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
             )}
 
             {/* MODAL CẤU HÌNH GOOGLE DRIVE & GOOGLE SHEETS CRM (ĐỒNG BỘ 2 CHIỀU) */}
+            {/* MODAL CƠ SỞ DỮ LIỆU TỰ ĐỘNG JSON & LƯU TRỮ GOOGLE DRIVE */}
             {showGoogleDriveModal && (
               <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/80 backdrop-blur-sm overflow-y-auto">
                 <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-lg w-full p-4 sm:p-5 shadow-2xl space-y-4 my-auto max-h-[92vh] overflow-y-auto">
                   <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                     <div className="flex items-center gap-2">
                       <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 flex items-center justify-center">
-                        <FileSpreadsheet className="w-4 h-4" />
+                        <HardDrive className="w-4 h-4" />
                       </div>
                       <div>
                         <h3 className="text-sm font-bold text-white flex items-center gap-1.5">
-                          <span>Google Drive &amp; Google Sheets CRM</span>
-                          {googleDriveWebhookUrl ? (
-                            <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-1.5 py-0.2 rounded-full font-bold">
-                              Đã Kết Nối
-                            </span>
-                          ) : (
-                            <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/40 px-1.5 py-0.2 rounded-full font-bold">
-                              Chưa Nhập URL
-                            </span>
-                          )}
+                          <span>Cơ Sở Dữ Liệu JSON Tự Động &amp; Google Drive</span>
+                          <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-1.5 py-0.2 rounded-full font-bold">
+                            Tự Động 100%
+                          </span>
                         </h3>
                         <p className="text-[11px] text-slate-400">
-                          Đồng bộ dữ liệu 2 chiều: Extension Khách &amp; Web App Admin cùng đẩy/nhận trực tiếp
+                          Đẩy app lên là hoạt động ngay, không cần cấu hình Google Sheet phức tạp
                         </p>
                       </div>
                     </div>
@@ -5061,130 +5070,128 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
                   </div>
 
                   <div className="space-y-3.5 text-xs">
-                    {/* URL Webhook Input */}
-                    <div>
-                      <label className="block text-slate-300 font-semibold mb-1 text-[11.5px]">
-                        URL Ứng Dụng Web (Google Apps Script Webhook URL): <span className="text-rose-400">*</span>
-                      </label>
-                      <input
-                        type="url"
-                        value={googleDriveWebhookUrl}
-                        onChange={(e) => setGoogleDriveWebhookUrl(e.target.value)}
-                        placeholder="https://script.google.com/macros/s/.../exec"
-                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-2 text-xs text-emerald-300 font-mono focus:border-emerald-500 focus:outline-none"
-                      />
-                      <p className="text-[10.5px] text-slate-500 mt-1">
-                        URL này nhận đơn hàng, lưu vào file Google Sheet trên Google Drive của bạn khi khách đặt mua.
+                    {/* KHỐI THÔNG BÁO HOẠT ĐỘNG SẴN 100% */}
+                    <div className="p-3 bg-emerald-950/40 border border-emerald-500/30 rounded-xl space-y-1.5">
+                      <div className="flex items-center gap-1.5 text-emerald-400 font-bold text-xs">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <span>Hệ Thống Tự Động Xử Lý &amp; Lưu Trữ JSON Nội Tại (Hoạt Động Ngay)</span>
+                      </div>
+                      <p className="text-[11px] text-slate-300 leading-relaxed">
+                        Toàn bộ đơn mua từ Extension và bản quyền duyệt cấp đều được tự động lưu vào các file JSON chuẩn (<code className="text-emerald-300 bg-slate-950 px-1 py-0.5 rounded">orders.json</code>, <code className="text-emerald-300 bg-slate-950 px-1 py-0.5 rounded">licenses.json</code>).
+                        Bạn <b>chỉ cần đẩy app lên</b> là toàn bộ quy trình chạy mượt mà ngay, không cần tạo sheet hay cài script.
                       </p>
                     </div>
 
-                    {/* Toggle Đồng bộ tự động */}
-                    <div className="flex items-center justify-between p-2.5 bg-slate-950/60 rounded-lg border border-slate-800">
-                      <div>
-                        <div className="text-[11.5px] font-bold text-slate-200">Tự động đẩy đơn hàng sang Google Drive</div>
-                        <div className="text-[10px] text-slate-400">Khi khách mua trên extension hoặc admin duyệt đơn, tự ghi vào sheet</div>
+                    {/* KHỐI SAO LƯU & CẤT FILE JSON VÀO GOOGLE DRIVE */}
+                    <div className="p-3 bg-slate-950/70 border border-slate-800 rounded-xl space-y-2.5">
+                      <div className="text-[11.5px] font-bold text-slate-200 flex items-center gap-1.5">
+                        <Cloud className="w-3.5 h-3.5 text-sky-400" />
+                        <span>Lưu Trữ &amp; Sao Lưu File JSON Lên Google Drive:</span>
                       </div>
-                      <label className="relative inline-flex items-center cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={googleDriveSyncEnabled}
-                          onChange={(e) => setGoogleDriveSyncEnabled(e.target.checked)}
-                          className="sr-only peer"
-                        />
-                        <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
-                      </label>
+                      <p className="text-[10.5px] text-slate-400 leading-relaxed">
+                        Bạn có thể tải 1-click toàn bộ dữ liệu ra file JSON để cất vào thư mục Google Drive của bạn, hoặc nạp lại khi cần:
+                      </p>
+                      <div className="grid grid-cols-2 gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={handleDownloadJsonBackup}
+                          className="py-2 px-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 shadow active:scale-98"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>Tải File JSON Database</span>
+                        </button>
+
+                        <label className="py-2 px-3 bg-teal-600 hover:bg-teal-500 text-white rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 shadow active:scale-98 cursor-pointer">
+                          <Upload className="w-3.5 h-3.5" />
+                          <span>Khôi Phục Từ File JSON</span>
+                          <input type="file" accept=".json" onChange={handleRestoreJsonUpload} className="hidden" />
+                        </label>
+                      </div>
+
+                      <div className="pt-2 border-t border-slate-800/80">
+                        <label className="block text-slate-300 font-semibold mb-1 text-[11px]">
+                          Tùy chọn: Nhập link file JSON trên Google Drive (để tự động kéo dữ liệu về):
+                        </label>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={googleDriveJsonLink}
+                            onChange={(e) => setGoogleDriveJsonLink(e.target.value)}
+                            placeholder="Dán link file JSON trên Google Drive (drive.google.com/file/d/...)..."
+                            className="flex-1 bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-emerald-300 font-mono focus:border-emerald-500 focus:outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handlePullFromGoogleDrive(googleDriveJsonLink)}
+                            disabled={isPullingFromGoogleDrive}
+                            className="px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-xs font-bold transition shrink-0 flex items-center gap-1 disabled:opacity-50"
+                          >
+                            <RefreshCw className={`w-3 h-3 ${isPullingFromGoogleDrive ? 'animate-spin' : ''}`} />
+                            <span>Kéo File Về</span>
+                          </button>
+                        </div>
+                        <p className="text-[10px] text-slate-500 mt-1">
+                          (Chỉ cần bật chia sẻ file JSON đó ở chế độ "Bất kỳ ai có liên kết", hệ thống sẽ tự đọc và nạp vào app).
+                        </p>
+                      </div>
                     </div>
 
-                    {/* Hàng nút chức năng chính */}
-                    <div className="grid grid-cols-2 gap-2 pt-1">
-                      <button
-                        type="button"
-                        onClick={handleSaveGoogleDriveSettings}
-                        disabled={isSavingSettings}
-                        className="py-2 px-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 shadow disabled:opacity-50"
-                      >
-                        <Check className="w-3.5 h-3.5" />
-                        <span>{isSavingSettings ? 'Đang lưu...' : '1. Lưu Cấu Hình URL'}</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={handleTestGoogleDrive}
-                        disabled={isTestingGoogleDrive}
-                        className="py-2 px-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 shadow disabled:opacity-50"
-                      >
-                        <Send className="w-3.5 h-3.5" />
-                        <span>{isTestingGoogleDrive ? 'Đang gửi...' : '2. Gửi Thử Đơn Mẫu'}</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={handleSyncAllToGoogleDrive}
-                        disabled={isSyncingAllGoogleDrive}
-                        className="py-2 px-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 shadow disabled:opacity-50"
-                      >
-                        <Cloud className="w-3.5 h-3.5" />
-                        <span>{isSyncingAllGoogleDrive ? 'Đang đẩy...' : '3. Đẩy Tất Cả Sang GG Drive'}</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={handlePullFromGoogleDrive}
-                        disabled={isPullingFromGoogleDrive}
-                        className="py-2 px-3 bg-teal-600 hover:bg-teal-500 text-white rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 shadow disabled:opacity-50"
-                      >
-                        <RefreshCw className={`w-3.5 h-3.5 ${isPullingFromGoogleDrive ? 'animate-spin' : ''}`} />
-                        <span>{isPullingFromGoogleDrive ? 'Đang kéo...' : '4. Kéo Dữ Liệu Về Admin'}</span>
-                      </button>
-                    </div>
-
-                    {/* Hướng Dẫn & Sao Chép Script */}
-                    <div className="pt-2 border-t border-slate-800">
+                    {/* MỤC PHỤ: GOOGLE SHEETS WEBHOOK (NẾU MUỐN DÙNG) */}
+                    <div className="border border-slate-800/80 rounded-xl overflow-hidden">
                       <div
                         onClick={() => setShowGoogleDriveGuide(!showGoogleDriveGuide)}
-                        className="flex items-center justify-between p-2 rounded-lg bg-slate-950/70 hover:bg-slate-800/60 cursor-pointer border border-slate-800 transition"
+                        className="flex items-center justify-between p-2.5 bg-slate-950 hover:bg-slate-800/50 cursor-pointer transition select-none"
                       >
-                        <span className="text-[11px] font-bold text-slate-300 flex items-center gap-1.5">
-                          <Code2 className="w-3.5 h-3.5 text-amber-400" />
-                          <span>Mã Nguồn Google Apps Script &amp; Hướng Dẫn Tạo Sheet</span>
+                        <span className="text-[11px] font-semibold text-slate-400 flex items-center gap-1.5">
+                          <FileSpreadsheet className="w-3.5 h-3.5 text-amber-400" />
+                          <span>Tùy chọn mở rộng: Xem dạng bảng tính Google Sheets (Không bắt buộc)</span>
                         </span>
                         <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform ${showGoogleDriveGuide ? 'rotate-180' : ''}`} />
                       </div>
 
                       {showGoogleDriveGuide && (
-                        <div className="mt-2 p-3 bg-slate-950 rounded-lg border border-slate-800 space-y-2.5 animate-in fade-in">
-                          <div className="text-[11px] text-slate-300 space-y-1">
-                            <p className="font-bold text-emerald-400">Cách cài đặt trong 1 phút:</p>
-                            <ol className="list-decimal list-inside space-y-0.5 text-slate-400 text-[10.5px]">
-                              <li>Mở file Google Sheet mới trên Google Drive của bạn.</li>
-                              <li>Vào <b>Tiện ích mở rộng</b> (Extensions) ➔ chọn <b>Apps Script</b>.</li>
-                              <li>Xóa mã cũ, dán toàn bộ mã bên dưới vào rồi bấm <b>Ctrl + S</b> để Lưu.</li>
-                              <li>Bấm <b>Triển khai</b> (Deploy) ➔ <b>Tùy chọn triển khai mới</b> (New deployment).</li>
-                              <li>Chọn loại <b>Ứng dụng web</b> (Web app), mục <i>Ai có quyền truy cập</i> chọn <b>Bất kỳ ai</b> (Anyone).</li>
-                              <li>Sao chép <b>URL Ứng dụng web</b> dán vào ô bên trên và bấm <b>Lưu Cấu Hình</b>.</li>
-                            </ol>
+                        <div className="p-3 bg-slate-950/90 border-t border-slate-800 space-y-3 animate-in fade-in">
+                          <div>
+                            <label className="block text-slate-300 font-semibold mb-1 text-[11px]">
+                              URL Webhook Apps Script:
+                            </label>
+                            <div className="flex gap-2">
+                              <input
+                                type="url"
+                                value={googleDriveWebhookUrl}
+                                onChange={(e) => setGoogleDriveWebhookUrl(e.target.value)}
+                                placeholder="https://script.google.com/macros/s/.../exec"
+                                className="flex-1 bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-emerald-300 font-mono focus:border-emerald-500 focus:outline-none"
+                              />
+                              <button
+                                type="button"
+                                onClick={handleSaveGoogleDriveSettings}
+                                disabled={isSavingSettings}
+                                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition shrink-0"
+                              >
+                                Lưu
+                              </button>
+                            </div>
                           </div>
 
-                          <div className="flex items-center justify-between pt-1">
-                            <span className="text-[10px] text-slate-400 font-mono">Mã Apps Script (doPost &amp; doGet 2 chiều):</span>
+                          <div className="flex gap-2">
                             <button
                               type="button"
-                              onClick={() => {
-                                navigator.clipboard.writeText(GOOGLE_APPS_SCRIPT_CODE);
-                                setCopiedScript(true);
-                                triggerToast('✓ Đã sao chép mã Google Apps Script vào bộ nhớ tạm!');
-                                setTimeout(() => setCopiedScript(false), 2500);
-                              }}
-                              className="px-2.5 py-1 bg-amber-600 hover:bg-amber-500 text-white rounded text-[11px] font-bold flex items-center gap-1 transition"
+                              onClick={handleTestGoogleDrive}
+                              disabled={isTestingGoogleDrive}
+                              className="flex-1 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-[11px] font-semibold transition"
                             >
-                              {copiedScript ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                              <span>{copiedScript ? 'Đã Sao Chép!' : 'Sao Chép Toàn Bộ Mã'}</span>
+                              Gửi Đơn Test Thử
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleSyncAllToGoogleDrive}
+                              disabled={isSyncingAllGoogleDrive}
+                              className="flex-1 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-[11px] font-semibold transition"
+                            >
+                              Đẩy Toàn Bộ Lên Sheet
                             </button>
                           </div>
-
-                          <pre className="p-2 bg-slate-900 border border-slate-800 rounded text-[9.5px] font-mono text-slate-300 max-h-36 overflow-y-auto overflow-x-hidden whitespace-pre-wrap select-all">
-                            {GOOGLE_APPS_SCRIPT_CODE}
-                          </pre>
                         </div>
                       )}
                     </div>
