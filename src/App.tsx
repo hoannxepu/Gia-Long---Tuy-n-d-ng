@@ -5199,6 +5199,22 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
                   </div>
 
                   <div className="space-y-3.5 text-xs">
+                    {/* HƯỚNG DẪN KHẮC PHỤC KHI ĐÃ TẠO FILE JSON TRÊN DRIVE NHƯNG CHƯA KẾT NỐI */}
+                    <div className="p-3 bg-amber-950/30 border border-amber-500/30 rounded-xl space-y-2 text-xs">
+                      <div className="font-bold text-amber-400 flex items-center gap-1.5">
+                        <AlertTriangle className="w-4 h-4 shrink-0" />
+                        <span>💡 Đã tạo file JSON trên Drive nhưng chưa kết nối được giữa Admin và Người dùng?</span>
+                      </div>
+                      <p className="text-slate-300 text-[11px] leading-relaxed">
+                        Nguyên nhân phổ biến nhất là <strong>quyền chia sẻ file trên Google Drive</strong> đang ở chế độ <em>Riêng Tư (Restricted)</em> khiến hệ thống không thể đọc được dữ liệu. Hãy thực hiện 3 bước sau để kết nối ngay lập tức:
+                      </p>
+                      <ul className="list-disc pl-4 space-y-1 text-slate-300 text-[10.5px]">
+                        <li><strong>Bước 1 (Quyền chia sẻ):</strong> Trên Google Drive, click chuột phải vào file JSON &rarr; Chọn <strong>Chia sẻ (Share)</strong> &rarr; Đổi quyền từ <em>Hạn chế</em> thành <strong>"Bất kỳ ai có liên kết" (Anyone with the link) &rarr; Người xem (Viewer)</strong>.</li>
+                        <li><strong>Bước 2 (Đăng nhập OAuth tự động):</strong> Hoặc đơn giản nhất, bấm nút <strong>"Đăng Nhập Google Để Tự Động Kết Nối Drive"</strong> bên dưới để app tự động tìm, sinh tệp và đồng bộ trực tiếp không cần chỉnh thủ công!</li>
+                        <li><strong>Bước 3 (Đồng bộ extension):</strong> Người dùng (extension) cần cài phiên bản ZIP mới nhất từ Cổng Khách Hàng để tự động nhận tín hiệu bản quyền chuẩn xác từ Admin.</li>
+                      </ul>
+                    </div>
+
                     {/* KHỐI 1: TỰ ĐỘNG SINH & ĐỒNG BỘ TỆP JSON TRỰC TIẾP TRÊN GOOGLE DRIVE (như thap_tai_san_data.json) */}
                     <div className="p-3.5 bg-gradient-to-br from-sky-950/70 to-slate-900 border border-sky-500/40 rounded-xl space-y-3">
                       <div className="flex items-center justify-between">
