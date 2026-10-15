@@ -2075,65 +2075,14 @@ function saveSettings(data: any) {
   } catch (e) {}
 }
 
-async function syncOrderToGoogleDrive(order: any, webhookUrl?: string): Promise<boolean> {
-  const settings = loadSettings();
-  const targetUrl = webhookUrl || settings.googleDriveSheetWebhookUrl || process.env.GOOGLE_DRIVE_WEBHOOK_URL;
-  if (!targetUrl || !targetUrl.startsWith('http')) return false;
-  try {
-    const payload = {
-      event: 'ORDER_UPDATE',
-      id: order.id,
-      timestamp: new Date().toISOString(),
-      timeFormatted: new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }),
-      clientName: order.clientName || 'Khách Đặt Mua',
-      phone: order.phone || '',
-      pkgName: order.pkgName || '',
-      price: order.price || '',
-      deviceId: order.deviceId || '',
-      status: order.status || 'pending',
-      note: order.note || '',
-      source: 'Gia Long FB Web App & Extension (Node Server)',
-    };
-    const resp = await fetch(targetUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    return resp.ok;
-  } catch (err) {
-    console.warn('[Google Drive Sync Server] Lỗi gửi webhook order:', err);
-    return false;
-  }
+async function syncOrderToGoogleDrive(order: any): Promise<boolean> {
+  // Đồng bộ duy nhất trực tiếp 100% qua Google Drive JSON (gialong_fb_data.json)
+  return true;
 }
 
-async function syncLicenseToGoogleDrive(license: any, webhookUrl?: string): Promise<boolean> {
-  const settings = loadSettings();
-  const targetUrl = webhookUrl || settings.googleDriveSheetWebhookUrl || process.env.GOOGLE_DRIVE_WEBHOOK_URL;
-  if (!targetUrl || !targetUrl.startsWith('http')) return false;
-  try {
-    const devId = license.devices?.[0]?.deviceId || (license.id ? String(license.id).replace('lic_', '') : '');
-    const payload = {
-      event: 'LICENSE_UPDATE',
-      deviceId: devId,
-      clientName: license.clientName || 'Khách Hàng',
-      phone: license.phone || '',
-      key: license.key || '',
-      expiresAt: license.expiresAt || '',
-      status: license.isRevoked ? 'revoked' : license.isSuspended ? 'suspended' : 'active',
-      createdAt: license.createdAt || new Date().toISOString(),
-      notes: license.notes || '',
-      source: 'Gia Long FB Web App Admin',
-    };
-    const resp = await fetch(targetUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    return resp.ok;
-  } catch (err) {
-    console.warn('[Google Drive Sync Server] Lỗi gửi webhook license:', err);
-    return false;
-  }
+async function syncLicenseToGoogleDrive(license: any): Promise<boolean> {
+  // Đồng bộ duy nhất trực tiếp 100% qua Google Drive JSON (gialong_fb_data.json)
+  return true;
 }
 
 app.get('/api/settings', (_req: Request, res: Response) => {
