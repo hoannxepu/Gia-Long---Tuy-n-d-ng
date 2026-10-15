@@ -556,7 +556,10 @@ async function checkLicenseStatus(forceRemote = false) {
       const serverCandidates = getCandidateServerUrls(primaryBase);
       for (const baseUrl of serverCandidates) {
         try {
-          const resp = await fetch(`${baseUrl}/api/check?machine_id=${encodeURIComponent(deviceId)}`, { cache: 'no-store' });
+          const resp = await fetch(`${baseUrl}/api/check?machine_id=${encodeURIComponent(deviceId)}`, {
+            cache: 'no-store',
+            signal: AbortSignal.timeout(2500),
+          });
           if (!resp.ok) continue;
           const checkRes = await resp.json();
           if (checkRes && (checkRes.status === 'revoked' || checkRes.isRevoked || checkRes.status === 'suspended' || checkRes.isSuspended)) {
