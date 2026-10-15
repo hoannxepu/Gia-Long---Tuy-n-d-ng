@@ -23,7 +23,9 @@ import {
   Package,
   Clock,
   RefreshCw,
-  AlertCircle
+  AlertCircle,
+  Cloud,
+  HardDrive
 } from 'lucide-react';
 
 interface CustomerDownloadPortalProps {
@@ -200,6 +202,45 @@ export function CustomerDownloadPortal({
     setTimeout(() => setPortalToast(null), 3500);
   };
 
+  const [isCheckingConnection, setIsCheckingConnection] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<{
+    serverOk: boolean;
+    driveOk: boolean;
+    lastChecked: string;
+    message: string;
+  } | null>(null);
+
+  const testConnectionSignal = async () => {
+    setIsCheckingConnection(true);
+    try {
+      const res = await fetch('/api/settings', { cache: 'no-store' });
+      const serverOk = res.ok;
+      let driveOk = false;
+      try {
+        const ordRes = await fetch('/api/orders/pending-count', { cache: 'no-store' });
+        driveOk = ordRes.ok;
+      } catch (e) {}
+
+      setConnectionStatus({
+        serverOk,
+        driveOk,
+        lastChecked: new Date().toLocaleTimeString('vi-VN'),
+        message: serverOk ? '✓ Tín hiệu kết nối máy chủ Cloud & đồng bộ hoạt động bình thường!' : '⚠️ Mất tín hiệu kết nối máy chủ.',
+      });
+      showToast(serverOk ? '✓ Kết nối Cloud & Server hoạt động bình thường!' : '⚠️ Mất tín hiệu kết nối máy chủ!', serverOk ? 'success' : 'error');
+    } catch (err: any) {
+      setConnectionStatus({
+        serverOk: false,
+        driveOk: false,
+        lastChecked: new Date().toLocaleTimeString('vi-VN'),
+        message: 'Lỗi kết nối: ' + (err.message || 'Không có tín hiệu'),
+      });
+      showToast('⚠️ Không tìm thấy tín hiệu kết nối giữa các bên!', 'error');
+    } finally {
+      setIsCheckingConnection(false);
+    }
+  };
+
   const currentVersion = packageInfo?.version || '1.0.4';
   const fileSizeKb = packageInfo?.sizeKb || 335;
   const zaloUrl = adminZaloUrl || 'https://zalo.me/0869029310';
@@ -315,6 +356,36 @@ Hỗ trợ Zalo: 0869.029.310 (Gia Long - FB)`;
           <span className="flex items-center gap-1">
             <Laptop className="w-3 h-3 text-sky-400" /> Chrome, Edge, Cốc Cốc
           </span>
+        </div>
+      </section>
+
+      {/* 1.5. TÍN HIỆU KẾT NỐI & ĐỒNG BỘ CLOUD (ADMIN & NGƯỜI DÙNG) */}
+      <section className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 sm:p-4 shadow-md flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+        <div className="flex items-center gap-2.5">
+          <div className="p-2 rounded-xl bg-blue-500/15 border border-blue-500/30 text-blue-400">
+            <Cloud className="w-4 h-4 text-sky-400" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-white">Tín Hiệu Kết Nối &amp; Đồng Bộ Cloud (Admin &harr; Người Dùng)</span>
+              <span className={`w-2 h-2 rounded-full ${connectionStatus?.serverOk ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
+            </div>
+            <p className="text-[11px] text-slate-400">
+              {connectionStatus ? connectionStatus.message : 'Hệ thống tự động đồng bộ qua Cloud API / Google Drive. Bấm kiểm tra để xác thực tín hiệu.'}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={testConnectionSignal}
+            disabled={isCheckingConnection}
+            className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-sky-300 border border-sky-500/30 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer active:scale-95"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isCheckingConnection ? 'animate-spin' : ''}`} />
+            <span>{isCheckingConnection ? 'Đang kiểm tra...' : 'Kiểm tra tín hiệu'}</span>
+          </button>
         </div>
       </section>
 

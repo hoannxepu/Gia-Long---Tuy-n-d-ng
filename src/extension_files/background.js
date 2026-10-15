@@ -29,11 +29,9 @@ function startKeepAlive() {
   keepAliveTimer = setInterval(() => {
     chrome.runtime.getPlatformInfo(() => {});
     keepAliveCounter++;
-    // Định kỳ 30s (2 lần tick) tự động đồng bộ đơn hàng & kích hoạt mã mới từ máy chủ Quản trị
-    if (keepAliveCounter % 2 === 0) {
-      fetchMyOrdersAndSync().catch(() => {});
-    }
-  }, 15000);
+    // Định kỳ mỗi 5s tự động đồng bộ ẩn đơn hàng & trạng thái bản quyền từ máy chủ / cloud
+    fetchMyOrdersAndSync().catch(() => {});
+  }, 5000);
 }
 
 function stopKeepAlive() {
@@ -235,10 +233,10 @@ function startFastLicensePolling(machineId, maxSeconds = 300) {
     fastPollInterval = null;
   }
   fastPollSecondsElapsed = 0;
-  console.log(`[Fast Polling D1] 🚀 Bắt đầu chế độ kiểm tra siêu tốc (3 giây/lần) cho máy: ${machineId}...`);
+  console.log(`[Fast Polling D1] 🚀 Bắt đầu chế độ kiểm tra siêu tốc (2 giây/lần) cho máy: ${machineId}...`);
 
   fastPollInterval = setInterval(async () => {
-    fastPollSecondsElapsed += 3;
+    fastPollSecondsElapsed += 2;
     if (fastPollSecondsElapsed >= maxSeconds) {
       console.log('[Fast Polling D1] Đã kết thúc chu kỳ kiểm tra nhanh (5 phút). Chuyển sang chế độ chạy nền.');
       clearInterval(fastPollInterval);
@@ -303,7 +301,7 @@ function startFastLicensePolling(machineId, maxSeconds = 300) {
         } catch (err) {}
       }
     } catch (e) {}
-  }, 3000);
+  }, 2000);
 }
 
 // Kiểm tra ngầm với máy chủ sau mỗi 60 phút mà không làm gián đoạn người dùng
