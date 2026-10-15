@@ -2207,18 +2207,102 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
       return jsonResponse({ success: true, message: `✓ Đã đồng bộ thành công ${sentCount} đơn hàng sang Google Sheet trên Google Drive!`, count: sentCount });
     }
 
-    // ROUTE: Kéo toàn bộ đơn hàng và bản quyền từ Google Drive về trang Admin (Đáp ứng 2 chiều)
+// Helper trích xuất File ID từ link Google Drive
+function extractGoogleDriveFileId(link: string): string | null {
+  if (!link) return null;
+  const match = link.match(/\/d\/([a-zA-Z0-9_-]+)/) || link.match(/id=([a-zA-Z0-9_-]+)/);
+  if (match) return match[1];
+  if (/^[a-zA-Z0-9_-]{25,}$/.test(link.trim())) return link.trim();
+  return null;
+}
+
+    // ROUTE: Kéo toàn bộ đơn hàng và bản quyền từ Google Drive về trang Admin (Đáp ứng 2 chiều & File JSON Google Drive)
     if (pathname === '/api/admin/google-drive/pull' && (method === 'GET' || method === 'POST')) {
-      const gUrl = body.webhookUrl || edgeSettings.googleDriveSheetWebhookUrl || env.GOOGLE_DRIVE_WEBHOOK_URL;
-      if (!gUrl || !gUrl.startsWith('http')) {
-        return jsonResponse({ success: false, error: 'Chưa cấu hình Webhook URL của Google Sheet!' }, 400);
+      const gUrl = body.driveUrlOrId || body.webhookUrl || edgeSettings.googleDriveJsonLink || edgeSettings.googleDriveSheetWebhookUrl || env.GOOGLE_DRIVE_WEBHOOK_URL;
+      if (!gUrl || (!gUrl.startsWith('http') && !extractGoogleDriveFileId(gUrl))) {
+        return jsonResponse({ success: false, error: 'Chưa cấu hình link file JSON Google Drive hoặc Webhook!' }, 400);
       }
+
+      const fileId = extractGoogleDriveFileId(gUrl);
+      if (gUrl.includes('drive.google.com') || gUrl.includes('docs.google.com') || fileId || gUrl.endsWith('.json')) {
+        try {
+          const downloadUrl = fileId
+            ? `https://drive.google.com/uc?export=download&id=${fileId}`
+            : gUrl;
+          const jsonResp = await fetch(downloadUrl);
+          const text = await jsonResp.text();
+          if (!jsonResp.ok || text.trim().startsWith('<!DOCTYPE') || text.trim().startsWith('<html')) {
+            return jsonResponse({
+              success: false,
+              error: 'Không thể tải file JSON từ Google Drive (File có thể đang ở chế độ Riêng tư). Hãy đảm bảo quyền chia sẻ Google Drive là "Bất kỳ ai có liên kết đều có thể xem"!',
+            }, 400);
+          }
+          let gData: any;
+          try {
+            gData = JSON.parse(text);
+          } catch (e) {
+            return jsonResponse({ success: false, error: 'File trên Google Drive không đúng định dạng JSON!' }, 400);
+          }
+
+          let pOrders = 0;
+          let pLicenses = 0;
+          if (Array.isArray(gData.orders)) {
+            const existingIds = new Set(edgeOrders.map((o) => o.id));
+            for (const po of gData.orders) {
+              if (!existingIds.has(po.id)) {
+                edgeOrders.unshift(po);
+                pOrders++;
+              }
+            }
+          }
+          if (Array.isArray(gData.licenses)) {
+            const existingLicKeys = new Set(edgeLicenses.map((l) => l.devices?.[0]?.deviceId?.toLowerCase()));
+            for (const pl of gData.licenses) {
+              const d = pl.devices?.[0]?.deviceId?.toLowerCase();
+              if (d && !existingLicKeys.has(d)) {
+                edgeLicenses.unshift(pl);
+                pLicenses++;
+              }
+            }
+          }
+          if (Array.isArray(gData.history)) {
+            for (const h of gData.history) {
+              edgeHistory.unshift(h);
+            }
+          }
+
+          edgeSettings.googleDriveJsonLink = gUrl;
+          if (d1) {
+            try {
+              await d1.prepare(`INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)`).bind('googleDriveJsonLink', JSON.stringify(gUrl)).run();
+            } catch (e) {}
+          }
+          await syncKV();
+
+          return jsonResponse({
+            success: true,
+            message: `✓ Đã nạp thành công từ Google Drive (Thêm ${pOrders} đơn, ${pLicenses} bản quyền)!`,
+            orders: edgeOrders,
+            licenses: edgeLicenses,
+            history: edgeHistory,
+          });
+        } catch (err: any) {
+          return jsonResponse({ success: false, error: 'Lỗi tải file JSON từ Google Drive: ' + err.message }, 500);
+        }
+      }
+
       try {
         const resp = await fetch(`${gUrl}?action=get_all`);
-        if (!resp.ok) {
-          return jsonResponse({ success: false, error: `Không thể kết nối đến Google Drive (HTTP ${resp.status})` }, 500);
+        const text = await resp.text();
+        if (!resp.ok || text.trim().startsWith('<!DOCTYPE') || text.trim().startsWith('<html')) {
+          return jsonResponse({ success: false, error: 'Không thể kết nối đến Google Drive Webhook. Vui lòng kiểm tra lại URL!' }, 500);
         }
-        const gData: any = await resp.json();
+        let gData: any;
+        try {
+          gData = JSON.parse(text);
+        } catch (e) {
+          return jsonResponse({ success: false, error: 'Phản hồi từ Google Sheet không đúng định dạng JSON!' }, 500);
+        }
         const ordersRaw = Array.isArray(gData.orders) ? gData.orders : [];
         const licensesRaw = Array.isArray(gData.licenses) ? gData.licenses : [];
 
