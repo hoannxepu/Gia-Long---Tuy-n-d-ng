@@ -2075,12 +2075,12 @@ function saveSettings(data: any) {
   } catch (e) {}
 }
 
-async function syncOrderToGoogleDrive(order: any): Promise<boolean> {
+async function syncOrderToGoogleDrive(order: any, webhookUrl?: string): Promise<boolean> {
   // Đồng bộ duy nhất trực tiếp 100% qua Google Drive JSON (gialong_fb_data.json)
   return true;
 }
 
-async function syncLicenseToGoogleDrive(license: any): Promise<boolean> {
+async function syncLicenseToGoogleDrive(license: any, webhookUrl?: string): Promise<boolean> {
   // Đồng bộ duy nhất trực tiếp 100% qua Google Drive JSON (gialong_fb_data.json)
   return true;
 }
