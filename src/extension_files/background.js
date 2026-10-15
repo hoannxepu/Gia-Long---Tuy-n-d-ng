@@ -396,6 +396,46 @@ async function handleCreateOrder(payload) {
     if (orderResult) break;
   }
 
+  // ĐỒNG THỜI: Đẩy trực tiếp 2 kênh sang Webhook Google Drive / Google Sheet nếu có
+  try {
+    const st = await chrome.storage.local.get(['googleDriveSheetWebhookUrl']);
+    let gdriveUrl = st.googleDriveSheetWebhookUrl;
+    if (!gdriveUrl) {
+      try {
+        const sResp = await fetch(`${primaryBase}/api/settings`, { signal: AbortSignal.timeout(2000) });
+        if (sResp.ok) {
+          const sData = await sResp.json();
+          if (sData?.settings?.googleDriveSheetWebhookUrl) {
+            gdriveUrl = sData.settings.googleDriveSheetWebhookUrl;
+            await chrome.storage.local.set({ googleDriveSheetWebhookUrl: gdriveUrl });
+          }
+        }
+      } catch (e) {}
+    }
+    if (gdriveUrl && gdriveUrl.startsWith('http')) {
+      fetch(gdriveUrl, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          event: 'ORDER_UPDATE',
+          id: payload.id,
+          timestamp: new Date().toISOString(),
+          timeFormatted: new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }),
+          clientName: payload.clientName || 'Khách Đặt Mua (Extension)',
+          phone: payload.phone || '',
+          pkgName: payload.pkgName || '',
+          price: payload.price || '',
+          deviceId: payload.deviceId || '',
+          status: 'pending',
+          note: payload.note || '',
+          source: 'Gia Long FB Extension (Trực Tiếp Khách Hàng)',
+        }),
+      }).catch(() => {});
+      console.log('[Gia Long - FB Background] ✓ Đã gửi đơn đồng thời sang Google Drive Webhook:', gdriveUrl);
+    }
+  } catch (e) {}
+
   const createdOrder = orderResult?.order || {
     id: payload.id,
     pkgName: payload.pkgName || 'Gói Bản Quyền',

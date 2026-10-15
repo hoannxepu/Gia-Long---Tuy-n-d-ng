@@ -340,6 +340,12 @@ app.post(['/api/register', '/register'], (req: Request, res: Response) => {
   orders.unshift(newOrder);
   saveOrders(orders);
 
+  // Tự động đồng bộ sang Google Drive / Google Sheets nếu bật
+  const currentSettings = loadSettings();
+  if (currentSettings.googleDriveSyncEnabled !== false && currentSettings.googleDriveSheetWebhookUrl) {
+    syncOrderToGoogleDrive(newOrder, currentSettings.googleDriveSheetWebhookUrl);
+  }
+
   res.json({
     success: true,
     message: 'Đăng ký gói thành công, vui lòng chờ Quản trị viên duyệt!',
@@ -424,6 +430,13 @@ app.post(['/api/admin/approve', '/admin/approve'], requireAdmin, (req: Request, 
     amount: price || pendingOrd?.price || '0đ',
     notes: `Duyệt cấp Token D1 và kích hoạt: ${targetDev}`,
   });
+
+  // Tự động đồng bộ sang Google Drive / Google Sheets nếu bật
+  const currentSettings = loadSettings();
+  if (currentSettings.googleDriveSyncEnabled !== false && currentSettings.googleDriveSheetWebhookUrl) {
+    if (pendingOrd) syncOrderToGoogleDrive(pendingOrd, currentSettings.googleDriveSheetWebhookUrl);
+    if (matchedLic) syncLicenseToGoogleDrive(matchedLic, currentSettings.googleDriveSheetWebhookUrl);
+  }
 
   res.json({
     success: true,
@@ -2033,12 +2046,7 @@ app.post('/api/admin/orders/delete', requireAdmin, (req: Request, res: Response)
 // Cài đặt hệ thống (Lưu link Chrome Web Store Unlisted & Zalo)
 const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 function loadSettings() {
-  try {
-    if (fs.existsSync(SETTINGS_FILE)) {
-      return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf-8'));
-    }
-  } catch (e) {}
-  return {
+  const defaults = {
     chromeStoreUrl: 'https://chromewebstore.google.com/detail/gia-long-fb/',
     edgeStoreUrl: 'https://microsoftedge.microsoft.com/addons/detail/gia-long-fb/blpkghkjimacggjlgiklkaddldbcnebo',
     edgeStoreId: '0RDCKC6WT538',
@@ -2051,6 +2059,13 @@ function loadSettings() {
     googleDriveSheetWebhookUrl: process.env.GOOGLE_DRIVE_WEBHOOK_URL || '',
     googleDriveSyncEnabled: true,
   };
+  try {
+    if (fs.existsSync(SETTINGS_FILE)) {
+      const parsed = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf-8'));
+      return { ...defaults, ...parsed };
+    }
+  } catch (e) {}
+  return defaults;
 }
 
 function saveSettings(data: any) {
@@ -2085,7 +2100,37 @@ async function syncOrderToGoogleDrive(order: any, webhookUrl?: string): Promise<
     });
     return resp.ok;
   } catch (err) {
-    console.warn('[Google Drive Sync Server] Lỗi gửi webhook:', err);
+    console.warn('[Google Drive Sync Server] Lỗi gửi webhook order:', err);
+    return false;
+  }
+}
+
+async function syncLicenseToGoogleDrive(license: any, webhookUrl?: string): Promise<boolean> {
+  const settings = loadSettings();
+  const targetUrl = webhookUrl || settings.googleDriveSheetWebhookUrl || process.env.GOOGLE_DRIVE_WEBHOOK_URL;
+  if (!targetUrl || !targetUrl.startsWith('http')) return false;
+  try {
+    const devId = license.devices?.[0]?.deviceId || (license.id ? String(license.id).replace('lic_', '') : '');
+    const payload = {
+      event: 'LICENSE_UPDATE',
+      deviceId: devId,
+      clientName: license.clientName || 'Khách Hàng',
+      phone: license.phone || '',
+      key: license.key || '',
+      expiresAt: license.expiresAt || '',
+      status: license.isRevoked ? 'revoked' : license.isSuspended ? 'suspended' : 'active',
+      createdAt: license.createdAt || new Date().toISOString(),
+      notes: license.notes || '',
+      source: 'Gia Long FB Web App Admin',
+    };
+    const resp = await fetch(targetUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return resp.ok;
+  } catch (err) {
+    console.warn('[Google Drive Sync Server] Lỗi gửi webhook license:', err);
     return false;
   }
 }
@@ -2150,7 +2195,7 @@ app.post('/api/admin/google-drive/test', requireAdmin, async (req: Request, res:
   }
 });
 
-// ROUTE: Đồng bộ toàn bộ đơn hàng sang Google Drive
+// ROUTE: Đồng bộ toàn bộ đơn hàng và bản quyền sang Google Drive
 app.post('/api/admin/google-drive/sync-all', requireAdmin, async (req: Request, res: Response) => {
   const { webhookUrl } = req.body;
   const settings = loadSettings();
@@ -2159,14 +2204,27 @@ app.post('/api/admin/google-drive/sync-all', requireAdmin, async (req: Request, 
     return res.status(400).json({ success: false, error: 'Chưa nhập Webhook URL của Google Sheet!' });
   }
   const orders = loadOrders();
-  let count = 0;
+  let countOrders = 0;
   for (const ord of orders) {
     try {
       await syncOrderToGoogleDrive(ord, targetUrl);
-      count++;
+      countOrders++;
     } catch (e) {}
   }
-  res.json({ success: true, message: `✓ Đã đồng bộ thành công ${count} đơn hàng sang Google Sheet trên Google Drive!`, count });
+  const licenses = loadLicenses();
+  let countLicenses = 0;
+  for (const lic of licenses) {
+    try {
+      await syncLicenseToGoogleDrive(lic, targetUrl);
+      countLicenses++;
+    } catch (e) {}
+  }
+  res.json({
+    success: true,
+    message: `✓ Đã đồng bộ thành công ${countOrders} đơn hàng và ${countLicenses} bản quyền sang Google Sheet trên Google Drive!`,
+    ordersCount: countOrders,
+    licensesCount: countLicenses,
+  });
 });
 
 // ROUTE: Kéo toàn bộ đơn hàng và bản quyền từ Google Drive về trang Admin (Đáp ứng 2 chiều)

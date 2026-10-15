@@ -1993,6 +1993,36 @@ window.proceedSendOrder = async function() {
     } catch (e) {}
   });
 
+  // Gửi trực tiếp sang Google Drive Sheet Webhook nếu có
+  try {
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      chrome.storage.local.get(['googleDriveSheetWebhookUrl'], (res) => {
+        const gdriveUrl = res?.googleDriveSheetWebhookUrl;
+        if (gdriveUrl && gdriveUrl.startsWith('http')) {
+          fetch(gdriveUrl, {
+            method: 'POST',
+            mode: 'no-cors',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              event: 'ORDER_UPDATE',
+              id: orderPayload.id,
+              timestamp: new Date().toISOString(),
+              timeFormatted: new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }),
+              clientName: customerName || orderPayload.clientName || 'Khách Đặt Mua (Dashboard)',
+              phone: phone || orderPayload.phone || '',
+              pkgName: pkg.name || orderPayload.pkgName || '',
+              price: pkg.price || orderPayload.price || '',
+              deviceId: devId || orderPayload.deviceId || '',
+              status: 'pending',
+              note: orderPayload.note || '',
+              source: 'Gia Long FB Extension Dashboard',
+            }),
+          }).catch(() => {});
+        }
+      });
+    }
+  } catch (e) {}
+
   // 3. Khởi động kiểm tra nhanh phía Dashboard (3s/lần trong 5 phút)
   let dashFastPollCount = 0;
   const dashFastPollInterval = setInterval(async () => {
