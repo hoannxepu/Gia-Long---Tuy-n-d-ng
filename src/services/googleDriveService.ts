@@ -1,74 +1,6 @@
 // src/services/googleDriveService.ts
-// Tự động kết nối, tạo và đồng bộ file JSON trực tiếp trên Google Drive của người dùng (tương tự thap_tai_san_data.json)
-import { initializeApp, getApps } from 'firebase/app';
-import {
-  getAuth,
-  signInWithPopup,
-  GoogleAuthProvider,
-  onAuthStateChanged,
-  User,
-  signOut,
-} from 'firebase/auth';
-import firebaseConfig from '../../firebase-applet-config.json';
-
-// Khởi tạo Firebase App nếu chưa có
-const app = getApps().length > 0 ? getApps()[0] : initializeApp(firebaseConfig);
-export const auth = getAuth(app);
-
-// Provider Google với quyền drive.file
-const provider = new GoogleAuthProvider();
-provider.addScope('https://www.googleapis.com/auth/drive.file');
-
-// In-memory token cache (Không lưu localStorage theo chuẩn bảo mật)
-let cachedAccessToken: string | null = null;
-let isSigningIn = false;
-
-export const initGoogleDriveAuth = (
-  onAuthSuccess?: (user: User, token: string) => void,
-  onAuthFailure?: () => void
-) => {
-  return onAuthStateChanged(auth, async (user: User | null) => {
-    if (user) {
-      if (cachedAccessToken) {
-        if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
-      } else if (!isSigningIn) {
-        cachedAccessToken = null;
-        if (onAuthFailure) onAuthFailure();
-      }
-    } else {
-      cachedAccessToken = null;
-      if (onAuthFailure) onAuthFailure();
-    }
-  });
-};
-
-export const googleSignInForDrive = async (): Promise<{ user: User; accessToken: string } | null> => {
-  try {
-    isSigningIn = true;
-    const result = await signInWithPopup(auth, provider);
-    const credential = GoogleAuthProvider.credentialFromResult(result);
-    if (!credential?.accessToken) {
-      throw new Error('Không lấy được Access Token từ Google Auth');
-    }
-
-    cachedAccessToken = credential.accessToken;
-    return { user: result.user, accessToken: cachedAccessToken };
-  } catch (error: any) {
-    console.error('[Google Drive] Lỗi đăng nhập:', error);
-    throw error;
-  } finally {
-    isSigningIn = false;
-  }
-};
-
-export const getDriveAccessToken = async (): Promise<string | null> => {
-  return cachedAccessToken;
-};
-
-export const googleLogoutFromDrive = async () => {
-  await signOut(auth);
-  cachedAccessToken = null;
-};
+// Tự động kết nối, tạo và đồng bộ file JSON trực tiếp trên Google Drive qua Google Identity Services (GIS)
+// Hoạt động 100% không phụ thuộc thư viện nặng, tương thích tuyệt đối với Cloudflare Pages & Node.js
 
 export interface DriveFileInfo {
   id: string;
@@ -77,14 +9,130 @@ export interface DriveFileInfo {
   modifiedTime?: string;
 }
 
+export interface DriveUserProfile {
+  email?: string;
+  name?: string;
+  displayName?: string;
+  picture?: string;
+}
+
 const DRIVE_JSON_FILE_NAME = 'gialong_fb_data.json';
+const OAUTH_CLIENT_ID = '404841178461-8qo1bnudgf8rvqr7d0qivrqtdonfqebj.apps.googleusercontent.com';
+
+let cachedAccessToken: string | null = null;
+let cachedUser: DriveUserProfile | null = null;
+
+// Tự động nạp thư viện Google Identity Services (GIS) chính thức của Google
+function loadGsiScript(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (typeof window === 'undefined') return resolve();
+    if ((window as any).google?.accounts?.oauth2) {
+      return resolve();
+    }
+    const existingScript = document.getElementById('google-gsi-client');
+    if (existingScript) {
+      existingScript.addEventListener('load', () => resolve());
+      return;
+    }
+    const script = document.createElement('script');
+    script.id = 'google-gsi-client';
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.defer = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error('Không thể tải Google Identity Services từ Google'));
+    document.head.appendChild(script);
+  });
+}
+
+export const initGoogleDriveAuth = (
+  onAuthSuccess?: (user: DriveUserProfile, token: string) => void,
+  onAuthFailure?: () => void
+) => {
+  // Kiểm tra token đã lưu trong phiên làm việc
+  if (cachedAccessToken && cachedUser) {
+    if (onAuthSuccess) onAuthSuccess(cachedUser, cachedAccessToken);
+  } else {
+    if (onAuthFailure) onAuthFailure();
+  }
+  return () => {};
+};
+
+// Đăng nhập Google và cấp quyền drive.file
+export const googleSignInForDrive = async (): Promise<{ user: DriveUserProfile; accessToken: string } | null> => {
+  await loadGsiScript();
+  const googleObj = (window as any).google;
+  if (!googleObj?.accounts?.oauth2) {
+    throw new Error('Google Identity Services chưa sẵn sàng');
+  }
+
+  return new Promise((resolve, reject) => {
+    try {
+      const client = googleObj.accounts.oauth2.initTokenClient({
+        client_id: OAUTH_CLIENT_ID,
+        scope: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email',
+        callback: async (resp: any) => {
+          if (resp.error) {
+            return reject(new Error(resp.error_description || resp.error));
+          }
+          if (!resp.access_token) {
+            return reject(new Error('Không nhận được Access Token từ Google'));
+          }
+
+          cachedAccessToken = resp.access_token;
+
+          // Lấy thông tin user
+          let userProfile: DriveUserProfile = {
+            displayName: 'Tài khoản Google',
+            email: 'google-drive-user',
+          };
+
+          try {
+            const userRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+              headers: { Authorization: `Bearer ${resp.access_token}` },
+            });
+            if (userRes.ok) {
+              const uData = await userRes.json();
+              userProfile = {
+                displayName: uData.name || uData.email,
+                name: uData.name,
+                email: uData.email,
+                picture: uData.picture,
+              };
+            }
+          } catch (e) {}
+
+          cachedUser = userProfile;
+          resolve({ user: userProfile, accessToken: resp.access_token });
+        },
+      });
+
+      client.requestAccessToken({ prompt: 'consent' });
+    } catch (err: any) {
+      reject(err);
+    }
+  });
+};
+
+export const getDriveAccessToken = async (): Promise<string | null> => {
+  return cachedAccessToken;
+};
+
+export const googleLogoutFromDrive = async () => {
+  if (cachedAccessToken && (window as any).google?.accounts?.oauth2) {
+    try {
+      (window as any).google.accounts.oauth2.revoke(cachedAccessToken, () => {});
+    } catch (e) {}
+  }
+  cachedAccessToken = null;
+  cachedUser = null;
+};
 
 // 1. Tìm hoặc Tự Động Sinh File JSON trên Google Drive
 export const findOrCreateDriveJsonFile = async (
   accessToken: string,
   initialContent?: any
 ): Promise<DriveFileInfo> => {
-  // Tìm xem file đã có trên Drive chưa
   const query = encodeURIComponent(`name='${DRIVE_JSON_FILE_NAME}' and trashed=false`);
   const listUrl = `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name,webViewLink,modifiedTime)&spaces=drive`;
 
@@ -98,11 +146,10 @@ export const findOrCreateDriveJsonFile = async (
 
   const searchData = await searchRes.json();
   if (Array.isArray(searchData.files) && searchData.files.length > 0) {
-    // Đã tồn tại file trên Drive
     return searchData.files[0];
   }
 
-  // Chưa tồn tại -> TỰ ĐỘNG TẠO FILE JSON MỚI TRÊN GOOGLE DRIVE
+  // Tự động tạo file mới
   const fileContent = initialContent || {
     app: 'Gia Long - FB',
     createdAt: new Date().toISOString(),
@@ -203,17 +250,14 @@ export const syncAppWithGoogleDrive = async (
   ordersCount: number;
   licensesCount: number;
 }> => {
-  // Lấy dữ liệu hiện tại từ Server App
   const localRes = await fetch('/api/database/export.json');
   if (!localRes.ok) {
     throw new Error('Không thể lấy dữ liệu nội tại từ Server');
   }
   const localData = await localRes.json();
 
-  // Tìm hoặc tạo file trên Drive
   const fileInfo = await findOrCreateDriveJsonFile(accessToken, localData);
 
-  // Đọc dữ liệu hiện có trên file Drive (nếu có để hợp nhất)
   let driveData: any = null;
   try {
     driveData = await readDriveJsonContent(accessToken, fileInfo.id);
@@ -221,7 +265,6 @@ export const syncAppWithGoogleDrive = async (
     driveData = null;
   }
 
-  // Hợp nhất đơn hàng (orders)
   const localOrders: any[] = Array.isArray(localData.orders) ? localData.orders : [];
   const driveOrders: any[] = Array.isArray(driveData?.orders) ? driveData.orders : [];
   const orderMap = new Map<string, any>();
@@ -230,7 +273,6 @@ export const syncAppWithGoogleDrive = async (
   });
   const mergedOrders = Array.from(orderMap.values());
 
-  // Hợp nhất bản quyền (licenses)
   const localLics: any[] = Array.isArray(localData.licenses) ? localData.licenses : [];
   const driveLics: any[] = Array.isArray(driveData?.licenses) ? driveData.licenses : [];
   const licMap = new Map<string, any>();
@@ -249,10 +291,8 @@ export const syncAppWithGoogleDrive = async (
     settings: localData.settings || driveData?.settings || {},
   };
 
-  // Cập nhật lại lên Google Drive
   const updatedInfo = await updateDriveJsonContent(accessToken, fileInfo.id, mergedPayload);
 
-  // Đồng thời nạp lại vào Server nội tại để cả 2 bên luôn đồng nhất 100%
   await fetch('/api/admin/restore-json', {
     method: 'POST',
     headers: {

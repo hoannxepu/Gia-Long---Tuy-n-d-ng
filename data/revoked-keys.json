@@ -1,5 +1,30 @@
 [
   {
+    "key": "ORD_1792067831539_IWK1",
+    "reason": "Đơn hàng liên kết với bản quyền đã xóa",
+    "revokedAt": "2026-10-15T12:37:11.574Z"
+  },
+  {
+    "key": "DEV:DEVICE_SIGNAL_MV9IX0HM",
+    "reason": "Quản trị viên đã xóa thiết bị này khỏi danh sách",
+    "revokedAt": "2026-10-15T12:37:11.574Z"
+  },
+  {
+    "key": "DEVICE_SIGNAL_MV9IX0HM",
+    "reason": "Quản trị viên đã xóa thiết bị này khỏi danh sách",
+    "revokedAt": "2026-10-15T12:37:11.574Z"
+  },
+  {
+    "key": "LIC_1792067831551_X0NPC",
+    "reason": "Quản trị viên đã xóa người dùng khỏi danh sách",
+    "revokedAt": "2026-10-15T12:37:11.574Z"
+  },
+  {
+    "key": "GLFB-VIP-X0NPC",
+    "reason": "Quản trị viên đã xóa người dùng khỏi danh sách",
+    "revokedAt": "2026-10-15T12:37:11.574Z"
+  },
+  {
     "key": "ORD_1792060053288_UZ3F",
     "reason": "Đơn hàng liên kết với bản quyền đã xóa",
     "revokedAt": "2026-10-15T10:27:33.325Z"
