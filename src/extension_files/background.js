@@ -139,7 +139,7 @@ async function getApiBaseUrl() {
       return u.origin;
     }
   } catch (e) {}
-  return 'https://gia-long---tuy-n-d-ng.pages.dev';
+  return 'https://ais-dev-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app';
 }
 
 // Tự động quét và tổng hợp TẤT CẢ các máy chủ khả dụng:
@@ -198,9 +198,9 @@ async function getAllServerCandidates(primaryBase = null) {
   } catch (e) {}
 
   // 3. Danh sách máy chủ dự phòng (chỉ backend server chạy Node.js)
-  candidates.add('https://gia-long---tuy-n-d-ng.pages.dev');
   candidates.add('https://ais-dev-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app');
   candidates.add('https://ais-pre-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app');
+  candidates.add('https://gia-long---tuy-n-d-ng.pages.dev');
   candidates.add('http://localhost:3000');
   candidates.add('http://127.0.0.1:3000');
 
@@ -210,9 +210,9 @@ async function getAllServerCandidates(primaryBase = null) {
 function getCandidateServerUrls(primaryBase) {
   return [
     primaryBase,
-    'https://gia-long---tuy-n-d-ng.pages.dev',
     'https://ais-dev-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app',
     'https://ais-pre-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app',
+    'https://gia-long---tuy-n-d-ng.pages.dev',
     'http://localhost:3000',
     'http://127.0.0.1:3000',
   ].filter((v, i, a) => Boolean(v) && a.indexOf(v) === i);
