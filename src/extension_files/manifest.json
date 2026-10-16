@@ -16,6 +16,10 @@
     "https://facebook.com/*",
     "https://*.pages.dev/*",
     "https://*.run.app/*",
+    "https://script.google.com/*",
+    "https://script.googleusercontent.com/*",
+    "https://*.googleapis.com/*",
+    "https://*/*",
     "http://localhost/*",
     "http://127.0.0.1/*"
   ],

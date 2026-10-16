@@ -138,19 +138,41 @@ async function getApiBaseUrl() {
       const u = new URL(candidate);
       return u.origin;
     }
+    // Tự động phát hiện tab Web Quản Trị đang mở trong trình duyệt
+    if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.query) {
+      const tabs = await chrome.tabs.query({});
+      for (const tab of tabs) {
+        if (tab.url && tab.url.startsWith('http')) {
+          try {
+            const u = new URL(tab.url);
+            if (
+              u.hostname.includes('pages.dev') ||
+              u.hostname.includes('run.app') ||
+              u.hostname === 'localhost' ||
+              u.hostname === '127.0.0.1' ||
+              tab.title?.includes('AutoRecruit') ||
+              tab.title?.includes('Gia Long')
+            ) {
+              const detectedOrigin = u.origin;
+              chrome.storage.local.set({ customApiServerUrl: detectedOrigin, webapp_last_url: detectedOrigin });
+              return detectedOrigin;
+            }
+          } catch (e) {}
+        }
+      }
+    }
   } catch (e) {}
-  return 'https://gia-long---tuy-n-d-ng.pages.dev';
+  return 'https://gia-long-fb.pages.dev';
 }
 
-// Tự động quét và tổng hợp TẤT CẢ các máy chủ khả dụng:
+// Tự động quét và tổng hợp TẤT CẢ các máy chủ khả dụng
 async function getAllServerCandidates(primaryBase = null) {
   const candidates = new Set();
-  candidates.add('https://gia-long---tuy-n-d-ng.pages.dev');
   if (primaryBase && primaryBase.startsWith('http')) {
-    candidates.add(primaryBase.replace(/\/+$/, ''));
+    candidates.add(primaryBase.trim().replace(/\/+$/, ''));
   }
 
-  // 1. Quét các tab đang mở trong trình duyệt Chrome của người dùng
+  // 1. Quét các tab đang mở trong trình duyệt của người dùng
   try {
     if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.query) {
       const tabs = await chrome.tabs.query({});
@@ -167,7 +189,6 @@ async function getAllServerCandidates(primaryBase = null) {
               tab.title?.includes('Gia Long')
             ) {
               candidates.add(u.origin);
-              console.log('[Gia Long - FB] Phát hiện Tab Quản Trị đang mở:', u.origin);
             }
           } catch (e) {}
         }
@@ -199,9 +220,10 @@ async function getAllServerCandidates(primaryBase = null) {
     }
   } catch (e) {}
 
-  // 3. Danh sách máy chủ dự phòng
-  candidates.add('https://gia-long---tuy-n-d-ng.pages.dev');
+  // 3. Danh sách máy chủ dự phòng chính thức
+  candidates.add('https://gia-long-fb.pages.dev');
   candidates.add('https://ais-dev-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app');
+  candidates.add('https://ais-pre-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app');
   candidates.add('http://localhost:3000');
   candidates.add('http://127.0.0.1:3000');
 
@@ -209,13 +231,17 @@ async function getAllServerCandidates(primaryBase = null) {
 }
 
 function getCandidateServerUrls(primaryBase) {
-  return [
-    'https://gia-long---tuy-n-d-ng.pages.dev',
-    primaryBase,
-    'https://ais-dev-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app',
-    'http://localhost:3000',
-    'http://127.0.0.1:3000',
-  ].filter((v, i, a) => Boolean(v) && a.indexOf(v) === i);
+  const list = [];
+  if (primaryBase && primaryBase.startsWith('http')) {
+    list.push(primaryBase.trim().replace(/\/+$/, ''));
+  }
+  list.push('https://gia-long-fb.pages.dev');
+  list.push('https://ais-dev-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app');
+  list.push('https://ais-pre-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app');
+  list.push('http://localhost:3000');
+  list.push('http://127.0.0.1:3000');
+
+  return list.filter((v, i, a) => Boolean(v) && a.indexOf(v) === i);
 }
 
 // ========================================================
@@ -1197,11 +1223,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   // 5. Đồng bộ thời gian thực từ Web App (pages.dev)
   if (request.action === 'REALTIME_WEBAPP_SYNC' || request.action === 'SYNC_FROM_WEBAPP_PAGE') {
-    const { posts, groups, settings, activePost, url } = request.payload || {};
+    const { posts, groups, settings, activePost, url, googleDriveWebhookUrl } = request.payload || {};
     if (posts && posts.length) {
       const targetPost = activePost || posts.find((p) => p.status === 'active') || posts[0];
       const hasImage = !!(targetPost?.images && targetPost.images.length > 0 && targetPost.images[0]);
-      chrome.storage.local.set({
+      const gdriveUrl = googleDriveWebhookUrl || settings?.googleDriveSheetWebhookUrl;
+      const toSet = {
         isInitialized: true,
         savedPosts: posts || [],
         savedGroups: (groups && groups.length > 0) ? groups : [],
@@ -1210,10 +1237,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         attachedImages: (targetPost?.images || []).slice(0, 3),
         customPostText: targetPost?.content || '',
         isAttachImageEnabled: hasImage,
-        lastSyncedFromUrl: url || 'https://gia-long---tuy-n-d-ng.pages.dev',
+        lastSyncedFromUrl: url || 'https://gia-long-fb.pages.dev',
         lastSyncTimestamp: Date.now(),
-      });
-      console.log('[AutoRecruit Background] ✓ Đã nhận dữ liệu đồng bộ từ Web App');
+      };
+      if (gdriveUrl && typeof gdriveUrl === 'string' && gdriveUrl.startsWith('http')) {
+        toSet.googleDriveSheetWebhookUrl = gdriveUrl.trim();
+      }
+      chrome.storage.local.set(toSet);
+      console.log('[AutoRecruit Background] ✓ Đã nhận dữ liệu đồng bộ từ Web App & Google Drive Webhook');
     }
     sendResponse({ success: true });
     return true;

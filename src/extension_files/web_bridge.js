@@ -58,6 +58,8 @@
       if (currentHash === lastSentHash && !customPayload) return;
       lastSentHash = currentHash;
 
+      const gdriveWebhook = localStorage.getItem('glfb_gdrive_webhook') || settings.googleDriveSheetWebhookUrl || '';
+
       chrome.runtime.sendMessage({
         action: 'REALTIME_WEBAPP_SYNC',
         payload: {
@@ -66,6 +68,7 @@
           settings,
           activePost,
           url: window.location.href,
+          googleDriveWebhookUrl: gdriveWebhook,
           timestamp: Date.now(),
         },
       }, () => {

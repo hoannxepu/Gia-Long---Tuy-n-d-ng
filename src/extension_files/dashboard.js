@@ -1534,7 +1534,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   chrome.storage.local.get(['customApiServerUrl'], (res) => {
     if (inputCustomServerUrl) {
-      inputCustomServerUrl.value = res.customApiServerUrl || 'https://gia-long---tuy-n-d-ng.pages.dev';
+      inputCustomServerUrl.value = res.customApiServerUrl || 'https://gia-long-fb.pages.dev';
     }
   });
 
@@ -1548,7 +1548,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   btnResetDefaultServerUrl?.addEventListener('click', () => {
-    const defaultUrl = 'https://gia-long---tuy-n-d-ng.pages.dev';
+    const defaultUrl = 'https://gia-long-fb.pages.dev';
     if (inputCustomServerUrl) inputCustomServerUrl.value = defaultUrl;
     chrome.storage.local.set({ customApiServerUrl: defaultUrl }, () => {
       showToast('✓ Đã khôi phục máy chủ mặc định!');
