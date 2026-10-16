@@ -992,7 +992,7 @@ app.post('/api/admin/licenses/extend', requireAdmin, (req: Request, res: Respons
   const days = parseInt(addDays, 10) || 30;
 
   const licenses = loadLicenses();
-  const found = licenses.find((l) => l.id === id);
+  const found = licenses.find((l) => l.id === id || l.key === id || (id && l.key?.toUpperCase() === String(id).toUpperCase()));
 
   if (!found) {
     return res.status(404).json({ success: false, error: 'Không tìm thấy mã bản quyền!' });
@@ -1055,7 +1055,7 @@ app.post('/api/admin/licenses/extend', requireAdmin, (req: Request, res: Respons
 app.post('/api/admin/licenses/update', requireAdmin, (req: Request, res: Response) => {
   const { id, clientName, phone, expiresAt, maxDevices, notes, planType } = req.body;
   const licenses = loadLicenses();
-  const found = licenses.find((l) => l.id === id);
+  const found = licenses.find((l) => l.id === id || l.key === id || (id && l.key?.toUpperCase() === String(id).toUpperCase()));
 
   if (!found) {
     return res.status(404).json({ success: false, error: 'Không tìm thấy mã bản quyền!' });
@@ -1105,7 +1105,7 @@ app.post('/api/admin/licenses/update', requireAdmin, (req: Request, res: Respons
 app.post('/api/admin/licenses/toggle', requireAdmin, (req: Request, res: Response) => {
   const { id } = req.body;
   const licenses = loadLicenses();
-  const found = licenses.find((l) => l.id === id);
+  const found = licenses.find((l) => l.id === id || l.key === id || (id && l.key?.toUpperCase() === String(id).toUpperCase()));
 
   if (!found) {
     return res.status(404).json({ success: false, error: 'Không tìm thấy mã bản quyền!' });
@@ -1127,7 +1127,7 @@ app.post('/api/admin/licenses/toggle', requireAdmin, (req: Request, res: Respons
 app.post('/api/admin/licenses/revoke', requireAdmin, (req: Request, res: Response) => {
   const { id, reason } = req.body;
   const licenses = loadLicenses();
-  const found = licenses.find((l) => l.id === id);
+  const found = licenses.find((l) => l.id === id || l.key === id || (id && l.key?.toUpperCase() === String(id).toUpperCase()));
 
   if (!found) {
     return res.status(404).json({ success: false, error: 'Không tìm thấy mã bản quyền!' });
@@ -1174,7 +1174,7 @@ app.post('/api/admin/licenses/revoke', requireAdmin, (req: Request, res: Respons
 app.post('/api/admin/licenses/unrevoke', requireAdmin, (req: Request, res: Response) => {
   const { id } = req.body;
   const licenses = loadLicenses();
-  const found = licenses.find((l) => l.id === id);
+  const found = licenses.find((l) => l.id === id || l.key === id || (id && l.key?.toUpperCase() === String(id).toUpperCase()));
 
   if (!found) {
     return res.status(404).json({ success: false, error: 'Không tìm thấy mã bản quyền!' });
@@ -1211,7 +1211,7 @@ app.post('/api/admin/licenses/unrevoke', requireAdmin, (req: Request, res: Respo
 app.post('/api/admin/licenses/regenerate-key', requireAdmin, (req: Request, res: Response) => {
   const { id } = req.body;
   const licenses = loadLicenses();
-  const found = licenses.find((l) => l.id === id);
+  const found = licenses.find((l) => l.id === id || l.key === id || (id && l.key?.toUpperCase() === String(id).toUpperCase()));
 
   if (!found) {
     return res.status(404).json({ success: false, error: 'Không tìm thấy mã bản quyền!' });
@@ -1254,7 +1254,7 @@ app.post('/api/admin/licenses/regenerate-key', requireAdmin, (req: Request, res:
 app.post('/api/admin/licenses/reset-devices', requireAdmin, (req: Request, res: Response) => {
   const { id } = req.body;
   const licenses = loadLicenses();
-  const found = licenses.find((l) => l.id === id);
+  const found = licenses.find((l) => l.id === id || l.key === id || (id && l.key?.toUpperCase() === String(id).toUpperCase()));
 
   if (!found) {
     return res.status(404).json({ success: false, error: 'Không tìm thấy mã bản quyền!' });
@@ -2075,12 +2075,12 @@ function saveSettings(data: any) {
   } catch (e) {}
 }
 
-async function syncOrderToGoogleDrive(order: any): Promise<boolean> {
+async function syncOrderToGoogleDrive(order: any, webhookUrl?: string): Promise<boolean> {
   // Đồng bộ duy nhất trực tiếp 100% qua Google Drive JSON (gialong_fb_data.json)
   return true;
 }
 
-async function syncLicenseToGoogleDrive(license: any): Promise<boolean> {
+async function syncLicenseToGoogleDrive(license: any, webhookUrl?: string): Promise<boolean> {
   // Đồng bộ duy nhất trực tiếp 100% qua Google Drive JSON (gialong_fb_data.json)
   return true;
 }
