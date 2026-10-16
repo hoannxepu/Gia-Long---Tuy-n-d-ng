@@ -1367,13 +1367,39 @@ async function pullGlobalStoreServer() {
   // Đã gỡ bỏ restful-api.dev để tránh lỗi giới hạn trần và timeout
 }
 
+function getInitialOrders(): OrderItem[] {
+  const now = Date.now();
+  const dayMs = 24 * 60 * 60 * 1000;
+  return [
+    {
+      id: 'ord_init_default_1',
+      pkgName: 'Gói VIP 1 Tháng (30 ngày)',
+      price: '1.000.000đ',
+      clientName: 'Công Ty CP Hoa Phượng ME (Hoan)',
+      phone: '0869029310',
+      deviceId: 'DEVICE-DEMO-01',
+      createdAt: new Date(now - dayMs).toISOString(),
+      status: 'approved',
+      generatedKey: 'VIP-GIALONG-0869029310',
+      note: 'Đơn hàng VIP khởi tạo hệ thống quản trị',
+    }
+  ];
+}
+
 function loadOrders(): OrderItem[] {
   try {
-    if (fs.existsSync(ORDERS_FILE)) {
-      return JSON.parse(fs.readFileSync(ORDERS_FILE, 'utf-8'));
+    if (!fs.existsSync(ORDERS_FILE)) {
+      const init = getInitialOrders();
+      fs.writeFileSync(ORDERS_FILE, JSON.stringify(init, null, 2), 'utf-8');
+      return init;
     }
-  } catch (e) {}
-  return [];
+    const raw = fs.readFileSync(ORDERS_FILE, 'utf-8');
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    return getInitialOrders();
+  } catch (e) {
+    return getInitialOrders();
+  }
 }
 
 function saveOrders(items: OrderItem[]) {

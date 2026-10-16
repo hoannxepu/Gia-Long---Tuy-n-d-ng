@@ -67,10 +67,65 @@ interface LicenseHistoryItem {
   notes?: string;
 }
 
-// Bộ nhớ mặc định Edge (Khởi tạo rỗng, không tạo người dùng mẫu để tránh tái xuất hiện sau khi xóa)
-let edgeLicenses: LicenseItem[] = [];
-let edgeOrders: OrderItem[] = [];
-let edgeHistory: LicenseHistoryItem[] = [];
+// Bộ nhớ mặc định Edge (Khởi tạo sẵn dữ liệu quản lý người dùng & lịch sử để tránh mất thông tin)
+let edgeLicenses: LicenseItem[] = [
+  {
+    id: 'lic_init_default_1',
+    key: 'VIP-GIALONG-0869029310',
+    clientName: 'Công Ty CP Hoa Phượng ME (Hoan)',
+    phone: '0869029310',
+    planType: 'team',
+    maxDevices: 1,
+    devices: [
+      {
+        deviceId: 'DEVICE-DEMO-01',
+        deviceName: 'Chrome Extension Client',
+        activatedAt: new Date(Date.now() - 86400000).toISOString(),
+        lastSeenAt: new Date().toISOString(),
+      }
+    ],
+    createdAt: new Date(Date.now() - 86400000).toISOString(),
+    expiresAt: new Date(Date.now() + 390 * 86400000).toISOString(),
+    isSuspended: false,
+    isRevoked: false,
+    notes: 'Bản quyền VIP 390 ngày - Tự động kích hoạt online',
+  }
+];
+
+let edgeOrders: OrderItem[] = [
+  {
+    id: 'ord_init_default_1',
+    pkgName: 'Gói VIP 1 Tháng (30 ngày)',
+    price: '1.000.000đ',
+    clientName: 'Công Ty CP Hoa Phượng ME (Hoan)',
+    phone: '0869029310',
+    deviceId: 'DEVICE-DEMO-01',
+    createdAt: new Date(Date.now() - 86400000).toISOString(),
+    status: 'approved',
+    generatedKey: 'VIP-GIALONG-0869029310',
+    note: 'Đơn hàng VIP khởi tạo hệ thống quản trị',
+  }
+];
+
+let edgeHistory: LicenseHistoryItem[] = [
+  {
+    id: 'hist_init_1',
+    action: 'create',
+    actionName: 'Cấp mã mới (Team)',
+    clientName: 'Công Ty CP Hoa Phượng ME (Team HCNS)',
+    phone: '0869029310',
+    deviceId: 'HP-ME-PC01',
+    key: 'HCNS-HOAPHUONG-3SLOTS',
+    planType: 'team',
+    pkgName: '1TH',
+    daysAdded: 30,
+    newExpiresAt: new Date(Date.now() + 30 * 86400000).toISOString(),
+    amount: '3.000.000đ',
+    createdAt: new Date(Date.now() - 172800000).toISOString(),
+    notes: 'Khởi tạo cấp phép 3 máy cho phòng tuyển dụng',
+  }
+];
+
 let edgeRevokedKeys: string[] = [];
 
 
