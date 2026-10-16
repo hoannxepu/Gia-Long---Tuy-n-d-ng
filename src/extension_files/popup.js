@@ -897,7 +897,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     chrome.runtime.sendMessage({ action: 'SYNC_ADMIN_STATUS' }, () => {
-      chrome.runtime.sendMessage({ action: 'CHECK_LICENSE' }, (res) => {
+      chrome.runtime.sendMessage({ action: 'CHECK_LICENSE', forceRemote: true }, (res) => {
         if (!res) return;
         if (res.isValid && res.license && !res.isRevoked && !res.license.isRevoked) {
           const lic = res.license;

@@ -17,7 +17,15 @@ export interface DriveUserProfile {
 }
 
 const DRIVE_JSON_FILE_NAME = 'gialong_fb_data.json';
-const OAUTH_CLIENT_ID = '404841178461-8qo1bnudgf8rvqr7d0qivrqtdonfqebj.apps.googleusercontent.com';
+export const DEFAULT_OAUTH_CLIENT_ID = '404841178461-8qo1bnudgf8rvqr7d0qivrqtdonfqebj.apps.googleusercontent.com';
+
+export const getOAuthClientId = (): string => {
+  if (typeof window !== 'undefined') {
+    const custom = localStorage.getItem('glfb_gdrive_client_id');
+    if (custom && custom.trim()) return custom.trim();
+  }
+  return DEFAULT_OAUTH_CLIENT_ID;
+};
 
 let cachedAccessToken: string | null = null;
 let cachedUser: DriveUserProfile | null = null;
@@ -69,7 +77,7 @@ export const googleSignInForDrive = async (): Promise<{ user: DriveUserProfile; 
   return new Promise((resolve, reject) => {
     try {
       const client = googleObj.accounts.oauth2.initTokenClient({
-        client_id: OAUTH_CLIENT_ID,
+        client_id: getOAuthClientId(),
         scope: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email',
         callback: async (resp: any) => {
           if (resp.error) {

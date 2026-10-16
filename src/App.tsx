@@ -543,6 +543,14 @@ export default function App() {
       return null;
     }
   });
+  const [customDriveClientId, setCustomDriveClientId] = useState<string>(() => {
+    try {
+      return localStorage.getItem('glfb_gdrive_client_id') || '';
+    } catch (e) {
+      return '';
+    }
+  });
+  const [showDriveClientIdConfig, setShowDriveClientIdConfig] = useState<boolean>(false);
 
   // Kích hoạt tự động 1-Click qua URL (?kich_hoat=KEY hoặc ?activate=KEY)
   const [autoActivateKey, setAutoActivateKey] = useState<string | null>(null);
@@ -1116,24 +1124,41 @@ export default function App() {
       const data = await res.json();
       let ordersList: any[] = (data && data.success && Array.isArray(data.orders)) ? data.orders : [];
 
-
       setAdminOrders((prev) => {
         const prevPending = prev.filter((o) => o.status === 'pending');
-        const newOrders = [...ordersList]
-          .filter((o: any) => o && o.id && !deletedOrderIdsRef.current.has(o.id))
-          .sort(
-            (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
-          );
+        const orderMap = new Map<string, any>();
+        prev.forEach((o) => {
+          if (o && o.id && !deletedOrderIdsRef.current.has(o.id)) orderMap.set(o.id, o);
+        });
+        ordersList.forEach((o) => {
+          if (o && o.id && !deletedOrderIdsRef.current.has(o.id)) {
+            const existing = orderMap.get(o.id);
+            orderMap.set(o.id, existing ? { ...existing, ...o } : o);
+          }
+        });
+        const mergedOrders = Array.from(orderMap.values()).sort(
+          (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+        );
         try {
-          localStorage.setItem('glfb_admin_orders', JSON.stringify(newOrders));
+          localStorage.setItem('glfb_admin_orders', JSON.stringify(mergedOrders));
         } catch (e) {}
-        const newPending = newOrders.filter((o: any) => o.status === 'pending');
+        const newPending = mergedOrders.filter((o: any) => o.status === 'pending');
         setPendingOrderCount(newPending.length);
         if (newPending.length > prevPending.length && prev.length > 0) {
           const latest = newPending[0];
           triggerToast(`🔔 Có đơn đặt mua mới: ${latest.pkgName} từ ${latest.clientName || 'Khách'} (${latest.phone || ''})!`);
         }
-        return areArraysEqual(prev, newOrders) ? prev : newOrders;
+
+        // Tự động bù đắp dữ liệu lên Cloudflare Pages Edge khi phát hiện Cold Restart
+        if (ordersList.length < mergedOrders.length && pin) {
+          fetch('/api/admin/restore-json', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-admin-pin': pin },
+            body: JSON.stringify({ orders: mergedOrders }),
+          }).catch(() => {});
+        }
+
+        return areArraysEqual(prev, mergedOrders) ? prev : mergedOrders;
       });
     } catch (e) {
       console.warn('Lỗi lấy orders:', e);
@@ -1225,8 +1250,27 @@ export default function App() {
       });
       const data = await res.json();
       if (data.success && Array.isArray(data.history)) {
-        try { localStorage.setItem('glfb_admin_history', JSON.stringify(data.history)); } catch (e) {}
-        setHistoryList((prev) => (areArraysEqual(prev, data.history) ? prev : data.history));
+        setHistoryList((prev) => {
+          const histMap = new Map<string, LicenseHistoryItem>();
+          prev.forEach((h) => { if (h && h.id) histMap.set(h.id, h); });
+          data.history.forEach((h: LicenseHistoryItem) => {
+            if (h && h.id) histMap.set(h.id, { ...histMap.get(h.id), ...h });
+          });
+          const merged = Array.from(histMap.values()).sort(
+            (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+          );
+          try { localStorage.setItem('glfb_admin_history', JSON.stringify(merged)); } catch (e) {}
+
+          if (data.history.length < merged.length && pin) {
+            fetch('/api/admin/restore-json', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'x-admin-pin': pin },
+              body: JSON.stringify({ history: merged }),
+            }).catch(() => {});
+          }
+
+          return areArraysEqual(prev, merged) ? prev : merged;
+        });
       }
     } catch (e) {
       console.warn('Lỗi lấy lịch sử:', e);
@@ -1238,19 +1282,53 @@ export default function App() {
   // Tự động kiểm tra đơn hàng mới định kỳ trong nền mà KHÔNG làm giật/nháy giao diện
   useEffect(() => {
     if (!isAdminUnlocked) return;
+
+    // Tự động re-hydrate lên Edge Worker memory nếu phiên trước đã có lưu dữ liệu
+    try {
+      const savedOrders = localStorage.getItem('glfb_admin_orders');
+      const savedLics = localStorage.getItem('glfb_admin_licenses');
+      const savedHist = localStorage.getItem('glfb_admin_history');
+      if (savedOrders || savedLics || savedHist) {
+        fetch('/api/admin/restore-json', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-admin-pin': adminPin },
+          body: JSON.stringify({
+            orders: savedOrders ? JSON.parse(savedOrders) : undefined,
+            licenses: savedLics ? JSON.parse(savedLics) : undefined,
+            history: savedHist ? JSON.parse(savedHist) : undefined,
+          }),
+        }).catch(() => {});
+      }
+    } catch (e) {}
+
     fetchOrders(adminPin, false);
     fetchLicenses(adminPin, false);
     fetchHistory(adminPin, false);
 
     // Polling silent: chạy ngầm 5s/lần, tự động fetch cả orders, licenses, history để admin nhận thông tin ngay lập tức!
+    let pollCount = 0;
     const timer = setInterval(() => {
       fetchOrders(adminPin, true);
       fetchLicenses(adminPin, true);
       fetchHistory(adminPin, true);
+      pollCount++;
+      // Cứ 30 giây (6 lần polling), nếu Google Drive đang kết nối thì tự động đẩy dữ liệu mới nhất lên Drive
+      if (pollCount % 6 === 0 && driveToken) {
+        syncAppWithGoogleDrive(driveToken, adminPin)
+          .then((res) => {
+            if (res && res.fileInfo) {
+              setDriveFileInfo(res.fileInfo);
+              const nowStr = new Date().toLocaleTimeString('vi-VN') + ' ' + new Date().toLocaleDateString('vi-VN');
+              setDriveLastSyncTime(nowStr);
+              try { localStorage.setItem('glfb_gdrive_last_sync', nowStr); } catch (e) {}
+            }
+          })
+          .catch(() => {});
+      }
     }, 5000);
 
     return () => clearInterval(timer);
-  }, [isAdminUnlocked, adminPin]);
+  }, [isAdminUnlocked, adminPin, driveToken]);
 
   const handleApproveOrder = async (orderId: string) => {
     try {
@@ -1272,6 +1350,19 @@ export default function App() {
         fetchLicenses(adminPin, true);
         fetchOrders(adminPin, true);
         fetchHistory(adminPin, true);
+        // Tự động đồng bộ lên Google Drive ngay sau khi phê duyệt đơn
+        if (driveToken) {
+          syncAppWithGoogleDrive(driveToken, adminPin)
+            .then((syncRes) => {
+              if (syncRes && syncRes.fileInfo) {
+                setDriveFileInfo(syncRes.fileInfo);
+                const nowStr = new Date().toLocaleTimeString('vi-VN') + ' ' + new Date().toLocaleDateString('vi-VN');
+                setDriveLastSyncTime(nowStr);
+                try { localStorage.setItem('glfb_gdrive_last_sync', nowStr); } catch (e) {}
+              }
+            })
+            .catch(() => {});
+        }
       } else {
         alert(data.error || 'Lỗi phê duyệt đơn!');
       }
@@ -1440,8 +1531,32 @@ export default function App() {
         const filteredLics = data.licenses.filter(
           (l: any) => l && !deletedLicenseIdsRef.current.has(l.id) && !deletedLicenseIdsRef.current.has(l.key)
         );
-        try { localStorage.setItem('glfb_admin_licenses', JSON.stringify(filteredLics)); } catch (e) {}
-        setLicenses((prev) => (areArraysEqual(prev, filteredLics) ? prev : filteredLics));
+        setLicenses((prev) => {
+          const licMap = new Map<string, AdminLicenseItem>();
+          prev.forEach((l) => {
+            if (l && !deletedLicenseIdsRef.current.has(l.id) && !deletedLicenseIdsRef.current.has(l.key)) {
+              licMap.set(l.key.toUpperCase(), l);
+            }
+          });
+          filteredLics.forEach((l: AdminLicenseItem) => {
+            if (l && !deletedLicenseIdsRef.current.has(l.id) && !deletedLicenseIdsRef.current.has(l.key)) {
+              const k = l.key.toUpperCase();
+              licMap.set(k, { ...licMap.get(k), ...l });
+            }
+          });
+          const merged = Array.from(licMap.values());
+          try { localStorage.setItem('glfb_admin_licenses', JSON.stringify(merged)); } catch (e) {}
+
+          if (filteredLics.length < merged.length && pin) {
+            fetch('/api/admin/restore-json', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'x-admin-pin': pin },
+              body: JSON.stringify({ licenses: merged }),
+            }).catch(() => {});
+          }
+
+          return areArraysEqual(prev, merged) ? prev : merged;
+        });
       }
     } catch (err) {
       console.warn('Lỗi lấy danh sách license:', err);
@@ -5317,6 +5432,53 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
                           </div>
                         </div>
                       )}
+
+                      {/* Tùy chỉnh Google Cloud OAuth Client ID (cho tên miền gia-long---tuy-n-d-ng.pages.dev) */}
+                      <div className="pt-1 border-t border-slate-900">
+                        <button
+                          type="button"
+                          onClick={() => setShowDriveClientIdConfig(!showDriveClientIdConfig)}
+                          className="text-[10px] text-slate-400 hover:text-sky-300 flex items-center gap-1 transition"
+                        >
+                          <Settings className="w-3 h-3 text-sky-400" />
+                          <span>{showDriveClientIdConfig ? '▲ Thu gọn Cài đặt OAuth Client ID' : '⚙️ Tùy chỉnh Google OAuth Client ID (nếu cần đổi Client ID riêng)'}</span>
+                        </button>
+
+                        {showDriveClientIdConfig && (
+                          <div className="mt-2 p-2.5 bg-slate-900/90 rounded-lg border border-slate-800 space-y-2 text-[10.5px]">
+                            <p className="text-slate-300 leading-relaxed">
+                              Khi chạy trên Cloudflare Pages, hãy thêm nguồn gốc được phép vào Google Cloud Console:
+                              <br />
+                              <code className="text-emerald-400 font-mono bg-slate-950 px-1 py-0.5 rounded select-all">https://gia-long---tuy-n-d-ng.pages.dev</code>
+                            </p>
+                            <div className="flex gap-1.5">
+                              <input
+                                type="text"
+                                value={customDriveClientId}
+                                onChange={(e) => setCustomDriveClientId(e.target.value)}
+                                placeholder="Nhập Client ID Google (đuôi .apps.googleusercontent.com)"
+                                className="flex-1 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-[11px] text-sky-300 font-mono focus:border-sky-500 focus:outline-none"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  try {
+                                    if (customDriveClientId && customDriveClientId.trim()) {
+                                      localStorage.setItem('glfb_gdrive_client_id', customDriveClientId.trim());
+                                    } else {
+                                      localStorage.removeItem('glfb_gdrive_client_id');
+                                    }
+                                    triggerToast('✓ Đã lưu Google OAuth Client ID!');
+                                  } catch (e) {}
+                                }}
+                                className="px-2.5 py-1 bg-sky-600 hover:bg-sky-500 text-white rounded text-[11px] font-bold"
+                              >
+                                Lưu
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </div>
 
                     {/* KHỐI GÙI/KÉO QUA LINK JSON GOOGLE DRIVE (Tránh tuyệt đối lỗi origin_mismatch của Google OAuth) */}

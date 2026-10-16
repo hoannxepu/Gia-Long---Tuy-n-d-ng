@@ -1274,6 +1274,24 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
     return jsonResponse({ success: true, settings: edgeSettings });
   }
 
+  // ROUTE: Xuất toàn bộ cơ sở dữ liệu dạng JSON cho Google Drive & Backup
+  if ((pathname === '/api/database/export.json' || pathname === '/database.json') && method === 'GET') {
+    const { licenses } = autoConsolidateEdgeLicensesAndOrders();
+    const data = {
+      app: 'Gia Long - FB',
+      version: '1.0.4',
+      updatedAt: new Date().toISOString(),
+      licenses: licenses || edgeLicenses,
+      orders: edgeOrders,
+      history: edgeHistory,
+      settings: edgeSettings,
+    };
+    return new Response(JSON.stringify(data, null, 2), {
+      status: 200,
+      headers: corsHeaders(),
+    });
+  }
+
   // Kiểm tra quyền Admin cho các route /api/admin/*
   if (pathname.startsWith('/api/admin/')) {
     if (!reqPin || reqPin !== adminPin) {
@@ -2008,6 +2026,90 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
       }
       await syncKV();
       return jsonResponse({ success: true, settings: edgeSettings, message: 'Đã lưu cài đặt và đồng bộ hệ thống thành công!' });
+    }
+
+    // ROUTE: Sao lưu toàn bộ dữ liệu ra file JSON
+    if (pathname === '/api/admin/backup-json' && method === 'GET') {
+      const { licenses } = autoConsolidateEdgeLicensesAndOrders();
+      const backupData = {
+        version: '1.0.4',
+        exportedAt: new Date().toISOString(),
+        licenses: licenses || edgeLicenses,
+        orders: edgeOrders,
+        history: edgeHistory,
+        revokedKeys: edgeRevokedKeys,
+        settings: edgeSettings,
+      };
+      return new Response(JSON.stringify(backupData, null, 2), {
+        status: 200,
+        headers: {
+          ...corsHeaders(),
+          'Content-Disposition': `attachment; filename="gia_long_fb_backup_${Date.now()}.json"`,
+        },
+      });
+    }
+
+    // ROUTE: Khôi phục và đồng bộ tức thì toàn bộ dữ liệu từ file JSON / LocalStorage / Google Drive
+    if (pathname === '/api/admin/restore-json' && method === 'POST') {
+      const data = body;
+      if (!data || typeof data !== 'object') {
+        return jsonResponse({ success: false, error: 'Dữ liệu JSON không hợp lệ!' }, 400);
+      }
+      if (Array.isArray(data.licenses) && data.licenses.length > 0) {
+        const licMap = new Map<string, LicenseItem>();
+        edgeLicenses.forEach((l) => { if (l && l.key) licMap.set(l.key.toUpperCase(), l); });
+        data.licenses.forEach((l: LicenseItem) => {
+          if (l && l.key) {
+            const upperKey = l.key.toUpperCase();
+            if (licMap.has(upperKey)) {
+              licMap.set(upperKey, { ...licMap.get(upperKey)!, ...l });
+            } else {
+              licMap.set(upperKey, l);
+            }
+          }
+        });
+        edgeLicenses = Array.from(licMap.values());
+      }
+      if (Array.isArray(data.orders) && data.orders.length > 0) {
+        const orderMap = new Map<string, OrderItem>();
+        edgeOrders.forEach((o) => { if (o && o.id) orderMap.set(o.id, o); });
+        data.orders.forEach((o: OrderItem) => {
+          if (o && o.id) {
+            if (orderMap.has(o.id)) {
+              orderMap.set(o.id, { ...orderMap.get(o.id)!, ...o });
+            } else {
+              orderMap.set(o.id, o);
+            }
+          }
+        });
+        edgeOrders = Array.from(orderMap.values()).sort(
+          (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+        );
+      }
+      if (Array.isArray(data.history) && data.history.length > 0) {
+        const histMap = new Map<string, LicenseHistoryItem>();
+        edgeHistory.forEach((h) => { if (h && h.id) histMap.set(h.id, h); });
+        data.history.forEach((h: LicenseHistoryItem) => {
+          if (h && h.id) histMap.set(h.id, h);
+        });
+        edgeHistory = Array.from(histMap.values()).sort(
+          (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+        );
+      }
+      if (data.settings && typeof data.settings === 'object') {
+        edgeSettings = { ...edgeSettings, ...data.settings };
+      }
+
+      autoConsolidateEdgeLicensesAndOrders();
+      await syncKV();
+
+      return jsonResponse({
+        success: true,
+        message: '✓ Khôi phục và đồng bộ dữ liệu từ file JSON thành công!',
+        licenses: edgeLicenses,
+        orders: edgeOrders,
+        history: edgeHistory,
+      });
     }
 
     // ROUTE: Kiểm tra kết nối Google Drive / Google Sheets Webhook

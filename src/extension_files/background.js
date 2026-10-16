@@ -162,7 +162,7 @@ async function getApiBaseUrl() {
       }
     }
   } catch (e) {}
-  return 'https://gia-long-fb.pages.dev';
+  return 'https://gia-long---tuy-n-d-ng.pages.dev';
 }
 
 // Tự động quét và tổng hợp TẤT CẢ các máy chủ khả dụng
@@ -220,7 +220,8 @@ async function getAllServerCandidates(primaryBase = null) {
     }
   } catch (e) {}
 
-  // 3. Danh sách máy chủ dự phòng chính thức
+  // 3. Danh sách máy chủ dự phòng chính thức (Ưu tiên tên miền Cloudflare Pages thực tế)
+  candidates.add('https://gia-long---tuy-n-d-ng.pages.dev');
   candidates.add('https://gia-long-fb.pages.dev');
   candidates.add('https://ais-dev-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app');
   candidates.add('https://ais-pre-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app');
@@ -235,6 +236,7 @@ function getCandidateServerUrls(primaryBase) {
   if (primaryBase && primaryBase.startsWith('http')) {
     list.push(primaryBase.trim().replace(/\/+$/, ''));
   }
+  list.push('https://gia-long---tuy-n-d-ng.pages.dev');
   list.push('https://gia-long-fb.pages.dev');
   list.push('https://ais-dev-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app');
   list.push('https://ais-pre-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app');
@@ -330,10 +332,10 @@ function startFastLicensePolling(machineId, maxSeconds = 300) {
   }, 2000);
 }
 
-// Kiểm tra ngầm với máy chủ sau mỗi 60 phút mà không làm gián đoạn người dùng
+// Kiểm tra ngầm và đồng bộ tức thì với máy chủ sau mỗi 10-15 giây mà không làm gián đoạn người dùng
 let isCheckingBackground = false;
 async function checkServerBackground(machineId, token) {
-  if (isCheckingBackground) return;
+  if (isCheckingBackground) return null;
   isCheckingBackground = true;
   try {
     const primaryBase = await getApiBaseUrl();
@@ -342,32 +344,59 @@ async function checkServerBackground(machineId, token) {
       try {
         const resp = await fetch(`${base}/api/check?machine_id=${encodeURIComponent(machineId)}`, {
           cache: 'no-store',
+          signal: AbortSignal.timeout(2500),
         });
         if (!resp.ok) continue;
         const data = await resp.json();
-          if (data.status === 'revoked' || data.isRevoked || data.status === 'suspended' || data.isSuspended) {
-            console.warn('[Cache Sync] 🚨 Bản quyền đã bị thu hồi hoặc tạm khóa!');
-            await chrome.storage.local.set({
-              isRevoked: Boolean(data.status === 'revoked' || data.isRevoked),
-              isSuspended: Boolean(data.status === 'suspended' || data.isSuspended),
-            });
-            await chrome.storage.local.remove(['signedToken', 'licenseKey', 'licenseData', 'isVip', 'currentLicense', 'licenseInfo']);
-            chrome.alarms.clearAll(() => {});
-            return;
-          }
-          if (data.success && data.status === 'active') {
-            await chrome.storage.local.set({
-              lastCheckedAt: Date.now(),
-              expiresAt: data.expires_at,
-              signedToken: data.token || token,
-            });
-            return;
-          }
+        if (data.status === 'revoked' || data.isRevoked || data.status === 'suspended' || data.isSuspended) {
+          console.warn('[Cache Sync] 🚨 Bản quyền đã bị thu hồi hoặc tạm khóa!');
+          await chrome.storage.local.set({
+            isRevoked: Boolean(data.status === 'revoked' || data.isRevoked),
+            isSuspended: Boolean(data.status === 'suspended' || data.isSuspended),
+          });
+          await chrome.storage.local.remove(['signedToken', 'licenseKey', 'licenseData', 'isVip', 'currentLicense', 'licenseInfo']);
+          chrome.alarms.clearAll(() => {});
+          return {
+            isValid: false,
+            isActivated: false,
+            isRevoked: true,
+            message: data.message || '🚨 Bản quyền đã bị Quản trị viên thu hồi hoặc tạm khóa!',
+            license: null,
+          };
+        }
+        if (data.success && data.status === 'active') {
+          const freshLic = {
+            key: data.token || token || 'GLFB-VIP-ACTIVE',
+            expiresAt: data.expires_at,
+            clientName: data.client_name || 'Khách Kích Hoạt',
+            notes: data.pkg_name || 'Bản quyền VIP Gia Long',
+            daysLeft: data.days_left || 30,
+            lastVerifiedAt: Date.now(),
+          };
+          await chrome.storage.local.set({
+            lastCheckedAt: Date.now(),
+            expiresAt: data.expires_at,
+            signedToken: data.token || token,
+            cachedPkgName: data.pkg_name,
+            isVip: true,
+            licenseStatus: 'active',
+            isRevoked: false,
+            isSuspended: false,
+            licenseData: freshLic,
+          });
+          return {
+            isValid: true,
+            isActivated: true,
+            message: `✓ Bản quyền VIP đang hoạt động (Còn ${data.days_left || 30} ngày)`,
+            license: freshLic,
+          };
+        }
       } catch (e) {}
     }
   } finally {
     isCheckingBackground = false;
   }
+  return null;
 }
 
 // Xử lý gửi đơn đặt mua gói bản quyền tự động lên Server
@@ -551,19 +580,13 @@ async function checkLicenseStatus(forceRemote = false) {
           lastVerifiedAt: now,
         };
 
-        // Nếu đã kiểm tra trong vòng 60 phút: Chạy 100% từ Cache bộ nhớ máy (0 request)
-        if (!forceRemote && (now - lastChecked < 60 * 60 * 1000)) {
-          return {
-            isValid: true,
-            isActivated: true,
-            isCached: true,
-            message: `✓ Bản quyền VIP đang hoạt động (Cache thông minh - Còn ${daysLeft} ngày)`,
-            license: { ...licObj, daysLeft, isExpired: false },
-          };
+        // Nếu yêu cầu forceRemote hoặc cache đã quá 15 giây: Xác thực ngay với Server để cập nhật tức thì
+        if (forceRemote || (now - lastChecked >= 15 * 1000)) {
+          const freshServerStatus = await checkServerBackground(deviceId, token);
+          if (freshServerStatus) {
+            return freshServerStatus;
+          }
         }
-
-        // Nếu đã quá 60 phút: Kích hoạt kiểm tra ngầm với Server mà KHÔNG chặn tiến trình người dùng
-        checkServerBackground(deviceId, token);
 
         return {
           isValid: true,
@@ -1237,7 +1260,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         attachedImages: (targetPost?.images || []).slice(0, 3),
         customPostText: targetPost?.content || '',
         isAttachImageEnabled: hasImage,
-        lastSyncedFromUrl: url || 'https://gia-long-fb.pages.dev',
+        lastSyncedFromUrl: url || 'https://gia-long---tuy-n-d-ng.pages.dev',
         lastSyncTimestamp: Date.now(),
       };
       if (gdriveUrl && typeof gdriveUrl === 'string' && gdriveUrl.startsWith('http')) {
