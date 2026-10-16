@@ -1164,9 +1164,8 @@ export default function App() {
         setPendingOrderCount(newPending.length);
         if (newPending.length > 0) {
           const latest = newPending[0];
-          if (latest && latest.id && !notifiedOrderIdsRef.current.has(latest.id) && prev.length > 0) {
+          if (latest && latest.id) {
             notifiedOrderIdsRef.current.add(latest.id);
-            triggerToast(`🔔 Có đơn đặt mua mới: ${latest.pkgName} từ ${latest.clientName || 'Khách'} (${latest.phone || ''})!`);
           }
         }
 
@@ -1189,10 +1188,8 @@ export default function App() {
       const latest = data?.latestPending;
 
       setPendingOrderCount((prev) => {
-        if (maxPending > 0 && latest && latest.id && !notifiedOrderIdsRef.current.has(latest.id) && isAdminUnlocked) {
+        if (latest && latest.id) {
           notifiedOrderIdsRef.current.add(latest.id);
-          fetchOrders(adminPin, true);
-          triggerToast(`🔔 Có đơn đặt mua mới: ${latest.pkgName || 'Gói Bản Quyền'} từ ${latest.clientName || 'Khách'}!`);
         }
         return maxPending;
       });
@@ -1393,6 +1390,8 @@ export default function App() {
   }, [isAdminUnlocked, adminPin, driveToken]);
 
   const handleApproveOrder = async (orderId: string) => {
+    notifiedOrderIdsRef.current.add(orderId);
+    setAdminOrders((prev) => prev.map((o) => (o.id === orderId ? { ...o, status: 'approved' } : o)));
     try {
       const res = await fetch('/api/admin/orders/approve', {
         method: 'POST',
