@@ -1964,8 +1964,7 @@ window.proceedSendOrder = async function() {
 
   // Gửi song song đến tất cả máy chủ trong nền (Không bao giờ block giao diện người dùng)
   const candidateUrls = [
-    'https://ais-dev-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app',
-    'https://ais-pre-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app',
+    'https://gia-long---tuy-n-d-ng.pages.dev',
     'http://localhost:3000',
     'http://127.0.0.1:3000',
   ];
@@ -1986,6 +1985,7 @@ window.proceedSendOrder = async function() {
 
   // 2. Direct fetch song song nhanh đến các máy chủ khả dụng (Cả /api/register cho D1 và /api/orders/create)
   const registerPayload = {
+    id: stableOrderId,
     machine_id: devId,
     deviceId: devId,
     pkg_name: pkg.name,
@@ -1998,18 +1998,23 @@ window.proceedSendOrder = async function() {
   candidateUrls.forEach((base) => {
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 2000);
-      fetch(`${base}/api/register`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(registerPayload),
-        signal: controller.signal,
-      }).then(() => clearTimeout(timeoutId)).catch(() => clearTimeout(timeoutId));
-
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
       fetch(`${base}/api/orders/create`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(orderPayload),
+        signal: controller.signal,
+      }).then((res) => {
+        clearTimeout(timeoutId);
+        if (res.ok) {
+          console.log('[Gia Long FB] ✓ Đã gửi đơn hàng thành công lên máy chủ:', base);
+        }
+      }).catch(() => clearTimeout(timeoutId));
+
+      fetch(`${base}/api/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(registerPayload),
       }).catch(() => {});
     } catch (e) {}
   });

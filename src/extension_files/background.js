@@ -222,9 +222,6 @@ async function getAllServerCandidates(primaryBase = null) {
 
   // 3. Danh sách máy chủ dự phòng chính thức (Ưu tiên tên miền Cloudflare Pages thực tế)
   candidates.add('https://gia-long---tuy-n-d-ng.pages.dev');
-  candidates.add('https://gia-long-fb.pages.dev');
-  candidates.add('https://ais-dev-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app');
-  candidates.add('https://ais-pre-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app');
   candidates.add('http://localhost:3000');
   candidates.add('http://127.0.0.1:3000');
 
@@ -237,9 +234,6 @@ function getCandidateServerUrls(primaryBase) {
     list.push(primaryBase.trim().replace(/\/+$/, ''));
   }
   list.push('https://gia-long---tuy-n-d-ng.pages.dev');
-  list.push('https://gia-long-fb.pages.dev');
-  list.push('https://ais-dev-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app');
-  list.push('https://ais-pre-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app');
   list.push('http://localhost:3000');
   list.push('http://127.0.0.1:3000');
 

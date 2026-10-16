@@ -1,5 +1,19 @@
 [
   {
+    "id": "hist_1792143424675_dwc8",
+    "createdAt": "2026-10-16T09:37:04.675Z",
+    "action": "create",
+    "actionName": "Đơn đặt mua mới",
+    "clientName": "Khách Hàng VIP",
+    "phone": "0869029310",
+    "deviceId": "GLFB-PC-VIP01",
+    "key": "673_IM73",
+    "planType": "individual",
+    "pkgName": "1TH",
+    "amount": "1.000.000đ",
+    "notes": "Khách gửi đơn mua: Gói VIP 1 Tháng (30 ngày) (1.000.000đ) - Ghi chú: Đăng ký gói VIP"
+  },
+  {
     "id": "hist_1792067831574_tp87",
     "createdAt": "2026-10-15T12:37:11.574Z",
     "action": "revoke",

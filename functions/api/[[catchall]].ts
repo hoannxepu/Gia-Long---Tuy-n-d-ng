@@ -7,6 +7,10 @@ interface Env {
   ADMIN_PIN?: string;
   SIGNING_SECRET?: string;
   GOOGLE_DRIVE_WEBHOOK_URL?: string;
+  DB?: any;
+  D1?: any;
+  KV?: any;
+  GIALONG_KV?: any;
 }
 
 interface LicenseItem {
@@ -365,8 +369,60 @@ async function syncToGoogleDrive(order: any, webhookUrl?: string): Promise<boole
   }
 }
 
-async function getD1Db(_env: any): Promise<any> {
-  return null;
+let d1TablesInitialized = false;
+async function getD1Db(env: any): Promise<any> {
+  const db = env?.DB || env?.D1 || env?.__D1_BETA__DB || null;
+  if (!db) return null;
+  if (!d1TablesInitialized) {
+    try {
+      await db.exec(`
+        CREATE TABLE IF NOT EXISTS orders (
+          id TEXT PRIMARY KEY,
+          pkg_name TEXT,
+          price TEXT,
+          client_name TEXT,
+          phone TEXT,
+          device_id TEXT,
+          created_at TEXT,
+          status TEXT DEFAULT 'pending',
+          note TEXT
+        );
+        CREATE TABLE IF NOT EXISTS licenses (
+          id TEXT PRIMARY KEY,
+          machine_id TEXT,
+          pkg_name TEXT,
+          client_name TEXT,
+          phone TEXT,
+          price TEXT,
+          status TEXT DEFAULT 'pending',
+          created_at TEXT,
+          expires_at TEXT,
+          signed_token TEXT,
+          notes TEXT
+        );
+        CREATE TABLE IF NOT EXISTS history (
+          id TEXT PRIMARY KEY,
+          action TEXT,
+          action_name TEXT,
+          client_name TEXT,
+          phone TEXT,
+          device_id TEXT,
+          key TEXT,
+          plan_type TEXT,
+          pkg_name TEXT,
+          days_added INTEGER,
+          new_expires_at TEXT,
+          amount TEXT,
+          created_at TEXT,
+          notes TEXT
+        );
+      `);
+      d1TablesInitialized = true;
+    } catch (d1InitErr) {
+      console.warn('[D1 Init] Table creation notice:', d1InitErr);
+    }
+  }
+  return db;
 }
 let d1: any = null;
 
@@ -423,8 +479,121 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
     edgeSettings.googleDriveSheetWebhookUrl = env.GOOGLE_DRIVE_WEBHOOK_URL;
   }
 
+  // Khởi tạo kết nối D1 Database và KV Namespace
+  d1 = await getD1Db(env);
+  const kv = env.KV || env.GIALONG_KV || null;
+
+  // 1. Tải dữ liệu từ Cloudflare KV (nếu người dùng đã cấu hình binding KV)
+  if (kv) {
+    try {
+      const savedOrders = await kv.get('glfb_orders', 'json');
+      if (Array.isArray(savedOrders) && savedOrders.length > 0) {
+        const orderMap = new Map<string, OrderItem>();
+        edgeOrders.forEach((o) => orderMap.set(o.id, o));
+        savedOrders.forEach((o: any) => orderMap.set(o.id, o));
+        edgeOrders = Array.from(orderMap.values());
+      }
+      const savedLic = await kv.get('glfb_licenses', 'json');
+      if (Array.isArray(savedLic) && savedLic.length > 0) {
+        const licMap = new Map<string, LicenseItem>();
+        edgeLicenses.forEach((l) => licMap.set(l.id, l));
+        savedLic.forEach((l: any) => licMap.set(l.id, l));
+        edgeLicenses = Array.from(licMap.values());
+      }
+      const savedHist = await kv.get('glfb_history', 'json');
+      if (Array.isArray(savedHist) && savedHist.length > 0) {
+        const histMap = new Map<string, LicenseHistoryItem>();
+        edgeHistory.forEach((h) => histMap.set(h.id, h));
+        savedHist.forEach((h: any) => histMap.set(h.id, h));
+        edgeHistory = Array.from(histMap.values());
+      }
+      const savedRevoked = await kv.get('glfb_revoked', 'json');
+      if (Array.isArray(savedRevoked) && savedRevoked.length > 0) {
+        edgeRevokedKeys = Array.from(new Set([...edgeRevokedKeys, ...savedRevoked]));
+      }
+    } catch (kvErr) {
+      console.warn('[KV Init] Lỗi nạp dữ liệu từ Cloudflare KV:', kvErr);
+    }
+  }
+
+  // 2. Tải dữ liệu từ Cloudflare D1 Database (nếu đã cấu hình binding DB)
+  if (d1) {
+    try {
+      const rows: any = await d1.prepare(`SELECT * FROM orders ORDER BY created_at DESC LIMIT 300`).all();
+      if (rows?.results && rows.results.length > 0) {
+        const orderMap = new Map<string, OrderItem>();
+        edgeOrders.forEach((o) => orderMap.set(o.id, o));
+        rows.results.forEach((r: any) => {
+          orderMap.set(r.id, {
+            id: r.id,
+            pkgName: r.pkg_name,
+            price: r.price,
+            clientName: r.client_name,
+            phone: r.phone,
+            deviceId: r.device_id,
+            createdAt: r.created_at,
+            status: r.status,
+            note: r.note,
+          });
+        });
+        edgeOrders = Array.from(orderMap.values()).sort(
+          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
+      }
+    } catch (d1Err) {
+      console.warn('[D1 Orders Init] Lỗi nạp đơn:', d1Err);
+    }
+  }
+
+  // 3. Tải từ Cloudflare Edge Cache API (Cứu cánh zero-config đồng bộ giữa các Worker Isolates khi chưa tạo D1/KV)
+  if (!d1 && !kv) {
+    try {
+      if (typeof caches !== 'undefined' && (caches as any).default) {
+        const cacheUrl = `https://gia-long---tuy-n-d-ng.pages.dev/__edge_cache_orders`;
+        const cacheReq = new Request(cacheUrl, { method: 'GET' });
+        const matched = await (caches as any).default.match(cacheReq);
+        if (matched) {
+          const cachedOrders = await matched.json();
+          if (Array.isArray(cachedOrders) && cachedOrders.length > 0) {
+            const orderMap = new Map<string, OrderItem>();
+            edgeOrders.forEach((o) => orderMap.set(o.id, o));
+            cachedOrders.forEach((o: any) => orderMap.set(o.id, o));
+            edgeOrders = Array.from(orderMap.values()).sort(
+              (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+            );
+          }
+        }
+      }
+    } catch (cacheErr) {}
+  }
+
   const syncKV = async () => {
-    // Hàm giữ tương thích (No-op khi không dùng KV)
+    if (kv) {
+      try {
+        await kv.put('glfb_orders', JSON.stringify(edgeOrders));
+        await kv.put('glfb_licenses', JSON.stringify(edgeLicenses));
+        await kv.put('glfb_history', JSON.stringify(edgeHistory));
+        if (edgeRevokedKeys.length > 0) {
+          await kv.put('glfb_revoked', JSON.stringify(edgeRevokedKeys));
+        }
+      } catch (e) {
+        console.warn('[KV Sync] Lỗi ghi KV:', e);
+      }
+    }
+    // Đồng thời đồng bộ vào Cloudflare Edge Cache API (để các Isolate khác đọc được ngay tức khắc)
+    try {
+      if (typeof caches !== 'undefined' && (caches as any).default) {
+        const cacheUrl = `https://gia-long---tuy-n-d-ng.pages.dev/__edge_cache_orders`;
+        const cacheReq = new Request(cacheUrl, { method: 'GET' });
+        const cacheResp = new Response(JSON.stringify(edgeOrders), {
+          headers: {
+            'Content-Type': 'application/json',
+            'Cache-Control': 'public, max-age=604800, s-maxage=604800',
+          },
+        });
+        await (caches as any).default.put(cacheReq, cacheResp);
+      }
+    } catch (e) {}
   };
 
   const addHistoryEntry = async (entry: Omit<LicenseHistoryItem, 'id' | 'createdAt'>) => {
@@ -1274,6 +1443,20 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
     return jsonResponse({ success: true, settings: edgeSettings });
   }
 
+  // ROUTE: Trạng thái cơ sở dữ liệu Cloudflare Edge (D1, KV, Cache, Drive)
+  if (pathname === '/api/admin/system/status' && method === 'GET') {
+    return jsonResponse({
+      success: true,
+      d1Active: Boolean(d1),
+      kvActive: Boolean(kv),
+      edgeCacheActive: typeof caches !== 'undefined' && Boolean((caches as any).default),
+      googleDriveSynced: Boolean(edgeSettings.googleDriveSheetWebhookUrl || env.GOOGLE_DRIVE_WEBHOOK_URL),
+      totalOrders: edgeOrders.length,
+      totalLicenses: edgeLicenses.length,
+      primaryDomain: 'gia-long---tuy-n-d-ng.pages.dev',
+    });
+  }
+
   // ROUTE: Xuất toàn bộ cơ sở dữ liệu dạng JSON cho Google Drive & Backup
   if ((pathname === '/api/database/export.json' || pathname === '/database.json') && method === 'GET') {
     const { licenses } = autoConsolidateEdgeLicensesAndOrders();
@@ -1317,7 +1500,7 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
         try {
           const rows: any = await d1.prepare(`SELECT * FROM orders ORDER BY created_at DESC LIMIT 300`).all();
           if (rows?.results && rows.results.length > 0) {
-            edgeOrders = rows.results.map((r: any) => ({
+            const d1Orders = rows.results.map((r: any) => ({
               id: r.id,
               pkgName: r.pkg_name,
               price: r.price,
@@ -1328,6 +1511,31 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
               status: r.status,
               note: r.note,
             }));
+            const orderMap = new Map<string, OrderItem>();
+            edgeOrders.forEach((o) => orderMap.set(o.id, o));
+            d1Orders.forEach((o: any) => orderMap.set(o.id, o));
+            edgeOrders = Array.from(orderMap.values()).sort(
+              (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+            );
+          }
+        } catch (e) {}
+      } else if (!kv) {
+        try {
+          if (typeof caches !== 'undefined' && (caches as any).default) {
+            const cacheUrl = `https://gia-long---tuy-n-d-ng.pages.dev/__edge_cache_orders`;
+            const cacheReq = new Request(cacheUrl, { method: 'GET' });
+            const matched = await (caches as any).default.match(cacheReq);
+            if (matched) {
+              const cachedOrders = await matched.json();
+              if (Array.isArray(cachedOrders) && cachedOrders.length > 0) {
+                const orderMap = new Map<string, OrderItem>();
+                edgeOrders.forEach((o) => orderMap.set(o.id, o));
+                cachedOrders.forEach((o: any) => orderMap.set(o.id, o));
+                edgeOrders = Array.from(orderMap.values()).sort(
+                  (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+                );
+              }
+            }
           }
         } catch (e) {}
       }

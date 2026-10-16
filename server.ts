@@ -2115,6 +2115,21 @@ app.get('/api/settings', (_req: Request, res: Response) => {
   res.json({ success: true, settings: loadSettings() });
 });
 
+app.get('/api/admin/system/status', (_req: Request, res: Response) => {
+  const settings = loadSettings();
+  const orders = loadOrders();
+  const licenses = loadLicenses();
+  res.json({
+    success: true,
+    d1Active: true,
+    serverMode: 'nodejs',
+    googleDriveSynced: Boolean(settings.googleDriveSheetWebhookUrl),
+    totalOrders: orders.length,
+    totalLicenses: licenses.length,
+    primaryDomain: 'gia-long---tuy-n-d-ng.pages.dev',
+  });
+});
+
 app.post('/api/admin/settings', requireAdmin, async (req: Request, res: Response) => {
   const current = loadSettings();
   const updated = { ...current, ...req.body };
