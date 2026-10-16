@@ -1270,7 +1270,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (res.isValid && lic && !res.isRevoked && !lic.isRevoked && !lic.isSuspended) {
         const isTrialPlan = lic.planType === 'trial';
-        const daysLeft = typeof lic.daysLeft === 'number' ? lic.daysLeft : parseInt(lic.daysLeft || '0', 10);
+        const expMs = lic.expiresAt ? new Date(lic.expiresAt).getTime() : 0;
+        const daysLeft = expMs > Date.now()
+          ? Math.max(1, Math.ceil((expMs - Date.now()) / (24 * 60 * 60 * 1000)))
+          : (typeof lic.daysLeft === 'number' ? lic.daysLeft : parseInt(lic.daysLeft || '0', 10));
         const isExpiringSoon = daysLeft <= 3 && daysLeft >= 0;
 
         // Cập nhật Header Pill

@@ -901,7 +901,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (!res) return;
         if (res.isValid && res.license && !res.isRevoked && !res.license.isRevoked) {
           const lic = res.license;
-          const daysLeft = typeof lic.daysLeft === 'number' ? lic.daysLeft : parseInt(lic.daysLeft || '0', 10);
+          const expMs = lic.expiresAt ? new Date(lic.expiresAt).getTime() : 0;
+          const daysLeft = expMs > Date.now()
+            ? Math.max(1, Math.ceil((expMs - Date.now()) / (24 * 60 * 60 * 1000)))
+            : (typeof lic.daysLeft === 'number' ? lic.daysLeft : parseInt(lic.daysLeft || '0', 10));
           const isExpiringSoon = daysLeft <= 3 && daysLeft >= 0;
 
           if (popupClientName) popupClientName.innerText = lic.clientName || 'Khách Hàng VIP';
