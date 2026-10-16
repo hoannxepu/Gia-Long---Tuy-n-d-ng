@@ -481,6 +481,7 @@ export default function App() {
       return new Set<string>();
     })()
   );
+  const notifiedOrderIdsRef = useRef<Set<string>>(new Set());
 
   const [licenses, setLicenses] = useState<AdminLicenseItem[]>(() => {
     try {
@@ -1139,32 +1140,9 @@ export default function App() {
         headers: { 'x-admin-pin': pin },
       });
       const data = await res.json();
-      let ordersList: any[] = (data && data.success && Array.isArray(data.orders)) ? data.orders : [];
-
-      // Nếu quản trị viên đang mở trang qua localhost hoặc môi trường preview, tự động truy vấn song song cả Cloudflare Pages
-      if (typeof window !== 'undefined' && !window.location.origin.includes('gia-long---tuy-n-d-ng.pages.dev')) {
-        try {
-          const cfRes = await fetch('https://gia-long---tuy-n-d-ng.pages.dev/api/admin/orders', {
-            headers: { 'x-admin-pin': pin },
-            signal: AbortSignal.timeout(4000),
-          });
-          const cfData = await cfRes.json();
-          if (cfData && cfData.success && Array.isArray(cfData.orders)) {
-            const combinedMap = new Map<string, any>();
-            ordersList.forEach((o) => combinedMap.set(o.id, o));
-            cfData.orders.forEach((o: any) => {
-              if (o && o.id) {
-                const ex = combinedMap.get(o.id);
-                combinedMap.set(o.id, ex ? { ...ex, ...o } : o);
-              }
-            });
-            ordersList = Array.from(combinedMap.values());
-          }
-        } catch (e) {}
-      }
+      const ordersList: any[] = (data && data.success && Array.isArray(data.orders)) ? data.orders : [];
 
       setAdminOrders((prev) => {
-        const prevPending = prev.filter((o) => o.status === 'pending');
         const orderMap = new Map<string, any>();
         prev.forEach((o) => {
           if (o && o.id && !deletedOrderIdsRef.current.has(o.id)) orderMap.set(o.id, o);
@@ -1181,23 +1159,19 @@ export default function App() {
         try {
           localStorage.setItem('glfb_admin_orders', JSON.stringify(mergedOrders));
         } catch (e) {}
+
         const newPending = mergedOrders.filter((o: any) => o.status === 'pending');
         setPendingOrderCount(newPending.length);
-        if (newPending.length > prevPending.length && prev.length > 0) {
+        if (newPending.length > 0) {
           const latest = newPending[0];
-          triggerToast(`🔔 Có đơn đặt mua mới: ${latest.pkgName} từ ${latest.clientName || 'Khách'} (${latest.phone || ''})!`);
+          if (latest && latest.id && !notifiedOrderIdsRef.current.has(latest.id) && prev.length > 0) {
+            notifiedOrderIdsRef.current.add(latest.id);
+            triggerToast(`🔔 Có đơn đặt mua mới: ${latest.pkgName} từ ${latest.clientName || 'Khách'} (${latest.phone || ''})!`);
+          }
         }
 
-        // Tự động bù đắp dữ liệu lên Cloudflare Pages Edge khi phát hiện Cold Restart
-        if (ordersList.length < mergedOrders.length && pin) {
-          fetch('/api/admin/restore-json', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-admin-pin': pin },
-            body: JSON.stringify({ orders: mergedOrders }),
-          }).catch(() => {});
-        }
-
-        return areArraysEqual(prev, mergedOrders) ? prev : mergedOrders;
+        const isSame = JSON.stringify(prev) === JSON.stringify(mergedOrders);
+        return isSame ? prev : mergedOrders;
       });
     } catch (e) {
       console.warn('Lỗi lấy orders:', e);
@@ -1211,30 +1185,14 @@ export default function App() {
     try {
       const res = await fetch('/api/orders/pending-count');
       const data = await res.json();
-      let maxPending = (data && data.success && typeof data.pendingCount === 'number') ? data.pendingCount : 0;
-      let latest = data?.latestPending;
-
-      if (typeof window !== 'undefined' && !window.location.origin.includes('gia-long---tuy-n-d-ng.pages.dev')) {
-        try {
-          const cfRes = await fetch('https://gia-long---tuy-n-d-ng.pages.dev/api/orders/pending-count', {
-            signal: AbortSignal.timeout(3000),
-          });
-          const cfData = await cfRes.json();
-          if (cfData && cfData.success && typeof cfData.pendingCount === 'number') {
-            if (cfData.pendingCount > maxPending) {
-              maxPending = cfData.pendingCount;
-              latest = cfData.latestPending || latest;
-            }
-          }
-        } catch (e) {}
-      }
+      const maxPending = (data && data.success && typeof data.pendingCount === 'number') ? data.pendingCount : 0;
+      const latest = data?.latestPending;
 
       setPendingOrderCount((prev) => {
-        if (maxPending > prev && isAdminUnlocked) {
+        if (maxPending > 0 && latest && latest.id && !notifiedOrderIdsRef.current.has(latest.id) && isAdminUnlocked) {
+          notifiedOrderIdsRef.current.add(latest.id);
           fetchOrders(adminPin, true);
-          if (latest) {
-            triggerToast(`🔔 Có đơn đặt mua mới: ${latest.pkgName || 'Gói Bản Quyền'} từ ${latest.clientName || 'Khách'}!`);
-          }
+          triggerToast(`🔔 Có đơn đặt mua mới: ${latest.pkgName || 'Gói Bản Quyền'} từ ${latest.clientName || 'Khách'}!`);
         }
         return maxPending;
       });
