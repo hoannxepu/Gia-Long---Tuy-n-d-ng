@@ -1395,7 +1395,29 @@ function loadOrders(): OrderItem[] {
     }
     const raw = fs.readFileSync(ORDERS_FILE, 'utf-8');
     const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      let modified = false;
+      const now = Date.now();
+      const cleaned = parsed.map((o: OrderItem) => {
+        if (o.status === 'pending' && o.createdAt) {
+          const ageHours = (now - new Date(o.createdAt).getTime()) / (1000 * 60 * 60);
+          if (ageHours > 24) {
+            modified = true;
+            return { 
+              ...o, 
+              status: 'approved' as const, 
+              generatedKey: o.generatedKey || 'GLFB-VIP-' + Math.random().toString(36).substring(2, 7).toUpperCase(), 
+              note: (o.note || '') + ' • Tự động duyệt do quá hạn chờ' 
+            };
+          }
+        }
+        return o;
+      });
+      if (modified) {
+        fs.writeFileSync(ORDERS_FILE, JSON.stringify(cleaned, null, 2), 'utf-8');
+      }
+      return cleaned;
+    }
     return getInitialOrders();
   } catch (e) {
     return getInitialOrders();
