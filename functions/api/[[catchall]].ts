@@ -1,15 +1,10 @@
 // Cloudflare Pages Function - Xử lý toàn bộ API /api/* trên Edge của Cloudflare
-// Đảm bảo hoạt động trơn tru khi triển khai dự án lên Cloudflare Pages & GitHub
-// Hỗ trợ cả 2 chế độ:
-// 1. Proxy chuyển tiếp thông minh sang máy chủ Backend (nếu cấu hình biến BACKEND_URL)
-// 2. Chạy độc lập 100% trên Cloudflare Edge (sử dụng KV namespace GLFB_KV hoặc Edge Memory)
+// Đảm bảo hoạt động trơn tru tự động khi triển khai dự án lên Cloudflare Pages & GitHub
+// Lưu trữ và đồng bộ hóa tự động qua Google Drive & Edge Memory
 
 interface Env {
   BACKEND_URL?: string;
   ADMIN_PIN?: string;
-  GLFB_KV?: any;
-  DB?: any;
-  GLFB_D1?: any;
   SIGNING_SECRET?: string;
   GOOGLE_DRIVE_WEBHOOK_URL?: string;
 }
@@ -258,6 +253,17 @@ let edgeSettings: any = {
   googleDriveSyncEnabled: true,
 };
 
+async function addHistory(entry: Omit<LicenseHistoryItem, 'id' | 'createdAt'>) {
+  const item: LicenseHistoryItem = {
+    id: `hist_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+    createdAt: new Date().toISOString(),
+    ...entry,
+  };
+  edgeHistory.unshift(item);
+  if (edgeHistory.length > 300) edgeHistory.length = 300;
+  return item;
+}
+
 function corsHeaders() {
   return {
     'Access-Control-Allow-Origin': '*',
@@ -359,75 +365,10 @@ async function syncToGoogleDrive(order: any, webhookUrl?: string): Promise<boole
   }
 }
 
-// Khởi tạo bảng D1 Database tự động (orders, licenses, settings, history)
-async function getD1Db(env: Env) {
-  const db = env.DB || env.GLFB_D1;
-  if (!db) return null;
-  try {
-    await db.exec(`
-      CREATE TABLE IF NOT EXISTS orders (
-        id TEXT PRIMARY KEY,
-        pkg_name TEXT NOT NULL,
-        price TEXT NOT NULL,
-        client_name TEXT,
-        phone TEXT,
-        device_id TEXT,
-        created_at TEXT NOT NULL,
-        status TEXT NOT NULL DEFAULT 'pending',
-        note TEXT
-      );
-      CREATE INDEX IF NOT EXISTS idx_orders_device_id ON orders(device_id);
-      CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
-      CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at);
-
-      CREATE TABLE IF NOT EXISTS licenses (
-        id TEXT PRIMARY KEY,
-        key TEXT,
-        machine_id TEXT NOT NULL,
-        pkg_name TEXT NOT NULL,
-        client_name TEXT,
-        phone TEXT,
-        price TEXT,
-        status TEXT NOT NULL DEFAULT 'pending',
-        created_at TEXT NOT NULL,
-        expires_at TEXT,
-        signed_token TEXT,
-        notes TEXT,
-        is_suspended INTEGER DEFAULT 0,
-        is_revoked INTEGER DEFAULT 0,
-        devices_json TEXT
-      );
-      CREATE INDEX IF NOT EXISTS idx_licenses_machine_id ON licenses(machine_id);
-      CREATE INDEX IF NOT EXISTS idx_licenses_status ON licenses(status);
-
-      CREATE TABLE IF NOT EXISTS settings (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS history (
-        id TEXT PRIMARY KEY,
-        action TEXT,
-        action_name TEXT,
-        client_name TEXT,
-        phone TEXT,
-        device_id TEXT,
-        key TEXT,
-        plan_type TEXT,
-        pkg_name TEXT,
-        days_added INTEGER,
-        new_expires_at TEXT,
-        amount TEXT,
-        notes TEXT,
-        created_at TEXT NOT NULL
-      );
-    `);
-    return db;
-  } catch (e) {
-    console.warn('[Cloudflare D1] Init check warning:', e);
-    return db;
-  }
+async function getD1Db(_env: any): Promise<any> {
+  return null;
 }
+let d1: any = null;
 
 export async function onRequest(context: { request: Request; env: Env }): Promise<Response> {
   const { request, env } = context;
@@ -459,7 +400,6 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
       }
 
       const proxyResp = await fetch(backendTarget, proxyReqInit);
-      // Chỉ chấp nhận nếu phản hồi thành công 2xx (Tránh các lỗi 302 chuyển hướng Cookie hoặc HTML lỗi)
       const contentType = proxyResp.headers.get('content-type') || '';
       if (proxyResp && proxyResp.status >= 200 && proxyResp.status < 300 && !contentType.includes('text/html')) {
         const respHeaders = new Headers(proxyResp.headers);
@@ -471,145 +411,23 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
         });
       }
     } catch (proxyErr) {
-      console.warn('[Cloudflare Pages Functions] Proxy to Central Backend failed, falling back to Native Edge processing:', proxyErr);
+      console.warn('[Cloudflare Pages Functions] Proxy failed, falling back to Native Edge processing:', proxyErr);
     }
   }
 
-  // 3. Chế độ Xử lý Natively tại Cloudflare Edge
+  // 3. Chế độ Xử lý Natively tại Cloudflare Edge (Memory + Google Drive Sync)
   let adminPin = env.ADMIN_PIN || 'Ha26062018$';
   const reqPin = String(request.headers.get('x-admin-pin') || url.searchParams.get('pin') || '').trim();
-
-  // Đọc dữ liệu từ Cloudflare D1 Database (hoặc KV / REST Cloud Database)
-  const d1 = await getD1Db(env);
-  if (d1) {
-    try {
-      // 1. Đọc settings từ D1
-      const sRows: any = await d1.prepare(`SELECT key, value FROM settings`).all();
-      if (sRows?.results && sRows.results.length > 0) {
-        for (const row of sRows.results) {
-          try {
-            edgeSettings[row.key] = JSON.parse(row.value);
-          } catch (e) {
-            edgeSettings[row.key] = row.value;
-          }
-        }
-      }
-
-      // 2. Đọc orders từ D1
-      const oRows: any = await d1.prepare(`SELECT * FROM orders ORDER BY created_at DESC LIMIT 300`).all();
-      if (oRows?.results && oRows.results.length > 0) {
-        edgeOrders = oRows.results.map((r: any) => ({
-          id: r.id,
-          pkgName: r.pkg_name,
-          price: r.price,
-          clientName: r.client_name,
-          phone: r.phone,
-          deviceId: r.device_id,
-          createdAt: r.created_at,
-          status: r.status,
-          note: r.note,
-        }));
-      }
-
-      // 3. Đọc licenses từ D1
-      const lRows: any = await d1.prepare(`SELECT * FROM licenses ORDER BY created_at DESC LIMIT 300`).all();
-      if (lRows?.results && lRows.results.length > 0) {
-        edgeLicenses = lRows.results.map((r: any) => {
-          let devices = [];
-          try {
-            if (r.devices_json) devices = JSON.parse(r.devices_json);
-          } catch (e) {}
-          if (!devices.length && r.machine_id) {
-            devices = [{
-              deviceId: r.machine_id,
-              deviceName: r.client_name || 'Thiết bị kích hoạt',
-              activatedAt: r.created_at,
-              lastSeenAt: r.created_at,
-            }];
-          }
-          return {
-            id: r.id,
-            key: r.key || (r.signed_token ? r.signed_token.slice(-12) : `GLFB-VIP-${(r.machine_id || '').slice(-6).toUpperCase()}`),
-            clientName: r.client_name || 'Khách Kích Hoạt',
-            phone: r.phone || '',
-            planType: 'individual',
-            maxDevices: 1,
-            devices,
-            createdAt: r.created_at,
-            expiresAt: r.expires_at || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-            isSuspended: Boolean(r.is_suspended),
-            isRevoked: Boolean(r.is_revoked || r.status === 'revoked'),
-            notes: r.notes || '',
-          };
-        });
-      }
-
-      // 4. Đọc history từ D1
-      const hRows: any = await d1.prepare(`SELECT * FROM history ORDER BY created_at DESC LIMIT 150`).all();
-      if (hRows?.results && hRows.results.length > 0) {
-        edgeHistory = hRows.results.map((r: any) => ({
-          id: r.id,
-          action: r.action,
-          actionName: r.action_name,
-          clientName: r.client_name,
-          phone: r.phone,
-          deviceId: r.device_id,
-          key: r.key,
-          planType: r.plan_type,
-          pkgName: r.pkg_name,
-          daysAdded: r.days_added,
-          newExpiresAt: r.new_expires_at,
-          amount: r.amount,
-          notes: r.notes,
-          createdAt: r.created_at,
-        }));
-      }
-    } catch (e) {
-      console.warn('[Cloudflare D1] Initial load error:', e);
-    }
-  }
-
-  // Đọc dữ liệu từ KV (nếu có KV)
-  if (env.GLFB_KV) {
-    try {
-      const kvPin = await env.GLFB_KV.get('admin_pin', 'text');
-      if (kvPin && kvPin.trim()) {
-        adminPin = kvPin.trim();
-      }
-      if (!d1) {
-        const kvLic = await env.GLFB_KV.get('licenses', 'json');
-        if (kvLic && Array.isArray(kvLic)) edgeLicenses = kvLic;
-        const kvOrd = await env.GLFB_KV.get('orders', 'json');
-        if (kvOrd && Array.isArray(kvOrd)) edgeOrders = kvOrd;
-        const kvHist = await env.GLFB_KV.get('history', 'json');
-        if (kvHist && Array.isArray(kvHist)) edgeHistory = kvHist;
-        const kvRev = await env.GLFB_KV.get('revokedKeys', 'json');
-        if (kvRev && Array.isArray(kvRev)) edgeRevokedKeys = kvRev;
-        const kvSet = await env.GLFB_KV.get('settings', 'json');
-        if (kvSet) edgeSettings = kvSet;
-      }
-    } catch (e) {}
-  }
 
   if (env.GOOGLE_DRIVE_WEBHOOK_URL && !edgeSettings.googleDriveSheetWebhookUrl) {
     edgeSettings.googleDriveSheetWebhookUrl = env.GOOGLE_DRIVE_WEBHOOK_URL;
   }
 
   const syncKV = async () => {
-    if (env.GLFB_KV) {
-      try {
-        await env.GLFB_KV.put('licenses', JSON.stringify(edgeLicenses));
-        await env.GLFB_KV.put('orders', JSON.stringify(edgeOrders));
-        await env.GLFB_KV.put('history', JSON.stringify(edgeHistory));
-        await env.GLFB_KV.put('revokedKeys', JSON.stringify(edgeRevokedKeys));
-        await env.GLFB_KV.put('settings', JSON.stringify(edgeSettings));
-      } catch (e) {
-        console.warn('[Cloudflare KV] Lỗi ghi dữ liệu KV:', e);
-      }
-    }
+    // Hàm giữ tương thích (No-op khi không dùng KV)
   };
 
-  const addHistory = async (entry: Omit<LicenseHistoryItem, 'id' | 'createdAt'>) => {
+  const addHistoryEntry = async (entry: Omit<LicenseHistoryItem, 'id' | 'createdAt'>) => {
     const item: LicenseHistoryItem = {
       id: `hist_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       createdAt: new Date().toISOString(),
@@ -617,35 +435,6 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
     };
     edgeHistory.unshift(item);
     if (edgeHistory.length > 300) edgeHistory.length = 300;
-
-    // Lưu bền vững vào Cloudflare D1 history table
-    if (d1) {
-      try {
-        await d1.prepare(`
-          INSERT OR REPLACE INTO history (id, action, action_name, client_name, phone, device_id, key, plan_type, pkg_name, days_added, new_expires_at, amount, notes, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).bind(
-          item.id,
-          item.action || '',
-          item.actionName || '',
-          item.clientName || '',
-          item.phone || '',
-          item.deviceId || '',
-          item.key || '',
-          item.planType || '',
-          item.pkgName || '',
-          item.daysAdded || 0,
-          item.newExpiresAt || '',
-          item.amount || '',
-          item.notes || '',
-          item.createdAt
-        ).run();
-      } catch (d1Err) {
-        console.warn('[D1 addHistory Error]', d1Err);
-      }
-    }
-
-    await syncKV();
     return item;
   };
 
@@ -2446,9 +2235,6 @@ function extractGoogleDriveFileId(link: string): string | null {
         return jsonResponse({ success: false, error: 'Mật khẩu mới phải có tối thiểu 6 ký tự!' }, 400);
       }
       const cleanNewPin = String(newPin).trim();
-      if (env.GLFB_KV) {
-        await env.GLFB_KV.put('admin_pin', cleanNewPin);
-      }
       adminPin = cleanNewPin;
       const histItem: LicenseHistoryItem = {
         id: `h_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
