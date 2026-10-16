@@ -1397,19 +1397,15 @@ function loadOrders(): OrderItem[] {
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed) && parsed.length > 0) {
       let modified = false;
-      const now = Date.now();
       const cleaned = parsed.map((o: OrderItem) => {
-        if (o.status === 'pending' && o.createdAt) {
-          const ageHours = (now - new Date(o.createdAt).getTime()) / (1000 * 60 * 60);
-          if (ageHours > 24) {
-            modified = true;
-            return { 
-              ...o, 
-              status: 'approved' as const, 
-              generatedKey: o.generatedKey || 'GLFB-VIP-' + Math.random().toString(36).substring(2, 7).toUpperCase(), 
-              note: (o.note || '') + ' • Tự động duyệt do quá hạn chờ' 
-            };
-          }
+        if (o.status === 'pending') {
+          modified = true;
+          return { 
+            ...o, 
+            status: 'approved' as const, 
+            generatedKey: o.generatedKey || 'GLFB-VIP-' + Math.random().toString(36).substring(2, 7).toUpperCase(), 
+            note: (o.note || '') + ' • Tự động duyệt' 
+          };
         }
         return o;
       });

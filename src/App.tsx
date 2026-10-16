@@ -3517,15 +3517,6 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
                       <span>Tạo Mã Mới</span>
                     </button>
                     <button
-                      onClick={() => setShowGoogleDriveModal(true)}
-                      className="px-2.5 py-1 bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-500/50 rounded-lg text-[11px] font-bold transition flex items-center gap-1.5 shadow-sm active:scale-98"
-                      title="Cơ sở dữ liệu tự động JSON & Lưu trữ Google Drive"
-                    >
-                      <HardDrive className="w-3 h-3 text-emerald-400" />
-                      <span>Lưu Trữ Tự Động JSON</span>
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                    </button>
-                    <button
                       onClick={() => {
                         setCurrentPinInput('');
                         setNewPinInput('');
@@ -3547,22 +3538,6 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
                       <RefreshCw className={`w-3 h-3 ${isLoadingLicenses ? 'animate-spin' : ''}`} />
                       <span>Làm mới</span>
                     </button>
-                    <button
-                      onClick={handleDownloadJsonBackup}
-                      className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-[11px] font-bold transition flex items-center gap-1 shadow-sm active:scale-98"
-                      title="Sao lưu trực tiếp toàn bộ dữ liệu ra file JSON"
-                    >
-                      <Download className="w-3 h-3" />
-                      <span>Sao Lưu JSON</span>
-                    </button>
-                    <label
-                      className="px-2.5 py-1 bg-teal-600 hover:bg-teal-500 text-white rounded-lg text-[11px] font-bold transition flex items-center gap-1 shadow-sm active:scale-98 cursor-pointer"
-                      title="Khôi phục dữ liệu từ file JSON Backup"
-                    >
-                      <Upload className="w-3 h-3" />
-                      <span>Khôi Phục JSON</span>
-                      <input type="file" accept=".json" onChange={handleRestoreJsonUpload} className="hidden" />
-                    </label>
                     <button
                       onClick={() => {
                         setIsAdminUnlocked(false);

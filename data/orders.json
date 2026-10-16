@@ -34,41 +34,5 @@
     "status": "approved",
     "generatedKey": "GLFB-VIP-GO50X",
     "note": "Đơn mua Gói 3 Tháng từ Extension • Tự động duyệt"
-  },
-  {
-    "id": "ord_1791734629017_i9ul",
-    "pkgName": "Gói 3 Tháng",
-    "price": "2.700.000đ",
-    "clientName": "củ tỏidfdsffdfds",
-    "phone": "164645464",
-    "deviceId": "dev_49omswx_mv370ms3",
-    "createdAt": "2026-10-11T16:03:49.017Z",
-    "status": "approved",
-    "note": "Đơn mua Gói 3 Tháng từ Extension • Đã xác nhận CK: CU TOIDFDSFFDFDS 164645464 3TH dev_49omswx_mv370ms3",
-    "generatedKey": "GLFB-VIP-QU9IY"
-  },
-  {
-    "id": "ord_1791734598867_7k63",
-    "pkgName": "Gói 12 Tháng",
-    "price": "10.800.000đ",
-    "clientName": "củ tỏidfdsffdfds",
-    "phone": "164645464",
-    "deviceId": "dev_49omswx_mv370ms3",
-    "createdAt": "2026-10-11T16:03:18.867Z",
-    "status": "approved",
-    "note": "Đơn mua Gói 12 Tháng từ Extension • Đã xác nhận CK: CU TOIDFDSFFDFDS 164645464 1N dev_49omswx_mv370ms3",
-    "generatedKey": "GLFB-VIP-QU9IY"
-  },
-  {
-    "id": "ord_1791734412180_z38y",
-    "pkgName": "Gói 12 Tháng",
-    "price": "10.800.000đ",
-    "clientName": "củ tỏidfdsffdfds",
-    "phone": "164645464",
-    "deviceId": "dev_49omswx_mv370ms3",
-    "createdAt": "2026-10-11T16:00:12.181Z",
-    "status": "approved",
-    "note": "Đơn mua Gói 12 Tháng từ Extension • Đã xác nhận CK: CU TOIDFDSFFDFDS 164645464 1N dev_49omswx_mv370ms3",
-    "generatedKey": "GLFB-VIP-QU9IY"
   }
 ]
