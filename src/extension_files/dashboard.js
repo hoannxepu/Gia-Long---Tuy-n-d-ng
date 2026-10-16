@@ -1266,11 +1266,31 @@ document.addEventListener('DOMContentLoaded', () => {
       const expiryAlertCard = document.getElementById('licenseExpiryAlertCard');
       const expiryAlertBadge = document.getElementById('expiryAlertBadge');
       const expiryAlertDesc = document.getElementById('expiryAlertDesc');
-      const lic = res.license;
+      const lic = res.license || {};
+
+      function parseExpDate(expStr) {
+        if (!expStr) return 0;
+        if (typeof expStr === 'number') return expStr;
+        if (typeof expStr === 'string') {
+          const s = expStr.trim();
+          if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(s)) {
+            const parts = s.split('/');
+            return new Date(parseInt(parts[2], 10), parseInt(parts[1], 10) - 1, parseInt(parts[0], 10), 23, 59, 59).getTime();
+          }
+          if (/^\d{4}-\d{1,2}-\d{1,2}/.test(s)) {
+            return new Date(s).getTime();
+          }
+          const d = new Date(s);
+          if (!isNaN(d.getTime())) return d.getTime();
+        }
+        return 0;
+      }
+
+      const clientPhoneVal = lic.phone || localStorage.getItem('gialong_last_phone') || 'Chưa cập nhật';
 
       if (res.isValid && lic && !res.isRevoked && !lic.isRevoked && !lic.isSuspended) {
         const isTrialPlan = lic.planType === 'trial';
-        const expMs = lic.expiresAt ? new Date(lic.expiresAt).getTime() : 0;
+        const expMs = parseExpDate(lic.expiresAt);
         const daysLeft = expMs > Date.now()
           ? Math.max(1, Math.ceil((expMs - Date.now()) / (24 * 60 * 60 * 1000)))
           : (typeof lic.daysLeft === 'number' ? lic.daysLeft : parseInt(lic.daysLeft || '0', 10));
@@ -1302,7 +1322,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Cập nhật Trang License
         if (licClientName) licClientName.innerText = lic.clientName || (isTrialPlan ? 'Khách Hàng Dùng Thử' : 'Khách Hàng VIP');
-        if (licClientPhone) licClientPhone.innerText = lic.phone || 'Chưa cập nhật';
+        if (licClientPhone) licClientPhone.innerText = clientPhoneVal;
         if (licKeyDisplay) licKeyDisplay.innerText = lic.key;
         if (licDeviceId) licDeviceId.innerText = activeId;
         if (licBadgeStatus) {
@@ -1316,7 +1336,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (licExpiresAtText) {
           try {
-            licExpiresAtText.innerText = new Date(lic.expiresAt).toLocaleDateString('vi-VN');
+            licExpiresAtText.innerText = new Date(parseExpDate(lic.expiresAt)).toLocaleDateString('vi-VN');
           } catch (e) {
             licExpiresAtText.innerText = lic.expiresAt || '---';
           }
@@ -1339,7 +1359,7 @@ document.addEventListener('DOMContentLoaded', () => {
               expiryAlertBadge.style.background = daysLeft <= 1 ? '#dc2626' : '#ea580c';
             }
             if (expiryAlertDesc) {
-              const expDate = lic.expiresAt ? new Date(lic.expiresAt).toLocaleDateString('vi-VN') : 'sắp tới';
+              const expDate = lic.expiresAt ? (isNaN(new Date(lic.expiresAt).getTime()) ? lic.expiresAt : new Date(parseExpDate(lic.expiresAt)).toLocaleDateString('vi-VN')) : 'sắp tới';
               expiryAlertDesc.innerHTML = `Gói cước của máy tính này sẽ hết hạn vào ngày <strong style="color: #fbbf24;">${expDate}</strong> (chỉ còn ${daysLeft} ngày). Vui lòng đặt mua thêm gói bên dưới để được <strong style="color: #34d399;">cộng dồn thời hạn sử dụng</strong> ngay lập tức, không làm gián đoạn lịch đăng bài tự động!`;
             }
           } else {
@@ -1372,7 +1392,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (licClientName) licClientName.innerText = lic?.clientName ? `${lic.clientName} (${isRevoked ? 'Đã Thu Hồi' : 'Hết Hạn'})` : (isRevoked ? 'Bản Quyền Bị Thu Hồi' : 'Chưa Kích Hoạt');
-        if (licClientPhone) licClientPhone.innerText = lic?.phone || '---';
+        if (licClientPhone) licClientPhone.innerText = clientPhoneVal !== 'Chưa cập nhật' ? clientPhoneVal : '---';
         if (licKeyDisplay) licKeyDisplay.innerText = lic?.key ? lic.key : 'Chưa có mã';
         if (licDeviceId) licDeviceId.innerText = activeId;
         if (licExpiresAtText) licExpiresAtText.innerText = isRevoked ? 'Đã thu hồi' : (isExp ? 'Đã hết hạn' : 'Cần đặt mua / duyệt gói');
@@ -1885,7 +1905,11 @@ window.submitOrderOnline = async function() {
 };
 
 // Hàm thực thi hoàn tất quá trình mua và gửi lệnh mua lên Server
+let isSubmittingOrder = false;
 window.proceedSendOrder = async function() {
+  if (isSubmittingOrder) return;
+  isSubmittingOrder = true;
+
   const modalConfirm = document.getElementById('modalConfirmTransferCheck');
   if (modalConfirm) modalConfirm.style.display = 'none';
 
@@ -1959,65 +1983,40 @@ window.proceedSendOrder = async function() {
     showSuccessUI(data || orderPayload);
   };
 
-  // Kích hoạt hiển thị thành công ngay tức thì
   triggerSuccessOnce(orderPayload);
 
-  // Gửi song song đến tất cả máy chủ trong nền (Không bao giờ block giao diện người dùng)
-  const candidateUrls = [
-    'https://gia-long---tuy-n-d-ng.pages.dev',
-    'http://localhost:3000',
-    'http://127.0.0.1:3000',
-  ];
-  try {
-    const savedCustom = localStorage.getItem('customApiServerUrl');
-    if (savedCustom && savedCustom.startsWith('http')) candidateUrls.unshift(savedCustom.replace(/\/+$/, ''));
-    if (typeof window !== 'undefined' && window.location && window.location.origin && window.location.origin.startsWith('http')) {
-      candidateUrls.unshift(window.location.origin.replace(/\/+$/, ''));
-    }
-  } catch (e) {}
-
-  // 1. Gửi qua Background Service Worker
+  // Gửi qua Background Service Worker (1 lần duy nhất)
   try {
     if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
       chrome.runtime.sendMessage({ action: 'CREATE_ORDER', payload: orderPayload });
     }
   } catch (e) {}
 
-  // 2. Direct fetch song song nhanh đến các máy chủ khả dụng (Cả /api/register cho D1 và /api/orders/create)
-  const registerPayload = {
-    id: stableOrderId,
-    machine_id: devId,
-    deviceId: devId,
-    pkg_name: pkg.name,
-    client_name: customerName || `Khách ${phone}`,
-    phone: phone,
-    price: pkg.price,
-    notes: orderPayload.note,
-  };
-
-  candidateUrls.forEach((base) => {
+  // Gửi duy nhất 1 request /api/orders/create tới server chính
+  try {
+    let base = 'https://gia-long---tuy-n-d-ng.pages.dev';
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
-      fetch(`${base}/api/orders/create`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(orderPayload),
-        signal: controller.signal,
-      }).then((res) => {
-        clearTimeout(timeoutId);
-        if (res.ok) {
-          console.log('[Gia Long FB] ✓ Đã gửi đơn hàng thành công lên máy chủ:', base);
-        }
-      }).catch(() => clearTimeout(timeoutId));
-
-      fetch(`${base}/api/register`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(registerPayload),
-      }).catch(() => {});
+      const savedCustom = localStorage.getItem('customApiServerUrl');
+      if (savedCustom && savedCustom.startsWith('http')) base = savedCustom.replace(/\/+$/, '');
+      if (typeof window !== 'undefined' && window.location && window.location.origin && window.location.origin.startsWith('http')) {
+        base = window.location.origin.replace(/\/+$/, '');
+      }
     } catch (e) {}
-  });
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    fetch(`${base}/api/orders/create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(orderPayload),
+      signal: controller.signal,
+    }).then((res) => {
+      clearTimeout(timeoutId);
+      if (res.ok) {
+        console.log('[Gia Long FB] ✓ Đã gửi đơn hàng thành công lên máy chủ:', base);
+      }
+    }).catch(() => clearTimeout(timeoutId));
+  } catch (e) {}
 
   // Gửi trực tiếp sang Google Drive Sheet Webhook nếu có
   try {
@@ -2090,6 +2089,10 @@ window.proceedSendOrder = async function() {
         }
       } catch (e) {}
     }
+  }, 3000);
+
+  setTimeout(() => {
+    isSubmittingOrder = false;
   }, 3000);
 };
 
