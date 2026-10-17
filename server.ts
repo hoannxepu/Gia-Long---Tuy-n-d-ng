@@ -57,6 +57,9 @@ export interface LicenseItem {
   revokedAt?: string;
   notes?: string;
   aliasKeys?: string[];
+  daysLeft?: number;
+  isExpired?: boolean;
+  revokedDevices?: string[];
 }
 
 // Khởi tạo danh sách rỗng nếu chưa có file (không tạo người dùng mẫu để tránh tái xuất hiện sau khi xóa)
@@ -1445,7 +1448,7 @@ export interface OrderItem {
   phone?: string;
   deviceId?: string;
   createdAt: string;
-  status: 'pending' | 'approved' | 'cancelled';
+  status: 'pending' | 'approved' | 'cancelled' | 'revoked';
   generatedKey?: string;
   note?: string;
 }

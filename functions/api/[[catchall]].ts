@@ -34,6 +34,9 @@ interface LicenseItem {
   revokedAt?: string;
   notes?: string;
   aliasKeys?: string[];
+  daysLeft?: number;
+  isExpired?: boolean;
+  revokedDevices?: string[];
 }
 
 interface OrderItem {
@@ -44,7 +47,7 @@ interface OrderItem {
   phone?: string;
   deviceId?: string;
   createdAt: string;
-  status: 'pending' | 'approved' | 'cancelled';
+  status: 'pending' | 'approved' | 'cancelled' | 'revoked';
   generatedKey?: string;
   note?: string;
 }
@@ -1008,7 +1011,6 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
     }
 
     // 3. Fallback sang Edge Memory / KV (nếu D1 chưa có hoặc dữ liệu cũ)
-    const cleanId = machineId.toLowerCase();
     const matchedLic = edgeLicenses.find((l) =>
       !l.isRevoked && l.devices?.some((d) => d.deviceId.toLowerCase() === cleanId)
     );
