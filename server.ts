@@ -1396,23 +1396,7 @@ function loadOrders(): OrderItem[] {
     const raw = fs.readFileSync(ORDERS_FILE, 'utf-8');
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed) && parsed.length > 0) {
-      let modified = false;
-      const cleaned = parsed.map((o: OrderItem) => {
-        if (o.status === 'pending') {
-          modified = true;
-          return { 
-            ...o, 
-            status: 'approved' as const, 
-            generatedKey: o.generatedKey || 'GLFB-VIP-' + Math.random().toString(36).substring(2, 7).toUpperCase(), 
-            note: (o.note || '') + ' • Tự động duyệt' 
-          };
-        }
-        return o;
-      });
-      if (modified) {
-        fs.writeFileSync(ORDERS_FILE, JSON.stringify(cleaned, null, 2), 'utf-8');
-      }
-      return cleaned;
+      return parsed;
     }
     return getInitialOrders();
   } catch (e) {
@@ -1511,10 +1495,36 @@ export function autoConsolidateLicensesAndOrders(): { licenses: LicenseItem[]; o
 
     const firstValidDev = ords.find((o) => o.deviceId && o.deviceId !== 'Chưa gắn' && !o.deviceId.includes('đang lấy') && !o.deviceId.includes('dang lay'))?.deviceId || devId;
 
+    let primaryLic: LicenseItem;
     if (matchedLics.length === 0) {
-      continue;
+      const newKey = ords[0].generatedKey || `GLFB-VIP-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
+      primaryLic = {
+        id: `lic_${ords[0].id}`,
+        key: newKey,
+        clientName: ords[0].clientName || 'Khách Đặt Mua',
+        phone: ords[0].phone || '',
+        planType: ords[0].pkgName?.includes('Team') ? 'team' : (ords[0].pkgName?.includes('Dùng Thử') ? 'trial' : 'individual'),
+        maxDevices: 1,
+        devices: firstValidDev && firstValidDev !== 'chưa gắn' && firstValidDev !== 'chuagan' ? [{
+          deviceId: firstValidDev,
+          deviceName: ords[0].clientName || 'Thiết bị đặt mua',
+          activatedAt: new Date().toISOString(),
+          lastSeenAt: new Date().toISOString(),
+        }] : [],
+        createdAt: new Date(earliestOrderMs).toISOString(),
+        expiresAt: new Date(earliestOrderMs + totalDays * 86400000).toISOString(),
+        isSuspended: false,
+        aliasKeys: ords.map((o) => o.generatedKey).filter((k): k is string => Boolean(k && k !== newKey)),
+        notes: `Bản quyền cấp từ duyệt đơn: ${ords[0].pkgName} (+${totalDays} ngày)`,
+        daysLeft: Math.max(0, Math.ceil((new Date(earliestOrderMs + totalDays * 86400000).getTime() - Date.now()) / 86400000)),
+        isExpired: (earliestOrderMs + totalDays * 86400000) < Date.now(),
+      };
+      licenses.push(primaryLic);
+      matchedLics.push(primaryLic);
+      licensesModified = true;
+    } else {
+      primaryLic = matchedLics[0];
     }
-    const primaryLic = matchedLics[0];
     const aliasSet = new Set<string>(primaryLic.aliasKeys || []);
 
     // Gom các license phụ vào primaryLic và xóa license trùng lặp

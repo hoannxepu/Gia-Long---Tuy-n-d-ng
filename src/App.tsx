@@ -575,6 +575,12 @@ export default function App() {
     return [];
   });
   const [isLoadingOrders, setIsLoadingOrders] = useState<boolean>(false);
+  const adminOrdersRef = useRef<any[]>(adminOrders);
+  adminOrdersRef.current = adminOrders;
+  const isAdminUnlockedRef = useRef<boolean>(isAdminUnlocked);
+  isAdminUnlockedRef.current = isAdminUnlocked;
+  const adminPinRef = useRef<string>(adminPin);
+  adminPinRef.current = adminPin;
   const [adminZaloUrl, setAdminZaloUrl] = useState<string>('https://zalo.me/0869029310');
   const [isUploadingQr, setIsUploadingQr] = useState<boolean>(false);
   const [qrVersion, setQrVersion] = useState<number>(Date.now());
@@ -1360,13 +1366,13 @@ export default function App() {
     try {
       const res = await fetch('/api/orders/pending-count');
       const data = await res.json();
-      const maxPending = (data && data.success && typeof data.pendingCount === 'number') ? data.pendingCount : 0;
+      const serverCount = (data && data.success && typeof data.pendingCount === 'number') ? data.pendingCount : 0;
       const latest = data?.latestPending;
 
-      // Nếu đơn mới nhất đã bị xóa bởi admin hoặc đã duyệt, không đếm
+      // Nếu đơn mới nhất đã bị xóa bởi admin, bỏ qua
       if (latest && latest.id && deletedOrderIdsRef.current.has(latest.id)) {
-        if (isAdminUnlocked) {
-          const count = adminOrders.filter((o) => o && o.status === 'pending' && !deletedOrderIdsRef.current.has(o.id)).length;
+        if (isAdminUnlockedRef.current) {
+          const count = adminOrdersRef.current.filter((o) => o && o.status === 'pending' && !deletedOrderIdsRef.current.has(o.id)).length;
           setPendingOrderCount(count);
         } else {
           setPendingOrderCount(0);
@@ -1374,31 +1380,38 @@ export default function App() {
         return;
       }
 
-      if (isAdminUnlocked) {
-        const count = adminOrders.filter((o) => o && o.status === 'pending' && !deletedOrderIdsRef.current.has(o.id)).length;
-        if (maxPending > count) {
+      if (isAdminUnlockedRef.current) {
+        const localPending = adminOrdersRef.current.filter((o) => o && o.status === 'pending' && !deletedOrderIdsRef.current.has(o.id)).length;
+        if (serverCount > localPending) {
           // Có đơn đặt mua mới thật sự từ máy chủ, đồng bộ ngay
-          fetchOrders(adminPin, true);
+          fetchOrders(adminPinRef.current, true);
         }
-        setPendingOrderCount(count);
+        setPendingOrderCount(localPending);
       } else {
-        setPendingOrderCount(maxPending);
+        // Nếu đã có cache adminOrders trong máy, ưu tiên số thực tế nếu có
+        if (adminOrdersRef.current.length > 0) {
+          const localPending = adminOrdersRef.current.filter((o) => o && o.status === 'pending' && !deletedOrderIdsRef.current.has(o.id)).length;
+          setPendingOrderCount(localPending > 0 ? localPending : (serverCount > 0 ? serverCount : 0));
+        } else {
+          setPendingOrderCount(serverCount);
+        }
       }
 
       if (latest && latest.id && !deletedOrderIdsRef.current.has(latest.id)) {
         notifiedOrderIdsRef.current.add(latest.id);
       }
-    } catch (e) {}
+    } catch (e) {
+      const localPending = adminOrdersRef.current.filter((o) => o && o.status === 'pending' && !deletedOrderIdsRef.current.has(o.id)).length;
+      setPendingOrderCount(localPending);
+    }
   };
 
   // Đồng bộ số lượng chờ duyệt tức thì mỗi khi adminOrders thay đổi
   useEffect(() => {
-    if (isAdminUnlocked) {
-      const realCount = adminOrders.filter(
-        (o) => o && o.status === 'pending' && !deletedOrderIdsRef.current.has(o.id)
-      ).length;
-      setPendingOrderCount(realCount);
-    }
+    const realCount = adminOrders.filter(
+      (o) => o && o.status === 'pending' && !deletedOrderIdsRef.current.has(o.id)
+    ).length;
+    setPendingOrderCount(realCount);
   }, [adminOrders, isAdminUnlocked]);
 
   useEffect(() => {
