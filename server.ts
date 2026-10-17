@@ -1733,7 +1733,8 @@ app.get('/api/orders/pending-count', async (_req: Request, res: Response) => {
   try {
     await pullGlobalStoreServer();
     const orders = loadOrders();
-    const pendingOrders = orders.filter((o) => o.status === 'pending');
+    const revoked = loadRevokedKeys().map((r) => r.key.trim().toUpperCase());
+    const pendingOrders = orders.filter((o) => o && o.status === 'pending' && !revoked.includes(o.id.toUpperCase()));
     res.json({
       success: true,
       pendingCount: pendingOrders.length,

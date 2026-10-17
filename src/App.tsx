@@ -284,6 +284,7 @@ export interface AdminLicenseItem {
   notes?: string;
   daysLeft?: number;
   isExpired?: boolean;
+  aliasKeys?: string[];
 }
 
 export interface LicenseHistoryItem {
@@ -659,6 +660,181 @@ export default function App() {
   const triggerToast = (msg: string) => {
     setActionToast(msg);
     setTimeout(() => setActionToast(null), 3500);
+  };
+
+  // Xác định số ngày của gói cước
+  const getOrderDurationDays = (pkgName?: string, price?: string): number => {
+    const p = (pkgName || '').toLowerCase();
+    const pr = (price || '').toLowerCase();
+    if (p.includes('dùng thử') || p.includes('trial') || pr === '0đ' || p.includes('1 ngày')) return 1;
+    if (p.includes('3 tháng') || p.includes('90 ngày') || p.includes('100 ngày') || p.includes('105 ngày')) return 100;
+    if (p.includes('6 tháng') || p.includes('180 ngày') || p.includes('195 ngày') || p.includes('210 ngày')) return 195;
+    if (p.includes('1 năm') || p.includes('12 tháng') || p.includes('360 ngày') || p.includes('365 ngày') || p.includes('390 ngày') || p.includes('420 ngày')) return 390;
+    if (p.includes('1 tháng') || p.includes('30 ngày')) return 30;
+    return 30;
+  };
+
+  // Trích xuất toàn bộ lịch sử chi tiết các lần mua gói, nạp key, cộng dồn cho khách hàng
+  const getCustomerPurchases = (lic: AdminLicenseItem) => {
+    const results: Array<{
+      id: string;
+      orderIndex: number;
+      pkgName: string;
+      orderDate: string;
+      startDate: string;
+      endDate: string;
+      daysAdded: number;
+      amount: string;
+      deviceId: string;
+      status: string;
+      note: string;
+    }> = [];
+
+    const seenIds = new Set<string>();
+    const licPhone = (lic.phone || '').replace(/\D/g, '');
+    const licKey = (lic.key || '').toUpperCase();
+    const aliasKeys = (lic.aliasKeys || []).map((k) => k.toUpperCase());
+    const licDevices = (lic.devices || []).map((d) => (d.deviceId || '').toLowerCase());
+
+    // 1. Lấy tất cả đơn hàng đã duyệt tương ứng từ adminOrders
+    const matchedOrders = adminOrders.filter((o) => {
+      if (!o || !o.id || deletedOrderIdsRef.current.has(o.id)) return false;
+      const ordPhone = (o.phone || '').replace(/\D/g, '');
+      const ordKey = (o.generatedKey || '').toUpperCase();
+      const ordDev = (o.deviceId || '').toLowerCase();
+
+      if (ordKey && (ordKey === licKey || aliasKeys.includes(ordKey))) return true;
+      if (licPhone && ordPhone && licPhone === ordPhone) return true;
+      if (ordDev && licDevices.includes(ordDev)) return true;
+      if (o.clientName && lic.clientName && o.clientName.trim().toLowerCase() === lic.clientName.trim().toLowerCase()) return true;
+      return false;
+    });
+
+    matchedOrders.sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
+
+    let rollingStartTime = new Date(lic.createdAt || Date.now()).getTime();
+
+    matchedOrders.forEach((o, idx) => {
+      seenIds.add(o.id);
+      const days = getOrderDurationDays(o.pkgName, o.price);
+      const ordTime = new Date(o.createdAt || lic.createdAt).getTime();
+      const startMs = Math.max(ordTime, idx === 0 ? new Date(lic.createdAt).getTime() : rollingStartTime);
+      const endMs = startMs + days * 24 * 60 * 60 * 1000;
+      rollingStartTime = endMs;
+
+      results.push({
+        id: o.id,
+        orderIndex: idx + 1,
+        pkgName: o.pkgName || 'Gói Bản Quyền',
+        orderDate: new Date(o.createdAt || lic.createdAt).toLocaleString('vi-VN', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+        startDate: new Date(startMs).toLocaleDateString('vi-VN'),
+        endDate: new Date(endMs).toLocaleDateString('vi-VN'),
+        daysAdded: days,
+        amount: o.price || 'Miễn phí',
+        deviceId: o.deviceId || lic.devices?.[0]?.deviceId || 'Chưa gắn',
+        status: o.status === 'approved' ? '✓ Đã duyệt' : '⏳ Chờ duyệt',
+        note: o.note || '',
+      });
+    });
+
+    // 2. Tra cứu thêm trong lịch sử cấp phép (historyList)
+    historyList.forEach((h) => {
+      if (!h || !h.id || seenIds.has(h.id)) return;
+      const histPhone = (h.phone || '').replace(/\D/g, '');
+      const histKey = (h.key || '').toUpperCase();
+      const histDev = (h.deviceId || '').toLowerCase();
+
+      const isMatch =
+        (histKey && (histKey === licKey || aliasKeys.includes(histKey))) ||
+        (licPhone && histPhone && licPhone === histPhone) ||
+        (histDev && licDevices.includes(histDev));
+
+      if (isMatch && (h.action === 'extend' || h.action === 'renew' || h.action === 'approve')) {
+        seenIds.add(h.id);
+        const days = h.daysAdded || getOrderDurationDays(h.pkgName, h.amount);
+        const histTime = new Date(h.createdAt || lic.createdAt).getTime();
+        const endMs = h.newExpiresAt ? new Date(h.newExpiresAt).getTime() : histTime + days * 86400000;
+        const startMs = endMs - days * 86400000;
+
+        results.push({
+          id: h.id,
+          orderIndex: results.length + 1,
+          pkgName: h.pkgName ? (h.pkgName.includes('Gói') ? h.pkgName : `Gói ${h.pkgName}`) : (h.actionName || 'Gia hạn gói'),
+          orderDate: new Date(h.createdAt).toLocaleString('vi-VN', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+          }),
+          startDate: new Date(startMs).toLocaleDateString('vi-VN'),
+          endDate: new Date(endMs).toLocaleDateString('vi-VN'),
+          daysAdded: days,
+          amount: h.amount || '—',
+          deviceId: h.deviceId || '—',
+          status: '✓ Đã cộng dồn',
+          note: h.notes || h.actionName,
+        });
+      }
+    });
+
+    // 3. Nếu chưa có bản ghi đơn đặt mua riêng lẻ, phân tích từ ghi chú hoặc thông tin bản quyền
+    if (results.length === 0) {
+      const notes = lic.notes || '';
+      if (notes.includes('cộng dồn') && notes.includes('+')) {
+        const parts = notes.split(':');
+        const pkgsPart = parts[1] ? parts[1].split('=')[0] : notes;
+        const rawPkgs = pkgsPart.split('+').map((s) => s.trim()).filter(Boolean);
+        let tempStart = new Date(lic.createdAt).getTime();
+
+        rawPkgs.forEach((raw, i) => {
+          const daysMatch = raw.match(/\+(\d+)n/);
+          const days = daysMatch ? parseInt(daysMatch[1], 10) : 30;
+          const tempEnd = tempStart + days * 24 * 60 * 60 * 1000;
+          const cleanPkgName = raw.replace(/\(\+\d+n\)/g, '').trim();
+
+          results.push({
+            id: `note_pkg_${i}_${lic.id}`,
+            orderIndex: i + 1,
+            pkgName: cleanPkgName || `Gói mua lần ${i + 1}`,
+            orderDate: new Date(tempStart).toLocaleDateString('vi-VN'),
+            startDate: new Date(tempStart).toLocaleDateString('vi-VN'),
+            endDate: new Date(tempEnd).toLocaleDateString('vi-VN'),
+            daysAdded: days,
+            amount: 'Đã thanh toán',
+            deviceId: lic.devices?.[0]?.deviceId || 'Theo máy kích hoạt',
+            status: '✓ Đã cộng dồn',
+            note: `Gói thứ ${i + 1} trong chuỗi cộng dồn`,
+          });
+          tempStart = tempEnd;
+        });
+      } else {
+        const start = new Date(lic.createdAt);
+        const end = new Date(lic.expiresAt);
+        const diffDays = Math.max(1, Math.round((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)));
+        results.push({
+          id: `init_${lic.id}`,
+          orderIndex: 1,
+          pkgName: lic.planType === 'team' ? 'Gói Doanh Nghiệp (Team)' : (lic.planType === 'trial' ? 'Gói Dùng Thử 1 Ngày' : 'Gói Cá Nhân'),
+          orderDate: start.toLocaleDateString('vi-VN'),
+          startDate: start.toLocaleDateString('vi-VN'),
+          endDate: end.toLocaleDateString('vi-VN'),
+          daysAdded: diffDays,
+          amount: 'Đã thanh toán',
+          deviceId: lic.devices?.[0]?.deviceId || 'Chưa gắn máy',
+          status: lic.isExpired ? '🚨 Hết hạn' : '✓ Đang dùng',
+          note: lic.notes || 'Bản quyền khởi tạo',
+        });
+      }
+    }
+
+    return results.sort((a, b) => new Date(b.orderDate).getTime() - new Date(a.orderDate).getTime());
   };
 
   const openActionModal = (lic: AdminLicenseItem) => {
@@ -1179,7 +1355,7 @@ export default function App() {
     }
   };
 
-  // Tra cứu số lượng đơn chờ duyệt
+  // Tra cứu số lượng đơn chờ duyệt (Đồng bộ chuẩn xác với dữ liệu thực tế)
   const fetchPendingCount = async () => {
     try {
       const res = await fetch('/api/orders/pending-count');
@@ -1187,14 +1363,43 @@ export default function App() {
       const maxPending = (data && data.success && typeof data.pendingCount === 'number') ? data.pendingCount : 0;
       const latest = data?.latestPending;
 
-      setPendingOrderCount((prev) => {
-        if (latest && latest.id) {
-          notifiedOrderIdsRef.current.add(latest.id);
+      // Nếu đơn mới nhất đã bị xóa bởi admin hoặc đã duyệt, không đếm
+      if (latest && latest.id && deletedOrderIdsRef.current.has(latest.id)) {
+        if (isAdminUnlocked) {
+          const count = adminOrders.filter((o) => o && o.status === 'pending' && !deletedOrderIdsRef.current.has(o.id)).length;
+          setPendingOrderCount(count);
+        } else {
+          setPendingOrderCount(0);
         }
-        return maxPending;
-      });
+        return;
+      }
+
+      if (isAdminUnlocked) {
+        const count = adminOrders.filter((o) => o && o.status === 'pending' && !deletedOrderIdsRef.current.has(o.id)).length;
+        if (maxPending > count) {
+          // Có đơn đặt mua mới thật sự từ máy chủ, đồng bộ ngay
+          fetchOrders(adminPin, true);
+        }
+        setPendingOrderCount(count);
+      } else {
+        setPendingOrderCount(maxPending);
+      }
+
+      if (latest && latest.id && !deletedOrderIdsRef.current.has(latest.id)) {
+        notifiedOrderIdsRef.current.add(latest.id);
+      }
     } catch (e) {}
   };
+
+  // Đồng bộ số lượng chờ duyệt tức thì mỗi khi adminOrders thay đổi
+  useEffect(() => {
+    if (isAdminUnlocked) {
+      const realCount = adminOrders.filter(
+        (o) => o && o.status === 'pending' && !deletedOrderIdsRef.current.has(o.id)
+      ).length;
+      setPendingOrderCount(realCount);
+    }
+  }, [adminOrders, isAdminUnlocked]);
 
   useEffect(() => {
     fetchPendingCount();
@@ -2573,12 +2778,18 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
               title="Dành riêng cho Quản trị viên quản lý và cấp key"
             >
               <span>{isAdminUnlocked ? 'Bảng Quản Trị (Admin)' : 'Quản Trị Cấp Key'}</span>
-              {isAdminUnlocked && pendingOrderCount > 0 && (
-                <span className="inline-flex items-center gap-1 bg-red-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-lg shadow-red-600/50 animate-bounce border border-amber-300 ml-0.5">
-                  <Bell className="w-3 h-3 text-amber-200" />
-                  <span>🔔 {pendingOrderCount} Chờ Duyệt!</span>
-                </span>
-              )}
+              {(() => {
+                const effectiveCount = isAdminUnlocked
+                  ? adminOrders.filter((o) => o && o.status === 'pending' && !deletedOrderIdsRef.current.has(o.id)).length
+                  : pendingOrderCount;
+                if (effectiveCount <= 0) return null;
+                return (
+                  <span className="inline-flex items-center gap-1 bg-red-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-lg shadow-red-600/50 animate-bounce border border-amber-300 ml-0.5">
+                    <Bell className="w-3 h-3 text-amber-200" />
+                    <span>🔔 {effectiveCount} Chờ Duyệt!</span>
+                  </span>
+                );
+              })()}
             </button>
 
             {/* Các tab kỹ thuật: CHỈ hiển thị khi bật chế độ nhà phát triển */}
@@ -4457,420 +4668,479 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
                   </div>
                 </div>
 
-                {/* HỘP THOẠI QUẢN LÝ KHÁCH HÀNG (ACTION MODAL DIALOG) - THIẾT KẾ GỌN GÀNG, CHUẨN WEB & ĐIỆN THOẠI */}
-                {actionModalLicense && (
-                  <div
-                    className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-2.5 sm:p-4 overflow-y-auto"
-                    onClick={() => setActionModalLicense(null)}
-                  >
+                {/* HỘP THOẠI QUẢN LÝ KHÁCH HÀNG (ACTION MODAL DIALOG) - THIẾT KẾ RỘNG RÃI, CHI TIẾT TỪNG LẦN MUA & BAO QUÁT */}
+                {actionModalLicense && (() => {
+                  const purchases = getCustomerPurchases(actionModalLicense);
+                  const totalDaysAccumulated = purchases.reduce((sum, p) => sum + (p.daysAdded || 0), 0);
+                  const firstPurchaseDate = purchases.length > 0 ? purchases[purchases.length - 1].startDate : new Date(actionModalLicense.createdAt).toLocaleDateString('vi-VN');
+                  const currentExpiryDate = new Date(actionModalLicense.expiresAt).toLocaleDateString('vi-VN');
+
+                  return (
                     <div
-                      className="bg-slate-900 border border-slate-700 rounded-2xl max-w-2xl w-full shadow-2xl overflow-hidden my-auto max-h-[92vh] flex flex-col animate-in fade-in zoom-in-95 duration-100"
-                      onClick={(e) => e.stopPropagation()}
+                      className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-2.5 sm:p-5 overflow-y-auto"
+                      onClick={() => setActionModalLicense(null)}
                     >
-                      {/* 1. Modal Header Cố Định - Cỡ chữ chuẩn */}
-                      <div className="px-4 py-3 bg-slate-950 border-b border-slate-800 flex items-center justify-between shrink-0">
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 flex items-center justify-center shrink-0">
-                            <Settings className="w-4 h-4" />
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <h3 className="text-sm sm:text-base font-bold text-white">
-                                {actionModalLicense.clientName}
-                              </h3>
-                              <span
-                                className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
-                                  actionModalLicense.isRevoked
-                                    ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                      <div
+                        className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-4xl lg:max-w-5xl w-full shadow-2xl overflow-hidden my-auto max-h-[92vh] flex flex-col animate-in fade-in zoom-in-95 duration-150"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {/* 1. Modal Header Cố Định - Cỡ chữ chuẩn, rõ ràng */}
+                        <div className="px-4 py-3 bg-slate-950 border-b border-slate-800 flex items-center justify-between shrink-0">
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 flex items-center justify-center shrink-0">
+                              <Settings className="w-5 h-5" />
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <h3 className="text-base sm:text-lg font-bold text-white tracking-tight">
+                                  {actionModalLicense.clientName}
+                                </h3>
+                                <span
+                                  className={`text-[10.5px] px-2.5 py-0.5 rounded-full font-bold ${
+                                    actionModalLicense.isRevoked
+                                      ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                                      : actionModalLicense.isSuspended
+                                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                                      : actionModalLicense.isExpired
+                                      ? 'bg-red-500/20 text-red-300 border border-red-500/30'
+                                      : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                  }`}
+                                >
+                                  {actionModalLicense.isRevoked
+                                    ? '🚫 Đã Thu Hồi'
                                     : actionModalLicense.isSuspended
-                                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                                    ? '⏸️ Đang Khóa'
                                     : actionModalLicense.isExpired
-                                    ? 'bg-red-500/20 text-red-300 border border-red-500/30'
-                                    : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                                }`}
-                              >
-                                {actionModalLicense.isRevoked
-                                  ? '🚫 Đã Thu Hồi'
-                                  : actionModalLicense.isSuspended
-                                  ? '⏸️ Đang Khóa'
-                                  : actionModalLicense.isExpired
-                                  ? '🚨 Hết Hạn'
-                                  : '✓ Đang Dùng'}
-                              </span>
-                            </div>
-                            <p className="text-[10.5px] text-slate-400">
-                              Quản trị bản quyền • Đồng bộ tức thì với Chrome Extension
-                            </p>
-                          </div>
-                        </div>
-
-                        <button
-                          onClick={() => setActionModalLicense(null)}
-                          className="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition shrink-0"
-                          title="Đóng hộp thoại"
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
-                      </div>
-
-                      {/* 2. Thẻ Tóm Tắt Thông Tin Tổng Quan (4 Thẻ Ngang Gọn Gàng) */}
-                      <div className="bg-slate-950/70 px-3.5 py-2 border-b border-slate-800 grid grid-cols-2 sm:grid-cols-4 gap-2 shrink-0 text-xs">
-                        {/* Thẻ 1: Mã Key */}
-                        <div className="bg-slate-900 border border-slate-800 p-2 rounded-lg space-y-0.5">
-                          <span className="text-[10px] text-slate-400 font-semibold uppercase block">Mã Bản Quyền</span>
-                          <div className="flex items-center justify-between gap-1">
-                            <span className="font-mono text-xs font-bold text-white truncate">
-                              {actionModalLicense.key}
-                            </span>
-                            <button
-                              onClick={() => {
-                                navigator.clipboard.writeText(actionModalLicense.key);
-                                setCopiedKey(actionModalLicense.id);
-                                setTimeout(() => setCopiedKey(null), 2000);
-                              }}
-                              className="p-0.5 text-slate-400 hover:text-white rounded hover:bg-slate-800 transition shrink-0"
-                              title="Sao chép Key"
-                            >
-                              {copiedKey === actionModalLicense.id ? (
-                                <Check className="w-3.5 h-3.5 text-emerald-400" />
-                              ) : (
-                                <Copy className="w-3.5 h-3.5" />
-                              )}
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* Thẻ 2: Hạn sử dụng */}
-                        <div className="bg-slate-900 border border-slate-800 p-2 rounded-lg space-y-0.5">
-                          <span className="text-[10px] text-slate-400 font-semibold uppercase block">Hạn Sử Dụng</span>
-                          <div className="text-xs font-bold text-white truncate flex items-center gap-1">
-                            <Calendar className="w-3 h-3 text-emerald-400 shrink-0" />
-                            <span>{new Date(actionModalLicense.expiresAt).toLocaleDateString('vi-VN')}</span>
-                          </div>
-                          <span
-                            className={`text-[10px] font-bold block ${
-                              actionModalLicense.isExpired
-                                ? 'text-rose-400'
-                                : (actionModalLicense.daysLeft || 0) <= 7
-                                ? 'text-amber-400'
-                                : 'text-emerald-400'
-                            }`}
-                          >
-                            {actionModalLicense.isExpired ? 'Hết hạn' : `Còn ${actionModalLicense.daysLeft} ngày`}
-                          </span>
-                        </div>
-
-                        {/* Thẻ 3: Gói & Máy */}
-                        <div className="bg-slate-900 border border-slate-800 p-2 rounded-lg space-y-0.5">
-                          <span className="text-[10px] text-slate-400 font-semibold uppercase block">Gói &amp; Thiết Bị</span>
-                          <div className="text-xs font-bold text-slate-200">
-                            {actionModalLicense.planType === 'team' ? 'Doanh Nghiệp' : 'Cá Nhân'}
-                          </div>
-                          <div className="text-[10px] text-slate-400 flex items-center gap-1">
-                            <Smartphone className="w-2.5 h-2.5 text-slate-500" />
-                            <span>{actionModalLicense.devices?.length || 0}/{actionModalLicense.maxDevices} máy</span>
-                          </div>
-                        </div>
-
-                        {/* Thẻ 4: Liên hệ */}
-                        <div className="bg-slate-900 border border-slate-800 p-2 rounded-lg space-y-0.5">
-                          <span className="text-[10px] text-slate-400 font-semibold uppercase block">Khách Hàng</span>
-                          <div className="text-xs font-bold text-slate-200 truncate">
-                            {actionModalLicense.phone || 'Chưa có SĐT'}
-                          </div>
-                          <span className="text-[10px] text-slate-500 truncate block">
-                            {actionModalLicense.notes || 'Không có ghi chú'}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* 3. Thân Modal - Bố Cục Khoa Học & Cỡ Chữ Chuẩn */}
-                      <div className="p-3.5 sm:p-4 overflow-y-auto space-y-3">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                          {/* ================= CỘT TRÁI: GIA HẠN & SỬA THỜI HẠN ================= */}
-                          <div className="bg-slate-950/70 border border-slate-800 p-3 rounded-xl space-y-3 flex flex-col justify-between">
-                            <div className="space-y-2.5">
-                              <div className="flex items-center justify-between border-b border-slate-800/80 pb-1.5">
-                                <h4 className="text-xs font-bold text-emerald-400 uppercase tracking-wide flex items-center gap-1.5">
-                                  <Zap className="w-3.5 h-3.5 text-emerald-400" />
-                                  <span>1. Gia Hạn Nhanh (Giữ Nguyên Mã)</span>
-                                </h4>
-                                <span className="text-[10px] text-slate-400">+ ngày dồn</span>
-                              </div>
-
-                              {/* 4 Nút Gia Hạn Cỡ Gọn Gàng Chuẩn Web & Mobile */}
-                              <div className="grid grid-cols-4 gap-1.5">
-                                <button
-                                  onClick={() => handleExtendLicense(actionModalLicense.id, 30)}
-                                  className="py-1.5 px-1 bg-emerald-600/15 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 rounded-lg transition flex flex-col items-center justify-center active:scale-95"
-                                >
-                                  <span className="text-xs font-bold">+1 Tháng</span>
-                                  <span className="text-[9.5px] text-emerald-400/80">+30n</span>
-                                </button>
-                                <button
-                                  onClick={() => handleExtendLicense(actionModalLicense.id, 90)}
-                                  className="py-1.5 px-1 bg-emerald-600/20 hover:bg-emerald-600/35 text-emerald-300 border border-emerald-500/40 rounded-lg transition flex flex-col items-center justify-center active:scale-95"
-                                >
-                                  <span className="text-xs font-bold">+3 Tháng</span>
-                                  <span className="text-[9.5px] text-emerald-400/80">+90n</span>
-                                </button>
-                                <button
-                                  onClick={() => handleExtendLicense(actionModalLicense.id, 180)}
-                                  className="py-1.5 px-1 bg-emerald-600/25 hover:bg-emerald-600/40 text-emerald-200 border border-emerald-500/50 rounded-lg transition flex flex-col items-center justify-center active:scale-95"
-                                >
-                                  <span className="text-xs font-bold">+6 Tháng</span>
-                                  <span className="text-[9.5px] text-emerald-300/80">+180n</span>
-                                </button>
-                                <button
-                                  onClick={() => handleExtendLicense(actionModalLicense.id, 365)}
-                                  className="py-1.5 px-1 bg-emerald-600/35 hover:bg-emerald-600/50 text-white border border-emerald-400/50 rounded-lg transition flex flex-col items-center justify-center active:scale-95"
-                                >
-                                  <span className="text-xs font-bold">+1 Năm</span>
-                                  <span className="text-[9.5px] text-emerald-200/80">+365n</span>
-                                </button>
-                              </div>
-
-                              {/* Cộng Ngày Tùy Ý */}
-                              <div className="flex items-center gap-1.5 pt-0.5">
-                                <span className="text-xs text-slate-300 font-medium whitespace-nowrap">
-                                  Cộng thêm:
+                                    ? '🚨 Hết Hạn'
+                                    : '✓ Đang Hoạt Động'}
                                 </span>
-                                <input
-                                  type="number"
-                                  min="1"
-                                  max="1000"
-                                  value={actionCustomDays}
-                                  onChange={(e) => setActionCustomDays(parseInt(e.target.value, 10) || 1)}
-                                  className="w-16 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-xs text-white text-center font-bold focus:outline-none focus:border-emerald-500"
-                                />
-                                <span className="text-xs text-slate-400">ngày</span>
-                                <button
-                                  onClick={() => handleExtendLicense(actionModalLicense.id, actionCustomDays)}
-                                  className="ml-auto px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition shadow-sm active:scale-95"
-                                >
-                                  Cộng Thêm
-                                </button>
                               </div>
-                            </div>
-
-                            {/* SỬA TRỰC TIẾP NGÀY HẾT HẠN (DATE PICKER) */}
-                            <div className="pt-2 border-t border-slate-800 space-y-1.5">
-                              <label className="text-xs font-bold text-slate-300 flex items-center justify-between">
-                                <span className="flex items-center gap-1 text-indigo-300">
-                                  <Calendar className="w-3.5 h-3.5" />
-                                  <span>2. Sửa Trực Tiếp Ngày Hết Hạn:</span>
-                                </span>
-                                <span className="text-[10px] text-slate-400 font-normal">Tùy ý tăng/giảm lùi ngày</span>
-                              </label>
-                              <div className="flex items-center gap-1.5">
-                                <input
-                                  type="date"
-                                  value={actionEditDate}
-                                  onChange={(e) => setActionEditDate(e.target.value)}
-                                  className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
-                                />
-                                <button
-                                  onClick={handleUpdateDirectDate}
-                                  className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 whitespace-nowrap active:scale-95"
-                                >
-                                  <Edit3 className="w-3 h-3" />
-                                  <span>Lưu Ngày</span>
-                                </button>
-                              </div>
-                              <p className="text-[10px] text-slate-400 italic">
-                                * Khắc phục khi cấp nhầm thời hạn hoặc muốn rút ngắn ngày dùng.
+                              <p className="text-[11px] text-slate-400 mt-0.5">
+                                Chi tiết khách hàng, lịch sử các lần mua gói &amp; Quản lý thời hạn bản quyền
                               </p>
                             </div>
                           </div>
 
-                          {/* ================= CỘT PHẢI: TIỆN ÍCH GỬI KHÁCH & THIẾT BỊ ================= */}
-                          <div className="bg-slate-950/70 border border-slate-800 p-3 rounded-xl space-y-3 flex flex-col justify-between">
-                            <div className="space-y-2.5">
-                              <div className="flex items-center justify-between border-b border-slate-800/80 pb-1.5">
-                                <h4 className="text-xs font-bold text-indigo-400 uppercase tracking-wide flex items-center gap-1.5">
-                                  <Share2 className="w-3.5 h-3.5 text-indigo-400" />
-                                  <span>3. Tiện Ích Gửi Khách Hàng</span>
+                          <button
+                            onClick={() => setActionModalLicense(null)}
+                            className="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition shrink-0"
+                            title="Đóng hộp thoại"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+
+                        {/* 2. Thẻ Tóm Tắt Thông Tin Tổng Quan (4 Thẻ Ngang Bao Quát & Dễ Nhìn) */}
+                        <div className="bg-slate-950/70 px-4 py-2.5 border-b border-slate-800 grid grid-cols-2 md:grid-cols-4 gap-2.5 shrink-0 text-xs">
+                          {/* Thẻ 1: Mã Key */}
+                          <div className="bg-slate-900/90 border border-slate-800 p-2.5 rounded-xl space-y-1">
+                            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Mã Bản Quyền (Key)</span>
+                            <div className="flex items-center justify-between gap-1.5">
+                              <span className="font-mono text-xs sm:text-sm font-bold text-white truncate">
+                                {actionModalLicense.key}
+                              </span>
+                              <button
+                                onClick={() => {
+                                  navigator.clipboard.writeText(actionModalLicense.key);
+                                  setCopiedKey(actionModalLicense.id);
+                                  triggerToast(`✓ Đã copy mã: ${actionModalLicense.key}`);
+                                  setTimeout(() => setCopiedKey(null), 2000);
+                                }}
+                                className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition shrink-0"
+                                title="Sao chép Key"
+                              >
+                                {copiedKey === actionModalLicense.id ? (
+                                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                                ) : (
+                                  <Copy className="w-3.5 h-3.5" />
+                                )}
+                              </button>
+                            </div>
+                            <span className="text-[10.5px] text-indigo-300 font-medium block truncate">
+                              {actionModalLicense.planType === 'team' ? 'Doanh Nghiệp (Team)' : (actionModalLicense.planType === 'trial' ? 'Dùng Thử 1 Ngày' : 'Cá Nhân (1 máy)')}
+                            </span>
+                          </div>
+
+                          {/* Thẻ 2: Thời gian bắt đầu -> kết thúc */}
+                          <div className="bg-slate-900/90 border border-slate-800 p-2.5 rounded-xl space-y-1">
+                            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Thời Gian &amp; Hạn Dùng</span>
+                            <div className="text-xs sm:text-sm font-bold text-white flex items-center gap-1.5 truncate">
+                              <Calendar className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                              <span>{currentExpiryDate}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span
+                                className={`text-[10px] font-bold px-1.5 py-0.2 rounded ${
+                                  actionModalLicense.isExpired
+                                    ? 'bg-rose-500/20 text-rose-300'
+                                    : (actionModalLicense.daysLeft || 0) <= 7
+                                    ? 'bg-amber-500/20 text-amber-300'
+                                    : 'bg-emerald-500/20 text-emerald-400'
+                                }`}
+                              >
+                                {actionModalLicense.isExpired ? 'Hết hạn' : `Còn ${actionModalLicense.daysLeft} ngày`}
+                              </span>
+                              <span className="text-[10px] text-slate-500">Từ: {firstPurchaseDate}</span>
+                            </div>
+                          </div>
+
+                          {/* Thẻ 3: Lần mua & cộng dồn */}
+                          <div className="bg-slate-900/90 border border-slate-800 p-2.5 rounded-xl space-y-1">
+                            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Số Lần Mua &amp; Cộng Dồn</span>
+                            <div className="text-xs sm:text-sm font-bold text-amber-400 flex items-center gap-1">
+                              <Package className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                              <span>{purchases.length} lần mua gói</span>
+                            </div>
+                            <span className="text-[10.5px] text-slate-400 block truncate">
+                              Tổng cộng: +{totalDaysAccumulated > 0 ? totalDaysAccumulated : (actionModalLicense.daysLeft || 30)} ngày
+                            </span>
+                          </div>
+
+                          {/* Thẻ 4: Khách hàng & Thiết bị */}
+                          <div className="bg-slate-900/90 border border-slate-800 p-2.5 rounded-xl space-y-1">
+                            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Khách Hàng &amp; Thiết Bị</span>
+                            <div className="text-xs sm:text-sm font-bold text-slate-200 truncate flex items-center gap-1">
+                              <Smartphone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                              <span>{actionModalLicense.phone || 'Chưa gắn SĐT'}</span>
+                            </div>
+                            <span className="text-[10.5px] text-sky-400 font-medium block truncate">
+                              Đã gắn: {actionModalLicense.devices?.length || 0}/{actionModalLicense.maxDevices} máy
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* 3. Thân Modal - Bố Cục Khoa Học & Cỡ Chữ Chuẩn Bao Quát */}
+                        <div className="p-3.5 sm:p-5 overflow-y-auto space-y-4 flex-1">
+                          {/* ================= KHU VỰC 1: BẢNG LỊCH SỬ CHI TIẾT CÁC LẦN MUA ================= */}
+                          <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3.5 space-y-3 shadow-md">
+                            <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                              <div className="flex items-center gap-2">
+                                <History className="w-4 h-4 text-emerald-400" />
+                                <h4 className="text-xs sm:text-sm font-bold text-white uppercase tracking-wide">
+                                  Chi Tiết Các Lần Mua, Gói Mua &amp; Thời Gian Hiệu Lực
                                 </h4>
-                                <span className="text-[10px] text-emerald-400 font-medium">1-Click nạp ngay</span>
+                                <span className="text-[11px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full font-bold">
+                                  {purchases.length} lần mua
+                                </span>
+                              </div>
+                              <span className="text-[11px] text-slate-400 hidden sm:inline">
+                                Hiển thị thời gian bắt đầu, kết thúc &amp; số ngày cộng dồn
+                              </span>
+                            </div>
+
+                            {/* Bảng Chi Tiết Từng Lần Mua / Nạp Key */}
+                            <div className="overflow-x-auto rounded-lg border border-slate-800/80">
+                              <table className="w-full text-left text-xs">
+                                <thead>
+                                  <tr className="bg-slate-900 text-slate-400 text-[10.5px] uppercase font-bold border-b border-slate-800">
+                                    <th className="py-2 px-3 whitespace-nowrap">Lần &amp; Ngày Mua</th>
+                                    <th className="py-2 px-3 whitespace-nowrap">Gói Mua</th>
+                                    <th className="py-2 px-3 whitespace-nowrap">Thời Gian Bắt Đầu</th>
+                                    <th className="py-2 px-3 whitespace-nowrap">Thời Gian Kết Thúc</th>
+                                    <th className="py-2 px-3 whitespace-nowrap">Số Tiền</th>
+                                    <th className="py-2 px-3 whitespace-nowrap">Mã Máy (Device ID)</th>
+                                    <th className="py-2 px-3 whitespace-nowrap text-right">Trạng Thái</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-800/60 bg-slate-950/40">
+                                  {purchases.map((item, pIdx) => (
+                                    <tr key={item.id || pIdx} className="hover:bg-slate-800/30 transition">
+                                      <td className="py-2.5 px-3 whitespace-nowrap">
+                                        <div className="flex items-center gap-1.5">
+                                          <span className="w-5 h-5 rounded-full bg-slate-800 text-slate-300 text-[10px] font-bold flex items-center justify-center shrink-0 border border-slate-700">
+                                            #{purchases.length - pIdx}
+                                          </span>
+                                          <div>
+                                            <span className="font-semibold text-slate-200 block text-[11.5px]">{item.orderDate}</span>
+                                            {item.note && (
+                                              <span className="text-[10px] text-slate-500 truncate max-w-[160px] block" title={item.note}>
+                                                {item.note}
+                                              </span>
+                                            )}
+                                          </div>
+                                        </div>
+                                      </td>
+                                      <td className="py-2.5 px-3 whitespace-nowrap">
+                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-purple-500/15 text-purple-300 border border-purple-500/30 font-bold text-[11px]">
+                                          <Package className="w-3 h-3 text-purple-400" />
+                                          <span>{item.pkgName}</span>
+                                        </span>
+                                        <span className="text-[10px] text-emerald-400 font-semibold ml-1.5">
+                                          +{item.daysAdded} ngày
+                                        </span>
+                                      </td>
+                                      <td className="py-2.5 px-3 whitespace-nowrap font-mono text-[11.5px] text-slate-300">
+                                        <div className="flex items-center gap-1">
+                                          <Calendar className="w-3 h-3 text-slate-500" />
+                                          <span>{item.startDate}</span>
+                                        </div>
+                                      </td>
+                                      <td className="py-2.5 px-3 whitespace-nowrap font-mono text-[11.5px] font-bold text-emerald-400">
+                                        <div className="flex items-center gap-1">
+                                          <Calendar className="w-3 h-3 text-emerald-500" />
+                                          <span>{item.endDate}</span>
+                                        </div>
+                                      </td>
+                                      <td className="py-2.5 px-3 whitespace-nowrap font-semibold text-amber-300 text-[11.5px]">
+                                        {item.amount}
+                                      </td>
+                                      <td className="py-2.5 px-3 whitespace-nowrap font-mono text-[11px] text-slate-400">
+                                        <div className="flex items-center gap-1" title={item.deviceId}>
+                                          <Smartphone className="w-3 h-3 text-slate-500" />
+                                          <span className="truncate max-w-[130px]">{item.deviceId}</span>
+                                        </div>
+                                      </td>
+                                      <td className="py-2.5 px-3 whitespace-nowrap text-right">
+                                        <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                                          {item.status}
+                                        </span>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+
+                          {/* ================= KHU VỰC 2: 2 CỘT QUẢN TRỊ & THIẾT BỊ CÂN ĐỐI ================= */}
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                            {/* CỘT TRÁI: GIA HẠN NHANH & SỬA THỜI HẠN */}
+                            <div className="bg-slate-950/70 border border-slate-800 p-3.5 rounded-xl space-y-3 flex flex-col justify-between">
+                              <div className="space-y-2.5">
+                                <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+                                  <h4 className="text-xs font-bold text-emerald-400 uppercase tracking-wide flex items-center gap-1.5">
+                                    <Zap className="w-4 h-4 text-emerald-400" />
+                                    <span>Gia Hạn Nhanh (Giữ Nguyên Mã)</span>
+                                  </h4>
+                                  <span className="text-[10px] text-slate-400">+ ngày dồn tự động</span>
+                                </div>
+
+                                {/* 4 Nút Gia Hạn Cỡ Gọn Gàng Chuẩn Web & Mobile */}
+                                <div className="grid grid-cols-4 gap-1.5">
+                                  <button
+                                    onClick={() => handleExtendLicense(actionModalLicense.id, 30)}
+                                    className="py-2 px-1 bg-emerald-600/15 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 rounded-lg transition flex flex-col items-center justify-center active:scale-95"
+                                  >
+                                    <span className="text-xs font-bold">+1 Tháng</span>
+                                    <span className="text-[9.5px] text-emerald-400/80">+30n</span>
+                                  </button>
+                                  <button
+                                    onClick={() => handleExtendLicense(actionModalLicense.id, 90)}
+                                    className="py-2 px-1 bg-emerald-600/20 hover:bg-emerald-600/35 text-emerald-300 border border-emerald-500/40 rounded-lg transition flex flex-col items-center justify-center active:scale-95"
+                                  >
+                                    <span className="text-xs font-bold">+3 Tháng</span>
+                                    <span className="text-[9.5px] text-emerald-400/80">+90n</span>
+                                  </button>
+                                  <button
+                                    onClick={() => handleExtendLicense(actionModalLicense.id, 180)}
+                                    className="py-2 px-1 bg-emerald-600/25 hover:bg-emerald-600/40 text-emerald-200 border border-emerald-500/50 rounded-lg transition flex flex-col items-center justify-center active:scale-95"
+                                  >
+                                    <span className="text-xs font-bold">+6 Tháng</span>
+                                    <span className="text-[9.5px] text-emerald-300/80">+180n</span>
+                                  </button>
+                                  <button
+                                    onClick={() => handleExtendLicense(actionModalLicense.id, 365)}
+                                    className="py-2 px-1 bg-emerald-600/35 hover:bg-emerald-600/50 text-white border border-emerald-400/50 rounded-lg transition flex flex-col items-center justify-center active:scale-95"
+                                  >
+                                    <span className="text-xs font-bold">+1 Năm</span>
+                                    <span className="text-[9.5px] text-emerald-200/80">+365n</span>
+                                  </button>
+                                </div>
+
+                                {/* Cộng Ngày Tùy Ý */}
+                                <div className="flex items-center gap-2 pt-0.5">
+                                  <span className="text-xs text-slate-300 font-medium whitespace-nowrap">
+                                    Cộng thêm:
+                                  </span>
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    max="1000"
+                                    value={actionCustomDays}
+                                    onChange={(e) => setActionCustomDays(parseInt(e.target.value, 10) || 1)}
+                                    className="w-20 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-white text-center font-bold focus:outline-none focus:border-emerald-500"
+                                  />
+                                  <span className="text-xs text-slate-400">ngày</span>
+                                  <button
+                                    onClick={() => handleExtendLicense(actionModalLicense.id, actionCustomDays)}
+                                    className="ml-auto px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition shadow-sm active:scale-95"
+                                  >
+                                    Cộng Thêm
+                                  </button>
+                                </div>
                               </div>
 
-                              {/* Link 1-Click gọn gàng */}
-                              <div className="space-y-1">
-                                <span className="text-xs font-semibold text-slate-300 block">
-                                  Link Kích Hoạt Tự Động (1-Click):
-                                </span>
-                                <div className="flex gap-1.5">
+                              {/* SỬA TRỰC TIẾP NGÀY HẾT HẠN (DATE PICKER) */}
+                              <div className="pt-2.5 border-t border-slate-800 space-y-1.5">
+                                <label className="text-xs font-bold text-slate-300 flex items-center justify-between">
+                                  <span className="flex items-center gap-1.5 text-indigo-300">
+                                    <Calendar className="w-3.5 h-3.5" />
+                                    <span>Sửa Trực Tiếp Ngày Hết Hạn:</span>
+                                  </span>
+                                  <span className="text-[10px] text-slate-400 font-normal">Tùy ý tăng/giảm lùi ngày</span>
+                                </label>
+                                <div className="flex items-center gap-1.5">
                                   <input
-                                    type="text"
-                                    readOnly
-                                    value={`${window.location.origin}/?kich_hoat=${encodeURIComponent(actionModalLicense.key)}`}
-                                    className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-slate-300 font-mono select-all focus:outline-none"
+                                    type="date"
+                                    value={actionEditDate}
+                                    onChange={(e) => setActionEditDate(e.target.value)}
+                                    className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
                                   />
                                   <button
-                                    onClick={() => handleCopyOneClickLink(actionModalLicense.key)}
-                                    className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 whitespace-nowrap active:scale-95"
+                                    onClick={handleUpdateDirectDate}
+                                    className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 whitespace-nowrap active:scale-95"
                                   >
-                                    <Copy className="w-3 h-3" />
-                                    <span>{copiedLinkKey === actionModalLicense.key ? '✓ Xong' : 'Copy'}</span>
+                                    <Edit3 className="w-3.5 h-3.5" />
+                                    <span>Lưu Ngày</span>
                                   </button>
                                 </div>
-                                <p className="text-[10px] text-slate-400">
-                                  Gửi qua Zalo/FB: khách mở link là tiện ích tự kích hoạt không cần gõ mã.
+                                <p className="text-[10px] text-slate-400 italic">
+                                  * Khắc phục khi cấp nhầm thời hạn hoặc muốn rút ngắn ngày dùng.
                                 </p>
-                              </div>
-
-                              {/* 3 Nút Thao Tác Tiện Lợi */}
-                              <div className="space-y-1.5 pt-0.5">
-                                <button
-                                  onClick={() => handleCopyStoreHandoverTemplate(actionModalLicense)}
-                                  className="w-full p-2 bg-gradient-to-r from-teal-600/25 to-emerald-600/25 hover:from-teal-600/35 hover:to-emerald-600/35 text-teal-300 border border-teal-500/40 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 active:scale-95 shadow-sm"
-                                  title="Copy mẫu tin nhắn Zalo kèm Link Edge Store chính thức + Link tự động kích hoạt 1-Click"
-                                >
-                                  <Globe className="w-3.5 h-3.5 text-teal-400 shrink-0" />
-                                  <span className="truncate">
-                                    {copiedHandoverMsg === actionModalLicense.id ? '✓ Đã Copy Mẫu Bàn Giao' : 'Mẫu Gửi Khách (Kèm Link Edge Store)'}
-                                  </span>
-                                </button>
-
-                                <div className="grid grid-cols-2 gap-1.5">
-                                  <button
-                                    onClick={() => handleCopyZaloTemplate(actionModalLicense)}
-                                    className="p-2 bg-blue-600/15 hover:bg-blue-600/25 text-blue-300 border border-blue-500/30 rounded-lg text-xs font-semibold transition flex items-center justify-center gap-1.5 active:scale-95"
-                                    title="Copy mẫu tin nhắn Zalo kèm thông tin thanh toán TPBank"
-                                  >
-                                    <MessageSquare className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-                                    <span className="truncate">{copiedZaloMsg === actionModalLicense.id ? '✓ Đã Copy' : 'Mẫu Nhắc Tiền'}</span>
-                                  </button>
-
-                                  <button
-                                    onClick={() =>
-                                      handleRegenerateKey(actionModalLicense.id, actionModalLicense.clientName, actionModalLicense.key)
-                                    }
-                                    className="p-2 bg-amber-600/15 hover:bg-amber-600/25 text-amber-300 border border-amber-500/30 rounded-lg text-xs font-semibold transition flex items-center justify-center gap-1.5 active:scale-95"
-                                    title="Cấp đổi sang mã mới toanh (Hủy mã cũ, giữ nguyên số ngày sử dụng còn lại)"
-                                  >
-                                    <RefreshCw className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                                    <span className="truncate">Đổi Sang Mã Mới</span>
-                                  </button>
-                                </div>
                               </div>
                             </div>
 
-                            {/* Quản lý thiết bị máy tính */}
-                            <div className="pt-2 border-t border-slate-800 space-y-1.5">
-                              <div className="flex items-center justify-between">
-                                <h4 className="text-xs font-bold text-sky-400 uppercase tracking-wide flex items-center gap-1.5">
-                                  <Laptop className="w-3.5 h-3.5 text-sky-400" />
-                                  <span>4. Thiết Bị ({actionModalLicense.devices?.length || 0}/{actionModalLicense.maxDevices} máy)</span>
-                                </h4>
-                                <button
-                                  onClick={() => handleResetDevices(actionModalLicense.id)}
-                                  className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-md text-[10.5px] font-semibold transition border border-slate-700 active:scale-95"
-                                >
-                                  Reset Máy
-                                </button>
+                            {/* CỘT PHẢI: QUẢN LÝ THIẾT BỊ MÁY TÍNH & ĐỔI MÃ */}
+                            <div className="bg-slate-950/70 border border-slate-800 p-3.5 rounded-xl space-y-3 flex flex-col justify-between">
+                              <div className="space-y-2.5">
+                                <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+                                  <h4 className="text-xs font-bold text-sky-400 uppercase tracking-wide flex items-center gap-1.5">
+                                    <Laptop className="w-4 h-4 text-sky-400" />
+                                    <span>Thiết Bị Kích Hoạt ({actionModalLicense.devices?.length || 0}/{actionModalLicense.maxDevices} máy)</span>
+                                  </h4>
+                                  <button
+                                    onClick={() => handleResetDevices(actionModalLicense.id)}
+                                    className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-lg text-[11px] font-semibold transition border border-slate-700 active:scale-95 flex items-center gap-1"
+                                    title="Xóa danh sách thiết bị để khách đổi sang máy tính khác"
+                                  >
+                                    <RefreshCw className="w-3 h-3 text-amber-400" />
+                                    <span>Reset Máy</span>
+                                  </button>
+                                </div>
+
+                                {(!actionModalLicense.devices || actionModalLicense.devices.length === 0) ? (
+                                  <div className="text-[11px] text-slate-400 italic bg-slate-900/60 p-3 rounded-lg border border-slate-800/80 space-y-1">
+                                    <p className="text-slate-300 font-semibold">Chưa có máy tính nào kích hoạt.</p>
+                                    <p className="text-[10.5px] text-slate-500">Khách có thể nhập mã này trên Chrome/Edge Extension để liên kết thiết bị đầu tiên.</p>
+                                  </div>
+                                ) : (
+                                  <div className="space-y-1.5 max-h-36 overflow-y-auto">
+                                    {actionModalLicense.devices.map((d, idx) => (
+                                      <div
+                                        key={idx}
+                                        className="bg-slate-900 p-2 rounded-lg border border-slate-800 flex items-center justify-between text-xs"
+                                      >
+                                        <div className="flex items-center gap-2">
+                                          <div className="w-6 h-6 rounded-md bg-sky-500/10 border border-sky-500/20 text-sky-400 flex items-center justify-center shrink-0">
+                                            <Laptop className="w-3.5 h-3.5" />
+                                          </div>
+                                          <div>
+                                            <span className="font-semibold text-slate-200 block text-[11.5px]">
+                                              {d.deviceName || `Máy tính ${idx + 1}`}
+                                            </span>
+                                            <span className="font-mono text-[10px] text-slate-500">
+                                              ID: {d.deviceId}
+                                            </span>
+                                          </div>
+                                        </div>
+                                        <div className="text-right">
+                                          <span className="text-[10px] text-slate-400 block">
+                                            {new Date(d.activatedAt).toLocaleDateString('vi-VN')}
+                                          </span>
+                                          <span className="text-[9.5px] text-emerald-400 font-medium">Đang kết nối</span>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
                               </div>
 
-                              {(!actionModalLicense.devices || actionModalLicense.devices.length === 0) ? (
-                                <p className="text-[10.5px] text-slate-500 italic bg-slate-900/60 p-1.5 rounded-lg border border-slate-800/80">
-                                  Chưa có máy tính nào kích hoạt. Khách có thể nhập mã bình thường.
-                                </p>
-                              ) : (
-                                <div className="space-y-1 max-h-20 overflow-y-auto">
-                                  {actionModalLicense.devices.map((d, idx) => (
-                                    <div
-                                      key={idx}
-                                      className="bg-slate-900 p-1.5 rounded-md border border-slate-800 flex items-center justify-between text-[11px]"
-                                    >
-                                      <div className="flex items-center gap-1.5">
-                                        <Smartphone className="w-3 h-3 text-slate-400" />
-                                        <span className="font-semibold text-slate-200">
-                                          {d.deviceName || `Máy ${idx + 1}`}
-                                        </span>
-                                        <span className="font-mono text-[9.5px] text-slate-500">
-                                          ({d.deviceId.slice(-6)})
-                                        </span>
-                                      </div>
-                                      <span className="text-[10px] text-slate-400">
-                                        {new Date(d.activatedAt).toLocaleDateString('vi-VN')}
-                                      </span>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
+                              {/* Nút Cấp Đổi Sang Mã Mới Toanh */}
+                              <div className="pt-2.5 border-t border-slate-800">
+                                <button
+                                  onClick={() =>
+                                    handleRegenerateKey(actionModalLicense.id, actionModalLicense.clientName, actionModalLicense.key)
+                                  }
+                                  className="w-full py-2 px-3 bg-amber-600/15 hover:bg-amber-600/25 text-amber-300 border border-amber-500/30 rounded-lg text-xs font-semibold transition flex items-center justify-center gap-2 active:scale-95"
+                                  title="Cấp đổi sang mã mới toanh (Hủy mã cũ, giữ nguyên số ngày sử dụng còn lại)"
+                                >
+                                  <RefreshCw className="w-3.5 h-3.5 text-amber-400" />
+                                  <span>Đổi Sang Mã Bản Quyền Mới (Giữ Nguyên Ngày Dùng)</span>
+                                </button>
+                              </div>
                             </div>
                           </div>
                         </div>
-                      </div>
 
-                      {/* 4. Modal Footer Cố Định - Cỡ chữ chuẩn, thao tác nhanh */}
-                      <div className="px-3.5 py-2.5 bg-slate-950 border-t border-slate-800 flex flex-wrap items-center justify-between gap-2 shrink-0">
-                        {/* Nhóm nút bảo mật & khẩn cấp */}
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          {/* Tạm khóa / Mở khóa */}
-                          <button
-                            onClick={() => handleToggleLicense(actionModalLicense.id)}
-                            className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1 active:scale-95 ${
-                              actionModalLicense.isSuspended
-                                ? 'bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-600/50'
-                                : 'bg-amber-600/30 text-amber-300 border border-amber-500/40 hover:bg-amber-600/50'
-                            }`}
-                          >
-                            {actionModalLicense.isSuspended ? (
-                              <>
-                                <Unlock className="w-3.5 h-3.5" />
-                                <span>Mở Khóa</span>
-                              </>
+                        {/* 4. Modal Footer Cố Định - Cỡ chữ chuẩn, thao tác nhanh */}
+                        <div className="px-4 py-3 bg-slate-950 border-t border-slate-800 flex flex-wrap items-center justify-between gap-2.5 shrink-0">
+                          {/* Nhóm nút bảo mật & khẩn cấp */}
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {/* Tạm khóa / Mở khóa */}
+                            <button
+                              onClick={() => handleToggleLicense(actionModalLicense.id)}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 active:scale-95 ${
+                                actionModalLicense.isSuspended
+                                  ? 'bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-600/50'
+                                  : 'bg-amber-600/30 text-amber-300 border border-amber-500/40 hover:bg-amber-600/50'
+                              }`}
+                            >
+                              {actionModalLicense.isSuspended ? (
+                                <>
+                                  <Unlock className="w-3.5 h-3.5" />
+                                  <span>Mở Khóa</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Lock className="w-3.5 h-3.5" />
+                                  <span>Tạm Khóa</span>
+                                </>
+                              )}
+                            </button>
+
+                            {/* Thu hồi khẩn cấp / Mở lại */}
+                            {actionModalLicense.isRevoked ? (
+                              <button
+                                onClick={() => handleUnrevokeLicense(actionModalLicense.id, actionModalLicense.clientName)}
+                                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 active:scale-95"
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                <span>Khôi Phục Quyền</span>
+                              </button>
                             ) : (
-                              <>
-                                <Lock className="w-3.5 h-3.5" />
-                                <span>Tạm Khóa</span>
-                              </>
+                              <button
+                                onClick={() => handleOpenRevokeModal(actionModalLicense)}
+                                className="px-3 py-1.5 bg-rose-600/30 hover:bg-rose-600/50 text-rose-300 border border-rose-500/40 rounded-lg text-xs font-bold transition flex items-center gap-1.5 active:scale-95 shadow-sm"
+                                title="Ngắt kết nối ngay lập tức toàn bộ máy tính của khách"
+                              >
+                                <ShieldAlert className="w-3.5 h-3.5" />
+                                <span>🚫 Thu Hồi (Ngắt Máy)</span>
+                              </button>
                             )}
-                          </button>
 
-                          {/* Thu hồi khẩn cấp / Mở lại */}
-                          {actionModalLicense.isRevoked ? (
+                            {/* Xóa vĩnh viễn */}
                             <button
-                              onClick={() => handleUnrevokeLicense(actionModalLicense.id, actionModalLicense.clientName)}
-                              className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 active:scale-95"
+                              onClick={() => handleDeleteLicense(actionModalLicense.id, actionModalLicense.key, actionModalLicense.clientName)}
+                              className="px-2.5 py-1.5 bg-slate-900 hover:bg-rose-950 text-slate-400 hover:text-rose-400 rounded-lg text-xs font-medium transition border border-slate-800 flex items-center gap-1.5 active:scale-95"
+                              title="Xóa hẳn bản ghi này khỏi hệ thống"
                             >
-                              <CheckCircle2 className="w-3.5 h-3.5" />
-                              <span>Khôi Phục Quyền</span>
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>Xóa</span>
                             </button>
-                          ) : (
-                            <button
-                              onClick={() => handleOpenRevokeModal(actionModalLicense)}
-                              className="px-2.5 py-1.5 bg-rose-600/30 hover:bg-rose-600/50 text-rose-300 border border-rose-500/40 rounded-lg text-xs font-bold transition flex items-center gap-1 active:scale-95 shadow-sm"
-                              title="Ngắt kết nối ngay lập tức toàn bộ máy tính của khách"
-                            >
-                              <ShieldAlert className="w-3.5 h-3.5" />
-                              <span>🚫 Thu Hồi (Ngắt Máy)</span>
-                            </button>
-                          )}
+                          </div>
 
-                          {/* Xóa vĩnh viễn */}
+                          {/* Nút Đóng */}
                           <button
-                            onClick={() => handleDeleteLicense(actionModalLicense.id, actionModalLicense.key, actionModalLicense.clientName)}
-                            className="px-2 py-1.5 bg-slate-900 hover:bg-rose-950 text-slate-400 hover:text-rose-400 rounded-lg text-xs font-medium transition border border-slate-800 flex items-center gap-1 active:scale-95"
-                            title="Xóa hẳn bản ghi này khỏi hệ thống"
+                            onClick={() => setActionModalLicense(null)}
+                            className="ml-auto px-5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-lg text-xs font-bold transition active:scale-95"
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
-                            <span>Xóa</span>
+                            Đóng
                           </button>
                         </div>
-
-                        {/* Nút Đóng */}
-                        <button
-                          onClick={() => setActionModalLicense(null)}
-                          className="ml-auto px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-lg text-xs font-bold transition active:scale-95"
-                        >
-                          Đóng
-                        </button>
                       </div>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
 
                 {/* HỘP THOẠI XÁC NHẬN XÓA TỰ TẠO (CUSTOM IN-APP DELETE MODAL - CHỐNG BỊ CHẶN BỞI IFRAME) */}
                 {deleteConfirmItem && (

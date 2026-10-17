@@ -1326,6 +1326,24 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
 
   // ROUTE: Lấy số lượng đơn hàng chờ duyệt
   if (pathname === '/api/orders/pending-count' && method === 'GET') {
+    if (kv) {
+      try {
+        const kvOrders = await kv.get('glfb_orders');
+        if (kvOrders) {
+          const parsed = JSON.parse(kvOrders);
+          if (Array.isArray(parsed)) {
+            edgeOrders = parsed;
+          }
+        }
+        const kvRevoked = await kv.get('glfb_revoked_keys');
+        if (kvRevoked) {
+          const parsedRev = JSON.parse(kvRevoked);
+          if (Array.isArray(parsedRev)) {
+            edgeRevokedKeys = parsedRev;
+          }
+        }
+      } catch (e) {}
+    }
     if (d1) {
       try {
         const countRes: any = await d1.prepare(`SELECT COUNT(*) as c FROM orders WHERE status = 'pending'`).first();
@@ -1343,7 +1361,8 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
         });
       } catch (e) {}
     }
-    const pendingOrders = edgeOrders.filter((o) => o.status === 'pending');
+    const revokedSet = new Set(edgeRevokedKeys.map((r) => String(r).toUpperCase()));
+    const pendingOrders = edgeOrders.filter((o) => o && o.status === 'pending' && !revokedSet.has(o.id.toUpperCase()));
     return jsonResponse({
       success: true,
       pendingCount: pendingOrders.length,
