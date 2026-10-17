@@ -108,6 +108,12 @@
         window.postMessage({ type: 'AUTORECRUIT_CHECK_LICENSE_RESULT', result: res }, '*');
       });
     }
+
+    if (event.data && event.data.type === 'AUTORECRUIT_FORCE_REVOKE') {
+      chrome.runtime.sendMessage({ action: 'FORCE_REVOKE_DEVICE' }, (res) => {
+        window.postMessage({ type: 'AUTORECRUIT_FORCE_REVOKE_RESULT', result: res }, '*');
+      });
+    }
   });
 
   window.addEventListener('storage', (event) => {

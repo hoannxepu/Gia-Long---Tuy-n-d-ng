@@ -851,6 +851,56 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
       return jsonResponse({ success: false, status: 'error', message: 'Thiếu tham số machine_id!' }, 400);
     }
 
+    const cleanId = machineId.toLowerCase();
+    const cleanIdUpper = machineId.toUpperCase();
+    const revUpper = edgeRevokedKeys.map((r) => String(r).trim().toUpperCase());
+    if (
+      revUpper.includes(cleanIdUpper) ||
+      revUpper.includes(`DEV:${cleanIdUpper}`) ||
+      edgeRevokedKeys.includes(cleanId) ||
+      edgeRevokedKeys.includes(`dev:${cleanId}`)
+    ) {
+      return jsonResponse({
+        success: false,
+        status: 'revoked',
+        isRevoked: true,
+        action: 'FORCE_REVOKE',
+        machine_id: machineId,
+        message: '🚨 Bản quyền của thiết bị này đã bị Quản trị viên thu hồi và ngắt kết nối!',
+      });
+    }
+
+    // Kiểm tra nếu thiết bị thuộc license đã bị thu hồi trong edgeLicenses
+    const revokedLic = edgeLicenses.find((l) =>
+      l.isRevoked && (
+        (l.devices && l.devices.some((d) => d.deviceId.toLowerCase() === cleanId)) ||
+        ((l as any).revokedDevices && (l as any).revokedDevices.some((d: string) => d.toLowerCase() === cleanId))
+      )
+    );
+    if (revokedLic) {
+      return jsonResponse({
+        success: false,
+        status: 'revoked',
+        isRevoked: true,
+        action: 'FORCE_REVOKE',
+        machine_id: machineId,
+        message: `🚨 BẢN QUYỀN ĐÃ BỊ THU HỒI (NGẮT MÁY): ${revokedLic.revokeReason || 'Quản trị viên đã ngắt kết nối'}!`,
+      });
+    }
+
+    // Kiểm tra nếu có đơn hàng của máy này đã bị thu hồi
+    const revokedOrd = edgeOrders.find((o) => o.status === 'revoked' && (o.deviceId || '').toLowerCase() === cleanId);
+    if (revokedOrd) {
+      return jsonResponse({
+        success: false,
+        status: 'revoked',
+        isRevoked: true,
+        action: 'FORCE_REVOKE',
+        machine_id: machineId,
+        message: '🚨 Máy tính này đã bị Quản trị viên thu hồi bản quyền và ngắt máy!',
+      });
+    }
+
     // 1. Kiểm tra trên Cloudflare D1 Database trước
     const d1 = await getD1Db(env);
     let d1Lic: any = null;
@@ -1024,9 +1074,11 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
 
     return jsonResponse({
       success: false,
-      status: 'not_found',
+      status: 'revoked',
+      isRevoked: true,
+      action: 'FORCE_REVOKE',
       machine_id: machineId,
-      message: 'Mã máy chưa đăng ký gói bản quyền nào trên hệ thống.',
+      message: 'Mã máy chưa đăng ký hoặc bản quyền đã bị ngắt kết nối khỏi hệ thống.',
     });
   }
 
@@ -1441,8 +1493,31 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
       totalPurchasedDays += getOrderDurationDays(o.pkgName, o.price);
     }
 
+    const cleanDevUpper = cleanDevId.toUpperCase();
+    const revUpper = edgeRevokedKeys.map((r) => String(r).trim().toUpperCase());
+    const isRevokedDev = revUpper.includes(cleanDevUpper) ||
+      revUpper.includes(`DEV:${cleanDevUpper}`) ||
+      (phone && revUpper.includes(`PHONE:${phone}`)) ||
+      matched.some((o) => o.status === 'revoked');
+
+    if (isRevokedDev) {
+      return jsonResponse({
+        success: true,
+        isRevoked: true,
+        action: 'FORCE_REVOKE',
+        orders: matched,
+        totalPending: 0,
+        approvedCount: 0,
+        totalPurchasedDays: 0,
+        isCumulative: false,
+        activeLicense: null,
+        message: '🚨 Bản quyền của thiết bị này đã bị Quản trị viên thu hồi và ngắt kết nối!',
+      });
+    }
+
     return jsonResponse({
       success: true,
+      isRevoked: false,
       orders: matched,
       totalPending: pendingOrders.length,
       approvedCount: approvedOrders.length,
@@ -2011,15 +2086,69 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
     }
 
     if (pathname === '/api/admin/licenses/revoke' && method === 'POST') {
-      const { id, reason } = body;
-      const found = edgeLicenses.find((l) => l.id === id || l.key === id);
+      const { id, key, reason } = body;
+      const searchId = String(id || key || '').trim();
+      const found = edgeLicenses.find((l) => l.id === searchId || l.key === searchId || (searchId && l.key?.toUpperCase() === searchId.toUpperCase()));
       if (!found) return jsonResponse({ success: false, error: 'Không tìm thấy mã!' }, 404);
 
+      const revokeReason = reason || 'Vi phạm điều khoản sử dụng hoặc Quản trị viên ngắt máy';
       found.isRevoked = true;
       found.isSuspended = true;
       found.revokedAt = new Date().toISOString();
-      found.revokeReason = reason || 'Vi phạm điều khoản sử dụng';
+      found.revokeReason = revokeReason;
+      const disconnectedDevices = (found.devices || []).map((d) => d.deviceId).filter(Boolean);
+      (found as any).revokedDevices = Array.from(new Set([...((found as any).revokedDevices || []), ...disconnectedDevices]));
       found.devices = [];
+
+      // Ghi nhận key, id, aliasKeys, phone và các thiết bị vào edgeRevokedKeys
+      const aliasSet = new Set<string>([found.key.toUpperCase(), ...(found.aliasKeys || []).map((k) => k.toUpperCase())]);
+      aliasSet.forEach((k) => {
+        if (k && !edgeRevokedKeys.includes(k)) edgeRevokedKeys.push(k);
+      });
+      if (found.id && !edgeRevokedKeys.includes(found.id.toUpperCase())) {
+        edgeRevokedKeys.push(found.id.toUpperCase());
+      }
+      disconnectedDevices.forEach((dev) => {
+        if (!edgeRevokedKeys.includes(dev)) edgeRevokedKeys.push(dev);
+        if (!edgeRevokedKeys.includes(dev.toUpperCase())) edgeRevokedKeys.push(dev.toUpperCase());
+        if (!edgeRevokedKeys.includes(`DEV:${dev}`)) edgeRevokedKeys.push(`DEV:${dev}`);
+        if (!edgeRevokedKeys.includes(`DEV:${dev.toUpperCase()}`)) edgeRevokedKeys.push(`DEV:${dev.toUpperCase()}`);
+      });
+      if (found.phone) {
+        const cleanPh = found.phone.replace(/\D/g, '');
+        if (cleanPh) {
+          if (!edgeRevokedKeys.includes(cleanPh)) edgeRevokedKeys.push(cleanPh);
+          if (!edgeRevokedKeys.includes(`PHONE:${cleanPh}`)) edgeRevokedKeys.push(`PHONE:${cleanPh}`);
+        }
+      }
+
+      // Cập nhật trạng thái các đơn hàng liên quan sang 'revoked'
+      edgeOrders = edgeOrders.map((o) => {
+        const oKey = (o.generatedKey || '').trim().toUpperCase();
+        const oDev = (o.deviceId || '').trim().toLowerCase();
+        const oPhone = (o.phone || '').trim().replace(/\D/g, '');
+        const cleanPh = (found.phone || '').replace(/\D/g, '');
+
+        const isMatch =
+          (oKey && (aliasSet.has(oKey))) ||
+          (cleanPh && oPhone && oPhone === cleanPh) ||
+          (oDev && disconnectedDevices.some((d) => d.toLowerCase() === oDev)) ||
+          (o.id && (o.id === found.id || `lic_${o.id}` === found.id));
+
+        if (isMatch) {
+          edgeRevokedKeys.push(o.id.toUpperCase());
+          if (o.deviceId) {
+            edgeRevokedKeys.push(o.deviceId);
+            edgeRevokedKeys.push(`DEV:${o.deviceId.toUpperCase()}`);
+          }
+          return {
+            ...o,
+            status: 'revoked' as const,
+            note: (o.note ? o.note + ' • ' : '') + 'Đã thu hồi bản quyền và ngắt máy',
+          };
+        }
+        return o;
+      });
 
       if (d1) {
         try {
@@ -2028,6 +2157,12 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
             SET is_revoked = 1, is_suspended = 1, status = 'revoked', devices_json = '[]'
             WHERE id = ? OR key = ?
           `).bind(found.id, found.key).run();
+
+          await d1.prepare(`
+            UPDATE orders
+            SET status = 'revoked'
+            WHERE generated_key = ? OR phone = ?
+          `).bind(found.key, found.phone || '').run();
         } catch (e) {}
       }
 
@@ -2036,18 +2171,19 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
         actionName: 'Thu hồi quyền',
         clientName: found.clientName,
         phone: found.phone || '',
-        deviceId: '',
+        deviceId: disconnectedDevices.join(', '),
         key: found.key,
         planType: found.planType,
-        notes: reason || 'Thu hồi giấy phép',
+        notes: revokeReason,
       });
       await syncKV();
 
       return jsonResponse({
         success: true,
-        message: `🚫 Đã thu hồi bản quyền của "${found.clientName}"!`,
+        message: `🚫 Đã thu hồi bản quyền của "${found.clientName}" và ngắt kết nối toàn bộ máy tính (${disconnectedDevices.length} máy)!`,
         license: found,
         licenses: edgeLicenses,
+        orders: edgeOrders,
         history: edgeHistory,
       });
     }

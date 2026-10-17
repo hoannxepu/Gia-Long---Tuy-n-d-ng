@@ -26,11 +26,31 @@ let keepAliveCounter = 0;
 function startKeepAlive() {
   stopKeepAlive();
   keepAliveCounter = 0;
-  keepAliveTimer = setInterval(() => {
+  keepAliveTimer = setInterval(async () => {
     chrome.runtime.getPlatformInfo(() => {});
     keepAliveCounter++;
-    // Định kỳ mỗi 5s tự động đồng bộ ẩn đơn hàng & trạng thái bản quyền từ máy chủ / cloud
-    fetchMyOrdersAndSync().catch(() => {});
+    try {
+      // Định kỳ mỗi 5s kiểm tra bản quyền ngầm với Server
+      const licRes = await checkLicenseStatus(true);
+      if (!licRes.isValid || licRes.isRevoked) {
+        console.warn('[KeepAlive] 🚨 PHÁT HIỆN BẢN QUYỀN ĐÃ BỊ THU HỒI / NGẮT MÁY!');
+        shouldStop = true;
+        isRunning = false;
+        if (activeTabId) {
+          chrome.tabs.remove(activeTabId).catch(() => {});
+          activeTabId = null;
+        }
+        chrome.alarms.clearAll(() => {});
+        await updateStatus({
+          isRunning: false,
+          statusText: '🚨 BẢN QUYỀN ĐÃ BỊ THU HỒI / NGẮT MÁY! Toàn bộ tiến trình đã dừng.',
+        });
+        stopKeepAlive();
+        return;
+      }
+      // Đồng bộ đơn hàng
+      await fetchMyOrdersAndSync();
+    } catch (e) {}
   }, 5000);
 }
 
@@ -341,20 +361,59 @@ async function checkServerBackground(machineId, token) {
           signal: AbortSignal.timeout(2500),
         });
         if (!resp.ok) continue;
-        const data = await resp.json();
-        if (data.status === 'revoked' || data.isRevoked || data.status === 'suspended' || data.isSuspended) {
-          console.warn('[Cache Sync] 🚨 Bản quyền đã bị thu hồi hoặc tạm khóa!');
+        const isRevoked = Boolean(
+          data.status === 'revoked' || 
+          data.isRevoked || 
+          data.action === 'FORCE_REVOKE' || 
+          data.status === 'not_found' || 
+          !data.success
+        );
+        const isSuspended = Boolean(data.status === 'suspended' || data.isSuspended);
+
+        if (isRevoked || isSuspended) {
+          console.warn('[Cache Sync] 🚨 Bản quyền đã bị thu hồi hoặc ngắt máy!');
           await chrome.storage.local.set({
-            isRevoked: Boolean(data.status === 'revoked' || data.isRevoked),
-            isSuspended: Boolean(data.status === 'suspended' || data.isSuspended),
+            isRevoked: true,
+            isSuspended,
+            isVip: false,
+            isRunning: false,
+            isScheduleActive: false,
+            autoScheduleEnabled: false,
+            scheduledJobs: [],
+            postJobState: 'REVOKED_STOPPED',
           });
           await chrome.storage.local.remove(['signedToken', 'licenseKey', 'licenseData', 'isVip', 'currentLicense', 'licenseInfo']);
           chrome.alarms.clearAll(() => {});
+          shouldStop = true;
+          isRunning = false;
+          stopKeepAlive();
+          if (activeTabId) {
+            chrome.tabs.remove(activeTabId).catch(() => {});
+            activeTabId = null;
+          }
+
+          // Bắn tín hiệu ngắt máy tới toàn bộ Tabs & Dashboard
+          try {
+            if (chrome.tabs && chrome.tabs.query) {
+              chrome.tabs.query({}).then((tabs) => {
+                tabs.forEach((tab) => {
+                  if (tab.id) {
+                    chrome.tabs.sendMessage(tab.id, {
+                      action: 'FORCE_REVOKE_STOP',
+                      message: data.message || '🚨 Bản quyền của máy tính này đã bị Quản trị viên thu hồi và ngắt kết nối!',
+                    }).catch(() => {});
+                  }
+                });
+              }).catch(() => {});
+            }
+          } catch (e) {}
+
           return {
             isValid: false,
             isActivated: false,
             isRevoked: true,
-            message: data.message || '🚨 Bản quyền đã bị Quản trị viên thu hồi hoặc tạm khóa!',
+            isSuspended,
+            message: data.message || '🚨 Bản quyền đã bị Quản trị viên thu hồi và ngắt máy!',
             license: null,
           };
         }
@@ -1322,6 +1381,31 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       .catch((err) => sendResponse({ success: false, message: err.message }));
     return true;
   }
+
+  // 13. NGẮT MÁY KHẨN CẤP TỪ WEB APP / ADMIN (FORCE REVOKE)
+  if (request.action === 'FORCE_REVOKE_DEVICE') {
+    chrome.storage.local.set({
+      isRevoked: true,
+      isVip: false,
+      isRunning: false,
+      isScheduleActive: false,
+      autoScheduleEnabled: false,
+      scheduledJobs: [],
+      postJobState: 'REVOKED_STOPPED',
+    }).then(() => {
+      chrome.storage.local.remove(['signedToken', 'licenseKey', 'licenseData', 'isVip', 'currentLicense', 'licenseInfo']);
+      chrome.alarms.clearAll(() => {});
+      shouldStop = true;
+      isRunning = false;
+      stopKeepAlive();
+      if (activeTabId) {
+        chrome.tabs.remove(activeTabId).catch(() => {});
+        activeTabId = null;
+      }
+      sendResponse({ success: true, message: 'Đã ngắt máy lập tức!' });
+    });
+    return true;
+  }
 });
 
 // Tra cứu danh sách đơn hàng của máy khách và tự động kích hoạt key nếu đã được Admin duyệt
@@ -1339,11 +1423,35 @@ async function fetchMyOrdersAndSync() {
       if (data && data.success && Array.isArray(data.orders)) {
         await chrome.storage.local.set({ myOrders: data.orders, lastOrdersSync: Date.now() });
 
+        // 🚨 NẾU ĐƠN HÀNG HOẶC THIẾT BỊ BỊ THU HỒI / NGẮT MÁY
+        if (data.isRevoked || data.orders.some((o) => o.status === 'revoked')) {
+          console.warn('[AutoRecruit Background] 🚨 Đơn hàng của máy này đã bị thu hồi / ngắt kết nối!');
+          await chrome.storage.local.set({
+            isRevoked: true,
+            isVip: false,
+            isRunning: false,
+            isScheduleActive: false,
+            autoScheduleEnabled: false,
+            scheduledJobs: [],
+            postJobState: 'REVOKED_STOPPED',
+          });
+          await chrome.storage.local.remove(['signedToken', 'licenseKey', 'licenseData', 'isVip', 'currentLicense', 'licenseInfo']);
+          chrome.alarms.clearAll(() => {});
+          shouldStop = true;
+          isRunning = false;
+          stopKeepAlive();
+          if (activeTabId) {
+            chrome.tabs.remove(activeTabId).catch(() => {});
+            activeTabId = null;
+          }
+          return { success: false, isRevoked: true, message: 'Bản quyền đã bị thu hồi' };
+        }
+
         // Tự động kích hoạt mã nếu có đơn được phê duyệt
         const approvedOrder = data.orders.find((o) => o.status === 'approved' && o.generatedKey);
         if (approvedOrder && approvedOrder.generatedKey) {
-          const currentData = await chrome.storage.local.get(['licenseKey']);
-          if (!currentData.licenseKey || currentData.licenseKey !== approvedOrder.generatedKey) {
+          const currentData = await chrome.storage.local.get(['licenseKey', 'isRevoked']);
+          if (!currentData.isRevoked && (!currentData.licenseKey || currentData.licenseKey !== approvedOrder.generatedKey)) {
             console.log('[AutoRecruit Background] Phát hiện đơn đã được duyệt, tự động nạp key:', approvedOrder.generatedKey);
             await activateLicenseKey(approvedOrder.generatedKey);
           }
@@ -1466,30 +1574,33 @@ async function runBatchPosting(
   for (let i = 0; i < groupsToRun.length; i++) {
     if (shouldStop) break;
 
-    // Kiểm tra bản quyền định kỳ trong suốt quá trình đăng bài (Mỗi 3 nhóm kiểm tra máy chủ 1 lần)
-    if (i > 0 && i % 3 === 0) {
-      const runtimeLicCheck = await checkLicenseStatus(true);
-      if (!runtimeLicCheck.isValid) {
-        console.warn('[AutoRecruit Background] 🚨 Bản quyền bị thu hồi hoặc hết hạn trong lúc đăng bài:', runtimeLicCheck.message);
-        shouldStop = true;
-        isRunning = false;
-        stopKeepAlive();
-        await updateStatus({
-          isRunning: false,
-          currentIndex: i,
-          totalGroups: groupsToRun.length,
-          statusText: `🚨 TIẾN TRÌNH BỊ DỪNG: ${runtimeLicCheck.message}`,
-        });
-        await addHistoryEntry({
-          groupName: 'Hệ Thống Bản Quyền',
-          groupLink: '',
-          postTitle: postTitle || 'Bản Quyền',
-          status: 'failed',
-          type: runType,
-          message: `🚨 Bị dừng giữa chừng: ${runtimeLicCheck.message}`,
-        });
-        break;
+    // Kiểm tra bản quyền nghiêm ngặt trước mỗi nhóm đăng
+    const runtimeLicCheck = await checkLicenseStatus(true);
+    if (!runtimeLicCheck.isValid || runtimeLicCheck.isRevoked) {
+      console.warn('[AutoRecruit Background] 🚨 Bản quyền bị thu hồi hoặc ngắt máy trong lúc đăng bài:', runtimeLicCheck.message);
+      shouldStop = true;
+      isRunning = false;
+      stopKeepAlive();
+      if (activeTabId) {
+        chrome.tabs.remove(activeTabId).catch(() => {});
+        activeTabId = null;
       }
+      chrome.alarms.clearAll(() => {});
+      await updateStatus({
+        isRunning: false,
+        currentIndex: i,
+        totalGroups: groupsToRun.length,
+        statusText: `🚨 TIẾN TRÌNH ĐÃ BỊ DỪNG: ${runtimeLicCheck.message || 'Bản quyền bị thu hồi'}`,
+      });
+      await addHistoryEntry({
+        groupName: 'Hệ Thống Bản Quyền',
+        groupLink: '',
+        postTitle: postTitle || 'Bản Quyền',
+        status: 'failed',
+        type: runType,
+        message: `🚨 Ngắt máy ngay lập tức: ${runtimeLicCheck.message || 'Bản quyền bị thu hồi'}`,
+      });
+      break;
     }
 
     const group = groupsToRun[i];

@@ -2125,17 +2125,50 @@ export default function App() {
           'Content-Type': 'application/json',
           'x-admin-pin': adminPin,
         },
-        body: JSON.stringify({ id: revokeConfirmItem.id, reason: revokeReasonInput }),
+        body: JSON.stringify({ 
+          id: revokeConfirmItem.id, 
+          key: revokeConfirmItem.key,
+          reason: revokeReasonInput 
+        }),
       });
       const data = await res.json();
       if (data.success) {
         if (data.licenses) setLicenses(data.licenses);
         if (data.history) setHistoryList(data.history);
+        if (data.orders) setAdminOrders(data.orders);
+        
+        // Cập nhật trạng thái trong bảng đơn hàng sang 'revoked'
+        setAdminOrders((prev) =>
+          prev.map((o) => {
+            const isMatch = (revokeConfirmItem.key && o.generatedKey === revokeConfirmItem.key) ||
+              (o.id && (o.id === revokeConfirmItem.id || `lic_${o.id}` === revokeConfirmItem.id));
+            if (isMatch) {
+              return { ...o, status: 'revoked' as const, note: (o.note ? o.note + ' • ' : '') + 'Đã thu hồi bản quyền và ngắt máy' };
+            }
+            return o;
+          })
+        );
+
         fetchLicenses(adminPin, true);
         fetchHistory(adminPin, true);
-        if (actionModalLicense && actionModalLicense.id === revokeConfirmItem.id) {
+        fetchOrders(adminPin, true);
+
+        if (actionModalLicense && (actionModalLicense.id === revokeConfirmItem.id || actionModalLicense.key === revokeConfirmItem.key)) {
           setActionModalLicense((prev) => (prev ? { ...prev, isRevoked: true, isSuspended: true, devices: [] } : null));
         }
+
+        // Bắn tín hiệu ngắt máy ngay lập tức sang Extension
+        try {
+          window.postMessage({
+            type: 'AUTORECRUIT_FORCE_REVOKE',
+            key: revokeConfirmItem.key,
+            id: revokeConfirmItem.id,
+          }, '*');
+          window.dispatchEvent(new CustomEvent('AUTORECRUIT_FORCE_REVOKE', {
+            detail: { key: revokeConfirmItem.key, id: revokeConfirmItem.id }
+          }));
+        } catch (e) {}
+
         triggerToast(`🚫 ĐÃ THU HỒI & NGẮT KẾT NỐI TOÀN BỘ MÁY TÍNH CỦA KHÁCH THÀNH CÔNG!`);
         setRevokeConfirmItem(null);
       } else {

@@ -2200,16 +2200,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 
-  // Mở tab bản quyền & cuộn thẳng tới Bảng Báo Giá nếu URL chứa ?tab=license, ?pricing=1, hoặc ?activate=1
+  // Lắng nghe tín hiệu ngắt máy từ Background
   try {
-    const urlParams = new URLSearchParams(window.location.search);
-    const reqTab = urlParams.get('tab');
-    const reqActivate = urlParams.get('activate');
-    const reqPricing = urlParams.get('pricing');
-    if (reqTab === 'license' || reqActivate === '1' || reqPricing === '1') {
-      window.scrollToPricingTable();
-      setTimeout(() => window.scrollToPricingTable(), 150);
-      setTimeout(() => window.scrollToPricingTable(), 400);
+    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
+      chrome.runtime.onMessage.addListener((msg) => {
+        if (msg.action === 'FORCE_REVOKE_STOP' || msg.action === 'VIP_REVOKED') {
+          console.warn('[Dashboard] Nhận lệnh ngắt máy khẩn cấp:', msg);
+          loadLicenseDetails(true);
+          switchTab('license');
+        }
+      });
     }
   } catch (e) {}
 });

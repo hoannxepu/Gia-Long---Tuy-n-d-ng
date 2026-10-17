@@ -456,13 +456,54 @@ app.all(['/api/check', '/check'], (req: Request, res: Response) => {
   }
 
   const cleanDev = machineId.toLowerCase();
+  const cleanDevUpper = machineId.toUpperCase();
   const revoked = loadRevokedKeys();
-  if (revoked.some((r) => r.key.toLowerCase() === cleanDev || r.key.toLowerCase() === `dev:${cleanDev}`)) {
+  const isRevokedKey = revoked.some((r) => {
+    const rk = r.key.trim().toUpperCase();
+    return rk === cleanDevUpper || rk === `DEV:${cleanDevUpper}` || rk.toLowerCase() === cleanDev || rk.toLowerCase() === `dev:${cleanDev}`;
+  });
+
+  if (isRevokedKey) {
     return res.json({
       success: false,
       status: 'revoked',
+      isRevoked: true,
+      action: 'FORCE_REVOKE',
       machine_id: machineId,
-      message: '🚨 Bản quyền của thiết bị này đã bị Quản trị viên thu hồi!',
+      message: '🚨 Bản quyền của thiết bị này đã bị Quản trị viên thu hồi và ngắt kết nối!',
+    });
+  }
+
+  // Kiểm tra nếu thiết bị nằm trong danh sách đã từng liên kết với bản quyền bị thu hồi
+  const allLicenses = loadLicenses();
+  const matchedRevokedLic = allLicenses.find((l) =>
+    l.isRevoked && (
+      (l.devices && l.devices.some((d) => d.deviceId.toLowerCase() === cleanDev)) ||
+      ((l as any).revokedDevices && (l as any).revokedDevices.some((d: string) => d.toLowerCase() === cleanDev))
+    )
+  );
+  if (matchedRevokedLic) {
+    return res.json({
+      success: false,
+      status: 'revoked',
+      isRevoked: true,
+      action: 'FORCE_REVOKE',
+      machine_id: machineId,
+      message: `🚨 BẢN QUYỀN ĐÃ BỊ THU HỒI (NGẮT MÁY): ${matchedRevokedLic.revokeReason || 'Quản trị viên đã ngắt kết nối máy này'}!`,
+    });
+  }
+
+  // Kiểm tra nếu có đơn hàng của máy này đã bị thu hồi
+  const orders = loadOrders();
+  const revokedOrd = orders.find((o) => o.status === 'revoked' && (o.deviceId || '').toLowerCase() === cleanDev);
+  if (revokedOrd) {
+    return res.json({
+      success: false,
+      status: 'revoked',
+      isRevoked: true,
+      action: 'FORCE_REVOKE',
+      machine_id: machineId,
+      message: '🚨 Máy tính này đã bị Quản trị viên thu hồi bản quyền và ngắt máy!',
     });
   }
 
@@ -475,6 +516,7 @@ app.all(['/api/check', '/check'], (req: Request, res: Response) => {
         success: false,
         status: 'revoked',
         isRevoked: true,
+        action: 'FORCE_REVOKE',
         machine_id: machineId,
         message: '🚨 Bản quyền của thiết bị này đã bị Quản trị viên thu hồi!',
       });
@@ -515,7 +557,6 @@ app.all(['/api/check', '/check'], (req: Request, res: Response) => {
     });
   }
 
-  const orders = loadOrders();
   const pendingOrd = orders.find((o) => o.status === 'pending' && (o.deviceId || '').toLowerCase() === cleanDev);
   if (pendingOrd) {
     return res.json({
@@ -529,9 +570,11 @@ app.all(['/api/check', '/check'], (req: Request, res: Response) => {
 
   return res.json({
     success: false,
-    status: 'not_found',
+    status: 'revoked',
+    isRevoked: true,
+    action: 'FORCE_REVOKE',
     machine_id: machineId,
-    message: 'Mã máy chưa đăng ký gói bản quyền nào trên hệ thống.',
+    message: 'Mã máy chưa đăng ký hoặc bản quyền đã bị ngắt kết nối khỏi hệ thống.',
   });
 });
 
@@ -1125,29 +1168,78 @@ app.post('/api/admin/licenses/toggle', requireAdmin, (req: Request, res: Respons
 
 // Thu hồi bản quyền vĩnh viễn (Revoke) - Ngắt ngay toàn bộ máy khách
 app.post('/api/admin/licenses/revoke', requireAdmin, (req: Request, res: Response) => {
-  const { id, reason } = req.body;
+  const { id, key, reason } = req.body;
   const licenses = loadLicenses();
-  const found = licenses.find((l) => l.id === id || l.key === id || (id && l.key?.toUpperCase() === String(id).toUpperCase()));
+  const searchId = String(id || key || '').trim();
+  const found = licenses.find((l) => l.id === searchId || l.key === searchId || (searchId && l.key?.toUpperCase() === searchId.toUpperCase()));
 
   if (!found) {
     return res.status(404).json({ success: false, error: 'Không tìm thấy mã bản quyền!' });
   }
 
+  const revokeReason = reason || 'Vi phạm điều khoản sử dụng hoặc Quản trị viên ngắt máy';
   found.isRevoked = true;
   found.isSuspended = true;
   found.revokedAt = new Date().toISOString();
-  found.revokeReason = reason || 'Vi phạm điều khoản sử dụng hoặc Quản trị viên ngắt máy';
-  const disconnectedDevices = (found.devices || []).map((d) => d.deviceId);
+  found.revokeReason = revokeReason;
+  const disconnectedDevices = (found.devices || []).map((d) => d.deviceId).filter(Boolean);
+  (found as any).revokedDevices = Array.from(new Set([...((found as any).revokedDevices || []), ...disconnectedDevices]));
   found.devices = []; // Ngắt ngay toàn bộ thiết bị đang kết nối
   saveLicenses(licenses);
 
-  // Ghi nhận key và toàn bộ deviceId bị thu hồi để ngắt kết nối lập tức
-  addRevokedKey(found.key, found.revokeReason);
+  // 1. Ghi nhận key, id, aliasKeys, phone và toàn bộ deviceId bị thu hồi
+  addRevokedKey(found.key, revokeReason);
+  addRevokedKey(found.id, revokeReason);
+  if (found.aliasKeys && Array.isArray(found.aliasKeys)) {
+    for (const ak of found.aliasKeys) {
+      if (ak) addRevokedKey(ak, revokeReason);
+    }
+  }
+  if (found.phone) {
+    const cleanPh = found.phone.replace(/\D/g, '');
+    if (cleanPh) {
+      addRevokedKey(cleanPh, revokeReason);
+      addRevokedKey(`PHONE:${cleanPh}`, revokeReason);
+    }
+  }
   for (const dId of disconnectedDevices) {
     if (dId) {
-      addRevokedKey(dId, found.revokeReason);
-      addRevokedKey(`DEV:${dId}`, found.revokeReason);
+      addRevokedKey(dId, revokeReason);
+      addRevokedKey(`DEV:${dId}`, revokeReason);
+      addRevokedKey(`DEV:${dId.toUpperCase()}`, revokeReason);
+      addRevokedKey(dId.toUpperCase(), revokeReason);
     }
+  }
+
+  // 2. Thu hồi và ngắt TOÀN BỘ đơn hàng liên quan đến khách hàng / thiết bị này
+  const orders = loadOrders();
+  let ordersChanged = false;
+  for (const o of orders) {
+    const oKey = (o.generatedKey || '').trim().toUpperCase();
+    const oDev = (o.deviceId || '').trim().toLowerCase();
+    const oPhone = (o.phone || '').trim().replace(/\D/g, '');
+    const cleanPh = (found.phone || '').replace(/\D/g, '');
+
+    const isMatch =
+      (oKey && (oKey === found.key.toUpperCase() || (found.aliasKeys || []).some((ak) => ak.toUpperCase() === oKey))) ||
+      (cleanPh && oPhone && oPhone === cleanPh) ||
+      (oDev && disconnectedDevices.some((d) => d.toLowerCase() === oDev)) ||
+      (o.id && (o.id === found.id || `lic_${o.id}` === found.id));
+
+    if (isMatch) {
+      o.status = 'revoked';
+      o.note = (o.note ? o.note + ' • ' : '') + 'Đã thu hồi bản quyền và ngắt máy';
+      addRevokedKey(o.id.toUpperCase(), revokeReason);
+      if (o.deviceId) {
+        addRevokedKey(o.deviceId, revokeReason);
+        addRevokedKey(`DEV:${o.deviceId}`, revokeReason);
+        addRevokedKey(`DEV:${o.deviceId.toUpperCase()}`, revokeReason);
+      }
+      ordersChanged = true;
+    }
+  }
+  if (ordersChanged) {
+    saveOrders(orders);
   }
 
   addHistoryEntry({
@@ -1158,7 +1250,7 @@ app.post('/api/admin/licenses/revoke', requireAdmin, (req: Request, res: Respons
     deviceId: disconnectedDevices.join(', '),
     key: found.key,
     planType: found.planType,
-    notes: reason || 'Thu hồi giấy phép & ngắt thiết bị',
+    notes: revokeReason,
   });
 
   res.json({
@@ -1167,6 +1259,7 @@ app.post('/api/admin/licenses/revoke', requireAdmin, (req: Request, res: Respons
     license: found,
     licenses: loadLicenses(),
     history: loadHistory(),
+    orders: loadOrders(),
   });
 });
 
@@ -1803,8 +1896,32 @@ app.get('/api/orders/my-orders', (req: Request, res: Response) => {
 
     const pendingCount = orders.filter((o) => o.status === 'pending').length;
 
+    // Kiểm tra nếu thiết bị hoặc số điện thoại đã bị Quản trị viên thu hồi
+    const revokedList = loadRevokedKeys();
+    const cleanDevUpper = deviceId.toUpperCase();
+    const isRevokedDev = revokedList.some((r) => {
+      const ru = r.key.trim().toUpperCase();
+      return (deviceId && (ru === cleanDevUpper || ru === `DEV:${cleanDevUpper}`)) || (phone && ru === `PHONE:${phone}`);
+    }) || matched.some((o) => o.status === 'revoked');
+
+    if (isRevokedDev) {
+      return res.json({
+        success: true,
+        isRevoked: true,
+        action: 'FORCE_REVOKE',
+        orders: matched,
+        totalPending: 0,
+        activeLicense: null,
+        isCumulative: false,
+        totalApprovedCount: 0,
+        totalPurchasedDays: 0,
+        message: '🚨 Bản quyền của thiết bị này đã bị Quản trị viên thu hồi và ngắt kết nối!',
+      });
+    }
+
     res.json({
       success: true,
+      isRevoked: false,
       orders: matched,
       totalPending: pendingCount,
       activeLicense: activeLic || null,
