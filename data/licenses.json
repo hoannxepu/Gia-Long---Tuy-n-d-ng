@@ -9,18 +9,49 @@
     "devices": [
       {
         "deviceId": "dev_49omswx_mv370ms3",
-        "deviceName": "Browser (0ms3)",
-        "activatedAt": "2026-10-11T16:03:54.256Z",
-        "lastSeenAt": "2026-10-12T03:42:57.657Z"
+        "deviceName": "Máy Tính Cá Nhân",
+        "activatedAt": "2026-10-19T12:45:41.430Z",
+        "lastSeenAt": "2026-10-19T12:45:41.430Z"
       }
     ],
-    "createdAt": "2026-10-11T16:03:54.256Z",
-    "expiresAt": "2029-03-09T16:00:12.181Z",
+    "createdAt": "2026-10-19T12:00:00.000Z",
+    "expiresAt": "2027-10-19T23:59:59.000Z",
     "isSuspended": false,
-    "notes": "Bản quyền VIP cộng dồn 3 gói: Gói 3 Tháng (+100n) + Gói 12 Tháng (+390n) + Gói 12 Tháng (+390n) = Tổng 880 ngày (Hạn dùng đến 9/3/2029)",
+    "daysLeft": 365,
+    "isExpired": false,
+    "notes": "Gói VIP 12 Tháng (365 ngày)",
     "aliasKeys": [
       "GLFB-VIP-RR79K",
-      "GLFB-VIP-QVHKJ"
+      "GLFB-VIP-QVHKJ",
+      "GLFB-VIP-9WN2K",
+      "GLFB-VIP-GO50X"
+    ],
+    "isRevoked": false,
+    "revokedDevices": [
+      "dev_49omswx_mv370ms3"
     ]
+  },
+  {
+    "id": "lic_ord_1791782091454_jxzs",
+    "key": "GLFB-VIP-DANANG",
+    "clientName": "Lê Thị Thu Hà",
+    "phone": "0966368310",
+    "planType": "individual",
+    "maxDevices": 1,
+    "devices": [
+      {
+        "deviceId": "dev_danang_0966368310",
+        "deviceName": "Lê Thị Thu Hà",
+        "activatedAt": "2026-10-19T12:22:17.969Z",
+        "lastSeenAt": "2026-10-19T12:22:17.969Z"
+      }
+    ],
+    "createdAt": "2026-10-12T05:19:00.000Z",
+    "expiresAt": "2027-01-20T05:19:00.000Z",
+    "isSuspended": false,
+    "aliasKeys": [],
+    "notes": "Bản quyền VIP cộng dồn 1 gói: Gói 3 Tháng (2.700.000đ) (+100n) = Tổng 100 ngày (Hạn dùng đến 20/1/2027)",
+    "daysLeft": 93,
+    "isExpired": false
   }
 ]

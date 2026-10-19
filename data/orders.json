@@ -7,9 +7,9 @@
     "phone": "9999998877878787878",
     "deviceId": "dev_49omswx_mv370ms3",
     "createdAt": "2026-10-13T08:26:12.267Z",
-    "status": "approved",
-    "generatedKey": "GLFB-VIP-9WN2K",
-    "note": "Đơn mua Gói 12 Tháng từ Extension • Đã xác nhận CK • Tự động duyệt"
+    "status": "revoked",
+    "generatedKey": "GLFB-VIP-QU9IY",
+    "note": "Đơn mua Gói 12 Tháng từ Extension • Đã xác nhận CK • Tự động duyệt • Đã thu hồi bản quyền và ngắt máy"
   },
   {
     "id": "ord_1791782091454_jxzs",
@@ -31,8 +31,8 @@
     "phone": "164645464454",
     "deviceId": "dev_49omswx_mv370ms3",
     "createdAt": "2026-10-12T03:43:39.046Z",
-    "status": "approved",
-    "generatedKey": "GLFB-VIP-GO50X",
-    "note": "Đơn mua Gói 3 Tháng từ Extension • Tự động duyệt"
+    "status": "revoked",
+    "generatedKey": "GLFB-VIP-QU9IY",
+    "note": "Đã thu hồi bản quyền cũ • Đã thu hồi bản quyền và ngắt máy"
   }
 ]

@@ -1810,32 +1810,18 @@ export default function App() {
         const filteredLics = data.licenses.filter(
           (l: any) => l && !deletedLicenseIdsRef.current.has(l.id) && !deletedLicenseIdsRef.current.has(l.key)
         );
-        setLicenses((prev) => {
-          const licMap = new Map<string, AdminLicenseItem>();
-          prev.forEach((l) => {
-            if (l && !deletedLicenseIdsRef.current.has(l.id) && !deletedLicenseIdsRef.current.has(l.key)) {
-              licMap.set(l.key.toUpperCase(), l);
-            }
-          });
-          filteredLics.forEach((l: AdminLicenseItem) => {
-            if (l && !deletedLicenseIdsRef.current.has(l.id) && !deletedLicenseIdsRef.current.has(l.key)) {
-              const k = l.key.toUpperCase();
-              licMap.set(k, { ...licMap.get(k), ...l });
-            }
-          });
-          const merged = Array.from(licMap.values());
-          try { localStorage.setItem('glfb_admin_licenses', JSON.stringify(merged)); } catch (e) {}
-
-          if (filteredLics.length < merged.length && pin) {
-            fetch('/api/admin/restore-json', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'x-admin-pin': pin },
-              body: JSON.stringify({ licenses: merged }),
-            }).catch(() => {});
-          }
-
-          return areArraysEqual(prev, merged) ? prev : merged;
+        const finalLics = filteredLics.map((l: AdminLicenseItem) => {
+          const expMs = new Date(l.expiresAt).getTime();
+          const nowMs = Date.now();
+          const daysLeft = !isNaN(expMs) && expMs > nowMs ? Math.max(1, Math.ceil((expMs - nowMs) / 86400000)) : 0;
+          return {
+            ...l,
+            daysLeft: l.daysLeft !== undefined ? l.daysLeft : daysLeft,
+            isExpired: l.isExpired !== undefined ? l.isExpired : expMs < nowMs,
+          };
         });
+        setLicenses(finalLics);
+        try { localStorage.setItem('glfb_admin_licenses', JSON.stringify(finalLics)); } catch (e) {}
       }
     } catch (err) {
       console.warn('Lỗi lấy danh sách license:', err);

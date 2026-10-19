@@ -361,6 +361,7 @@ async function checkServerBackground(machineId, token) {
           signal: AbortSignal.timeout(2500),
         });
         if (!resp.ok) continue;
+        const data = await resp.json();
         const isRevoked = Boolean(
           data.status === 'revoked' || 
           data.isRevoked || 
@@ -418,18 +419,24 @@ async function checkServerBackground(machineId, token) {
           };
         }
         if (data.success && data.status === 'active') {
+          const expMs = new Date(data.expires_at).getTime();
+          const daysLeft = !isNaN(expMs) && expMs > Date.now()
+            ? Math.max(1, Math.ceil((expMs - Date.now()) / (24 * 60 * 60 * 1000)))
+            : (data.days_left || 0);
+
           const freshLic = {
-            key: data.token || token || 'GLFB-VIP-ACTIVE',
+            key: data.license_key || data.token || token || 'GLFB-VIP-ACTIVE',
             expiresAt: data.expires_at,
             clientName: data.client_name || 'Khách Kích Hoạt',
             notes: data.pkg_name || 'Bản quyền VIP Gia Long',
-            daysLeft: data.days_left || 30,
+            daysLeft,
             lastVerifiedAt: Date.now(),
           };
           await chrome.storage.local.set({
             lastCheckedAt: Date.now(),
             expiresAt: data.expires_at,
             signedToken: data.token || token,
+            licenseKey: data.license_key || data.token || token,
             cachedPkgName: data.pkg_name,
             isVip: true,
             licenseStatus: 'active',
@@ -440,7 +447,7 @@ async function checkServerBackground(machineId, token) {
           return {
             isValid: true,
             isActivated: true,
-            message: `✓ Bản quyền VIP đang hoạt động (Còn ${data.days_left || 30} ngày)`,
+            message: `✓ Bản quyền VIP đang hoạt động (Còn ${daysLeft} ngày)`,
             license: freshLic,
           };
         }
@@ -633,8 +640,8 @@ async function checkLicenseStatus(forceRemote = false) {
           lastVerifiedAt: now,
         };
 
-        // Nếu yêu cầu forceRemote hoặc cache đã quá 15 giây: Xác thực ngay với Server để cập nhật tức thì
-        if (forceRemote || (now - lastChecked >= 15 * 1000)) {
+        // Nếu yêu cầu forceRemote hoặc cache đã quá 5 giây: Xác thực ngay với Server để cập nhật tức thì
+        if (forceRemote || (now - lastChecked >= 5 * 1000)) {
           const freshServerStatus = await checkServerBackground(deviceId, token);
           if (freshServerStatus) {
             return freshServerStatus;
@@ -866,15 +873,29 @@ async function activateLicenseKey(rawKey) {
       const result = JSON.parse(text);
 
       if (result.success && result.license) {
+        const expMs = new Date(result.license.expiresAt).getTime();
+        const daysLeft = !isNaN(expMs) && expMs > Date.now()
+          ? Math.max(1, Math.ceil((expMs - Date.now()) / (24 * 60 * 60 * 1000)))
+          : (result.license.daysLeft || 30);
+
         const lic = {
           ...result.license,
           key,
+          daysLeft,
           lastVerifiedAt: Date.now(),
         };
         await chrome.storage.local.set({
           licenseKey: key,
           licenseData: lic,
           customApiServerUrl: baseUrl,
+          expiresAt: result.license.expiresAt,
+          signedToken: key,
+          licenseStatus: 'active',
+          isVip: true,
+          isRevoked: false,
+          isSuspended: false,
+          lastCheckedAt: Date.now(),
+          cachedPkgName: result.license.notes || (result.license.planType === 'team' ? 'Gói Doanh Nghiệp' : (result.license.planType === 'trial' ? 'Gói Dùng Thử 1N' : 'Gói VIP Cá Nhân')),
         });
 
         // Nếu kích hoạt gói chính thức, xóa bỏ giới hạn bài đăng dùng thử; nếu là gói dùng thử thì reset về 0
@@ -1423,8 +1444,12 @@ async function fetchMyOrdersAndSync() {
       if (data && data.success && Array.isArray(data.orders)) {
         await chrome.storage.local.set({ myOrders: data.orders, lastOrdersSync: Date.now() });
 
-        // 🚨 NẾU ĐƠN HÀNG HOẶC THIẾT BỊ BỊ THU HỒI / NGẮT MÁY
-        if (data.isRevoked || data.orders.some((o) => o.status === 'revoked')) {
+        // 🚨 NẾU THIẾT BỊ BỊ THU HỒI / NGẮT MÁY VÀ KHÔNG CÓ BẢN QUYỀN MỚI
+        const hasActiveOrderOrLicense = Boolean(
+          data.activeLicense || 
+          data.orders.some((o) => o.status === 'approved' && o.generatedKey)
+        );
+        if (data.isRevoked && !hasActiveOrderOrLicense) {
           console.warn('[AutoRecruit Background] 🚨 Đơn hàng của máy này đã bị thu hồi / ngắt kết nối!');
           await chrome.storage.local.set({
             isRevoked: true,

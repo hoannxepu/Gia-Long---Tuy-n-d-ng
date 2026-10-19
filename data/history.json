@@ -1,5 +1,55 @@
 [
   {
+    "id": "hist_1792413972200_e544",
+    "createdAt": "2026-10-19T12:46:12.200Z",
+    "action": "update_date",
+    "actionName": "Sửa hạn dùng",
+    "clientName": "củ tỏidfdsffdfds",
+    "phone": "164645464",
+    "deviceId": "dev_49omswx_mv370ms3",
+    "key": "GLFB-VIP-QU9IY",
+    "planType": "individual",
+    "newExpiresAt": "2027-10-19T23:59:59.000Z",
+    "notes": "Đổi ngày hết hạn sang 19/10/2027"
+  },
+  {
+    "id": "hist_1792413957196_medt",
+    "createdAt": "2026-10-19T12:45:57.196Z",
+    "action": "update_date",
+    "actionName": "Sửa hạn dùng",
+    "clientName": "củ tỏidfdsffdfds",
+    "phone": "164645464",
+    "deviceId": "dev_49omswx_mv370ms3",
+    "key": "GLFB-VIP-QU9IY",
+    "planType": "individual",
+    "newExpiresAt": "2027-05-01T23:59:59.000Z",
+    "notes": "Đổi ngày hết hạn sang 1/5/2027"
+  },
+  {
+    "id": "hist_1792413930504_f077",
+    "createdAt": "2026-10-19T12:45:30.504Z",
+    "action": "unrevoke",
+    "actionName": "Khôi phục quyền",
+    "clientName": "củ tỏidfdsffdfds",
+    "phone": "164645464",
+    "deviceId": "",
+    "key": "GLFB-VIP-QU9IY",
+    "planType": "individual",
+    "notes": "Khôi phục bản quyền hoạt động bình thường"
+  },
+  {
+    "id": "hist_1792413916170_adfv",
+    "createdAt": "2026-10-19T12:45:16.170Z",
+    "action": "revoke",
+    "actionName": "Thu hồi quyền",
+    "clientName": "củ tỏidfdsffdfds",
+    "phone": "164645464",
+    "deviceId": "dev_49omswx_mv370ms3",
+    "key": "GLFB-VIP-QU9IY",
+    "planType": "individual",
+    "notes": "Thử nghiệm ngắt máy"
+  },
+  {
     "id": "hist_1792143424675_dwc8",
     "createdAt": "2026-10-16T09:37:04.675Z",
     "action": "create",

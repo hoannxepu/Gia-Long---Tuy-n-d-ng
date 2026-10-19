@@ -1,5 +1,50 @@
 [
   {
+    "key": "ORD_1791776619046_GO50",
+    "reason": "Thử nghiệm ngắt máy",
+    "revokedAt": "2026-10-19T12:45:16.169Z"
+  },
+  {
+    "key": "ORD_1791879972267_9WNX",
+    "reason": "Thử nghiệm ngắt máy",
+    "revokedAt": "2026-10-19T12:45:16.169Z"
+  },
+  {
+    "key": "PHONE:164645464",
+    "reason": "Thử nghiệm ngắt máy",
+    "revokedAt": "2026-10-19T12:45:16.168Z"
+  },
+  {
+    "key": "164645464",
+    "reason": "Thử nghiệm ngắt máy",
+    "revokedAt": "2026-10-19T12:45:16.168Z"
+  },
+  {
+    "key": "GLFB-VIP-GO50X",
+    "reason": "Thử nghiệm ngắt máy",
+    "revokedAt": "2026-10-19T12:45:16.168Z"
+  },
+  {
+    "key": "GLFB-VIP-9WN2K",
+    "reason": "Thử nghiệm ngắt máy",
+    "revokedAt": "2026-10-19T12:45:16.168Z"
+  },
+  {
+    "key": "GLFB-VIP-QVHKJ",
+    "reason": "Thử nghiệm ngắt máy",
+    "revokedAt": "2026-10-19T12:45:16.167Z"
+  },
+  {
+    "key": "GLFB-VIP-RR79K",
+    "reason": "Thử nghiệm ngắt máy",
+    "revokedAt": "2026-10-19T12:45:16.167Z"
+  },
+  {
+    "key": "LIC_1791734634256_QU9IY",
+    "reason": "Thử nghiệm ngắt máy",
+    "revokedAt": "2026-10-19T12:45:16.167Z"
+  },
+  {
     "key": "ORD_1792067831539_IWK1",
     "reason": "Đơn hàng liên kết với bản quyền đã xóa",
     "revokedAt": "2026-10-15T12:37:11.574Z"
