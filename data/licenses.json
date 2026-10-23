@@ -2,7 +2,7 @@
   {
     "id": "lic_1791734634256_QU9IY",
     "key": "GLFB-VIP-QU9IY",
-    "clientName": "củ tỏidfdsffdfds",
+    "clientName": "c\u1ee7 t\u1ecfidfdsffdfds",
     "phone": "164645464",
     "planType": "individual",
     "maxDevices": 1,
@@ -17,7 +17,7 @@
     "createdAt": "2026-10-11T16:03:54.256Z",
     "expiresAt": "2030-07-12T16:00:12.181Z",
     "isSuspended": false,
-    "notes": "Bản quyền VIP cộng dồn 5 gói: Gói 12 Tháng (+390n) + Gói 3 Tháng (+100n) + Gói 3 Tháng (+100n) + Gói 12 Tháng (+390n) + Gói 12 Tháng (+390n) = Tổng 1370 ngày (Hạn dùng đến 12/7/2030)",
+    "notes": "B\u1ea3n quy\u1ec1n VIP Gia Long (G\u00f3i 1 N\u0103m)",
     "aliasKeys": [
       "GLFB-VIP-RR79K",
       "GLFB-VIP-QVHKJ",
@@ -30,14 +30,14 @@
   {
     "id": "lic_ord_1791782091454_jxzs",
     "key": "GLFB-VIP-DANANG",
-    "clientName": "Lê Thị Thu Hà",
+    "clientName": "L\u00ea Th\u1ecb Thu H\u00e0",
     "phone": "0966368310",
     "planType": "individual",
     "maxDevices": 1,
     "devices": [
       {
         "deviceId": "dev_danang_0966368310",
-        "deviceName": "Lê Thị Thu Hà",
+        "deviceName": "L\u00ea Th\u1ecb Thu H\u00e0",
         "activatedAt": "2026-10-17T14:23:02.934Z",
         "lastSeenAt": "2026-10-17T14:23:02.934Z"
       }
@@ -46,7 +46,7 @@
     "expiresAt": "2027-01-20T05:19:00.000Z",
     "isSuspended": false,
     "aliasKeys": [],
-    "notes": "Bản quyền VIP cộng dồn 1 gói: Gói 3 Tháng (2.700.000đ) (+100n) = Tổng 100 ngày (Hạn dùng đến 20/1/2027)",
+    "notes": "B\u1ea3n quy\u1ec1n VIP Gia Long (G\u00f3i 3 Th\u00e1ng)",
     "daysLeft": 95,
     "isExpired": false
   }

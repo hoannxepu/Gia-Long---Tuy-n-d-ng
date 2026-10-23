@@ -12,6 +12,18 @@ async function runTests() {
   const testClientName = 'Nguyễn Văn Kiểm Thử';
 
   // ------------------------------------------------------------------
+  // BƯỚC 0: MÁY MỚI CÀI ĐẶT LẦN ĐẦU (CHƯA ĐĂNG KÝ)
+  // ------------------------------------------------------------------
+  console.log('👉 [BƯỚC 0] Kiểm tra máy khách mới cài đặt lần đầu (Chưa đăng ký bao giờ)...');
+  const freshCheckRes = await fetch(`${BASE_URL}/api/check?machine_id=${encodeURIComponent(testDeviceId)}`);
+  const freshCheckData = await freshCheckRes.json();
+  console.log('Kết quả kiểm tra máy mới:', freshCheckData);
+  if (freshCheckData.status === 'revoked' || freshCheckData.isRevoked) {
+    throw new Error('LỖI: Máy mới cài đặt lại bị báo là BỊ KHÓA / THU HỒI!');
+  }
+  console.log('✓ Máy mới chưa đăng ký: Trả về trạng thái "unregistered", KHÔNG BỊ KHÓA NHẦM!\n');
+
+  // ------------------------------------------------------------------
   // BƯỚC 1: KHÁCH HÀNG TẠO ĐƠN ĐẶT MUA GÓI 12 THÁNG
   // ------------------------------------------------------------------
   console.log('👉 [BƯỚC 1] Khách hàng tạo đơn đặt mua Gói 12 Tháng...');

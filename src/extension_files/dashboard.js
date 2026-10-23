@@ -1992,30 +1992,26 @@ window.proceedSendOrder = async function() {
     }
   } catch (e) {}
 
-  // Gửi duy nhất 1 request /api/orders/create tới server chính
+  // Gửi trực tiếp /api/orders/create tới các server chính
   try {
-    let base = 'https://gia-long---tuy-n-d-ng.pages.dev';
+    const bases = new Set(['https://gia-long---tuy-n-d-ng.pages.dev']);
     try {
       const savedCustom = localStorage.getItem('customApiServerUrl');
-      if (savedCustom && savedCustom.startsWith('http')) base = savedCustom.replace(/\/+$/, '');
+      if (savedCustom && savedCustom.startsWith('http')) bases.add(savedCustom.replace(/\/+$/, ''));
       if (typeof window !== 'undefined' && window.location && window.location.origin && window.location.origin.startsWith('http')) {
-        base = window.location.origin.replace(/\/+$/, '');
+        bases.add(window.location.origin.replace(/\/+$/, ''));
       }
     } catch (e) {}
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
-    fetch(`${base}/api/orders/create`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(orderPayload),
-      signal: controller.signal,
-    }).then((res) => {
-      clearTimeout(timeoutId);
-      if (res.ok) {
-        console.log('[Gia Long FB] ✓ Đã gửi đơn hàng thành công lên máy chủ:', base);
-      }
-    }).catch(() => clearTimeout(timeoutId));
+    bases.forEach((b) => {
+      fetch(`${b}/api/orders/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(orderPayload),
+      }).then((res) => {
+        if (res.ok) console.log('[Gia Long FB] ✓ Đã gửi đơn hàng thành công lên máy chủ:', b);
+      }).catch(() => {});
+    });
   } catch (e) {}
 
   // Gửi trực tiếp sang Google Drive Sheet Webhook nếu có

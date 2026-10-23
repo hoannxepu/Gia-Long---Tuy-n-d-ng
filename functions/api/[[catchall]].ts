@@ -1092,11 +1092,10 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
 
     return jsonResponse({
       success: false,
-      status: 'revoked',
-      isRevoked: true,
-      action: 'FORCE_REVOKE',
+      status: 'unregistered',
+      isRevoked: false,
       machine_id: machineId,
-      message: 'Mã máy chưa đăng ký hoặc bản quyền đã bị ngắt kết nối khỏi hệ thống.',
+      message: 'Thiết bị chưa kích hoạt bản quyền. Vui lòng gửi đơn mua gói hoặc kích hoạt mã để sử dụng.',
     });
   }
 
@@ -1706,9 +1705,30 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
     }
 
     if (pathname === '/api/admin/orders/approve' && method === 'POST') {
-      const { orderId } = body;
-      const order = edgeOrders.find((o) => o.id === orderId);
-      if (!order) return jsonResponse({ success: false, error: 'Không tìm thấy đơn hàng!' }, 404);
+      const { orderId, order: orderPayload } = body;
+      let order = edgeOrders.find((o) => o.id === orderId);
+
+      if (!order && orderPayload && (orderPayload.id || orderPayload.deviceId || orderPayload.phone)) {
+        order = {
+          id: orderPayload.id || orderId || `ord_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          pkgName: orderPayload.pkgName || 'Gói 1 Tháng (30 ngày)',
+          price: orderPayload.price || '1.000.000đ',
+          clientName: orderPayload.clientName || 'Khách đặt mua',
+          phone: orderPayload.phone || '',
+          deviceId: orderPayload.deviceId || '',
+          createdAt: orderPayload.createdAt || new Date().toISOString(),
+          status: 'pending',
+          note: orderPayload.note || '',
+        };
+        edgeOrders.push(order);
+      }
+
+      if (!order && orderId) {
+        const cleanId = String(orderId).trim().toLowerCase();
+        order = edgeOrders.find((o) => (o.deviceId && o.deviceId.toLowerCase() === cleanId) || (o.phone && o.phone.replace(/\D/g, '') === cleanId));
+      }
+
+      if (!order) return jsonResponse({ success: false, error: 'Không tìm thấy đơn hàng cần phê duyệt!' }, 404);
 
       if (!order.deviceId || order.deviceId.toLowerCase().includes('đang lấy') || order.deviceId.toLowerCase().includes('dang lay') || order.deviceId === 'Chưa gắn') {
         const cleanPhone = (order.phone || '').replace(/\D/g, '');

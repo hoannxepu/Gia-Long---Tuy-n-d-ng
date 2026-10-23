@@ -1324,36 +1324,20 @@ export default function App() {
       const data = await res.json();
       const ordersList: any[] = (data && data.success && Array.isArray(data.orders)) ? data.orders : [];
 
-      setAdminOrders((prev) => {
-        const orderMap = new Map<string, any>();
-        prev.forEach((o) => {
-          if (o && o.id && !deletedOrderIdsRef.current.has(o.id)) orderMap.set(o.id, o);
-        });
-        ordersList.forEach((o) => {
-          if (o && o.id && !deletedOrderIdsRef.current.has(o.id)) {
-            const existing = orderMap.get(o.id);
-            orderMap.set(o.id, existing ? { ...existing, ...o } : o);
-          }
-        });
-        const mergedOrders = Array.from(orderMap.values()).sort(
-          (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
-        );
-        try {
-          localStorage.setItem('glfb_admin_orders', JSON.stringify(mergedOrders));
-        } catch (e) {}
+      const filteredServerOrders = ordersList.filter((o) => o && o.id && !deletedOrderIdsRef.current.has(o.id));
+      setAdminOrders(filteredServerOrders);
+      try {
+        localStorage.setItem('glfb_admin_orders', JSON.stringify(filteredServerOrders));
+      } catch (e) {}
 
-        const newPending = mergedOrders.filter((o: any) => o.status === 'pending');
-        setPendingOrderCount(newPending.length);
-        if (newPending.length > 0) {
-          const latest = newPending[0];
-          if (latest && latest.id) {
-            notifiedOrderIdsRef.current.add(latest.id);
-          }
+      const newPending = filteredServerOrders.filter((o: any) => o.status === 'pending');
+      setPendingOrderCount(newPending.length);
+      if (newPending.length > 0) {
+        const latest = newPending[0];
+        if (latest && latest.id) {
+          notifiedOrderIdsRef.current.add(latest.id);
         }
-
-        const isSame = JSON.stringify(prev) === JSON.stringify(mergedOrders);
-        return isSame ? prev : mergedOrders;
-      });
+      }
     } catch (e) {
       console.warn('Lỗi lấy orders:', e);
     } finally {
@@ -1527,27 +1511,9 @@ export default function App() {
       });
       const data = await res.json();
       if (data.success && Array.isArray(data.history)) {
-        setHistoryList((prev) => {
-          const histMap = new Map<string, LicenseHistoryItem>();
-          prev.forEach((h) => { if (h && h.id) histMap.set(h.id, h); });
-          data.history.forEach((h: LicenseHistoryItem) => {
-            if (h && h.id) histMap.set(h.id, { ...histMap.get(h.id), ...h });
-          });
-          const merged = Array.from(histMap.values()).sort(
-            (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
-          );
-          try { localStorage.setItem('glfb_admin_history', JSON.stringify(merged)); } catch (e) {}
-
-          if (data.history.length < merged.length && pin) {
-            fetch('/api/admin/restore-json', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'x-admin-pin': pin },
-              body: JSON.stringify({ history: merged }),
-            }).catch(() => {});
-          }
-
-          return areArraysEqual(prev, merged) ? prev : merged;
-        });
+        const serverHistory = Array.isArray(data.history) ? data.history : [];
+        setHistoryList(serverHistory);
+        try { localStorage.setItem('glfb_admin_history', JSON.stringify(serverHistory)); } catch (e) {}
       }
     } catch (e) {
       console.warn('Lỗi lấy lịch sử:', e);
@@ -1559,24 +1525,6 @@ export default function App() {
   // Tự động kiểm tra đơn hàng mới định kỳ trong nền mà KHÔNG làm giật/nháy giao diện
   useEffect(() => {
     if (!isAdminUnlocked) return;
-
-    // Tự động re-hydrate lên Edge Worker memory nếu phiên trước đã có lưu dữ liệu
-    try {
-      const savedOrders = localStorage.getItem('glfb_admin_orders');
-      const savedLics = localStorage.getItem('glfb_admin_licenses');
-      const savedHist = localStorage.getItem('glfb_admin_history');
-      if (savedOrders || savedLics || savedHist) {
-        fetch('/api/admin/restore-json', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-admin-pin': adminPin },
-          body: JSON.stringify({
-            orders: savedOrders ? JSON.parse(savedOrders) : undefined,
-            licenses: savedLics ? JSON.parse(savedLics) : undefined,
-            history: savedHist ? JSON.parse(savedHist) : undefined,
-          }),
-        }).catch(() => {});
-      }
-    } catch (e) {}
 
     fetchOrders(adminPin, false);
     fetchLicenses(adminPin, false);
@@ -1609,6 +1557,7 @@ export default function App() {
 
   const handleApproveOrder = async (orderId: string) => {
     notifiedOrderIdsRef.current.add(orderId);
+    const targetOrder = adminOrders.find((o) => o && o.id === orderId);
     setAdminOrders((prev) => prev.map((o) => (o.id === orderId ? { ...o, status: 'approved' } : o)));
     try {
       const res = await fetch('/api/admin/orders/approve', {
@@ -1617,7 +1566,7 @@ export default function App() {
           'Content-Type': 'application/json',
           'x-admin-pin': adminPin,
         },
-        body: JSON.stringify({ orderId }),
+        body: JSON.stringify({ orderId, order: targetOrder }),
       });
       const data = await res.json();
       if (data.success) {

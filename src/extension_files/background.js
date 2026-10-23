@@ -362,19 +362,17 @@ async function checkServerBackground(machineId, token) {
         });
         if (!resp.ok) continue;
         const data = await resp.json();
-        const isRevoked = Boolean(
+        const isExplicitRevoked = Boolean(
           data.status === 'revoked' || 
-          data.isRevoked || 
-          data.action === 'FORCE_REVOKE' || 
-          data.status === 'not_found' || 
-          !data.success
+          data.isRevoked === true || 
+          data.action === 'FORCE_REVOKE'
         );
-        const isSuspended = Boolean(data.status === 'suspended' || data.isSuspended);
+        const isSuspended = Boolean(data.status === 'suspended' || data.isSuspended === true);
 
-        if (isRevoked || isSuspended) {
+        if (isExplicitRevoked || isSuspended) {
           console.warn('[Cache Sync] 🚨 Bản quyền đã bị thu hồi hoặc ngắt máy!');
           await chrome.storage.local.set({
-            isRevoked: true,
+            isRevoked: isExplicitRevoked,
             isSuspended,
             isVip: false,
             isRunning: false,
@@ -412,9 +410,28 @@ async function checkServerBackground(machineId, token) {
           return {
             isValid: false,
             isActivated: false,
-            isRevoked: true,
+            isRevoked: isExplicitRevoked,
             isSuspended,
             message: data.message || '🚨 Bản quyền đã bị Quản trị viên thu hồi và ngắt máy!',
+            license: null,
+          };
+        }
+
+        // Nếu máy chưa kích hoạt (máy mới hoặc đang chờ duyệt đơn), KHÔNG BAO GIỜ khóa máy
+        if (!data.success || data.status !== 'active') {
+          await chrome.storage.local.set({
+            isRevoked: false,
+            isSuspended: false,
+            isVip: false,
+            licenseStatus: data.status || 'unregistered',
+          });
+          return {
+            isValid: false,
+            isActivated: false,
+            isRevoked: false,
+            isSuspended: false,
+            status: data.status || 'unregistered',
+            message: data.message || 'Thiết bị chưa kích hoạt bản quyền.',
             license: null,
           };
         }
@@ -503,13 +520,31 @@ async function handleCreateOrder(payload) {
     return null;
   }
 
-  // Thử gửi lần lượt ưu tiên primaryBase và các máy chủ khả dụng
+  // Gửi song song đến TẤT CẢ các máy chủ khả dụng (Pages.dev, Cloud Run, Localhost)
   const allUrls = [primaryBase, ...candidates].filter((u, i, arr) => u && arr.indexOf(u) === i);
   let orderResult = null;
-  for (const u of allUrls) {
-    orderResult = await postOrderTo(u);
-    if (orderResult) break;
+  const results = await Promise.allSettled(allUrls.map((u) => postOrderTo(u)));
+  for (const r of results) {
+    if (r.status === 'fulfilled' && r.value) {
+      if (!orderResult) orderResult = r.value;
+    }
   }
+
+  // Bắn tín hiệu đơn mới tức thì tới tất cả các Tab Quản Trị đang mở
+  try {
+    if (chrome.tabs && chrome.tabs.query) {
+      chrome.tabs.query({}).then((tabs) => {
+        tabs.forEach((tab) => {
+          if (tab.id) {
+            chrome.tabs.sendMessage(tab.id, {
+              action: 'DISPATCH_NEW_ORDER_TO_WEBAPP',
+              order: payload,
+            }).catch(() => {});
+          }
+        });
+      }).catch(() => {});
+    }
+  } catch (e) {}
 
   // ĐỒNG THỜI: Đẩy trực tiếp 2 kênh sang Webhook Google Drive / Google Sheet nếu có
   try {

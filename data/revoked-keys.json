@@ -1,237 +1,42 @@
 [
   {
-    "key": "ORD_TEST_1792721648268",
-    "reason": "Kiểm thử tính năng ngắt máy khẩn cấp",
-    "revokedAt": "2026-10-23T02:14:08.400Z"
+    "key": "ORD_TEST_1792723563568",
+    "reason": "Ki\u1ec3m th\u1eed t\u00ednh n\u0103ng ng\u1eaft m\u00e1y kh\u1ea9n c\u1ea5p",
+    "revokedAt": "2026-10-23T02:46:03.639Z"
   },
   {
-    "key": "ORD_TEST_ADD_1792721648378",
-    "reason": "Kiểm thử tính năng ngắt máy khẩn cấp",
-    "revokedAt": "2026-10-23T02:14:08.399Z"
+    "key": "ORD_TEST_ADD_1792723563619",
+    "reason": "Ki\u1ec3m th\u1eed t\u00ednh n\u0103ng ng\u1eaft m\u00e1y kh\u1ea9n c\u1ea5p",
+    "revokedAt": "2026-10-23T02:46:03.638Z"
   },
   {
-    "key": "DEV:TEST_PC_1792721648268",
-    "reason": "Kiểm thử tính năng ngắt máy khẩn cấp",
-    "revokedAt": "2026-10-23T02:14:08.399Z"
+    "key": "DEV:TEST_PC_1792723563480",
+    "reason": "Ki\u1ec3m th\u1eed t\u00ednh n\u0103ng ng\u1eaft m\u00e1y kh\u1ea9n c\u1ea5p",
+    "revokedAt": "2026-10-23T02:46:03.638Z"
   },
   {
-    "key": "TEST_PC_1792721648268",
-    "reason": "Kiểm thử tính năng ngắt máy khẩn cấp",
-    "revokedAt": "2026-10-23T02:14:08.399Z"
-  },
-  {
-    "key": "LIC_1792721648369_L9GFX",
-    "reason": "Kiểm thử tính năng ngắt máy khẩn cấp",
-    "revokedAt": "2026-10-23T02:14:08.399Z"
-  },
-  {
-    "key": "GLFB-VIP-L9GFX",
-    "reason": "Kiểm thử tính năng ngắt máy khẩn cấp",
-    "revokedAt": "2026-10-23T02:14:08.399Z"
-  },
-  {
-    "key": "ORD_TEST_1792721597836",
-    "reason": "Kiểm thử tính năng ngắt máy khẩn cấp",
-    "revokedAt": "2026-10-23T02:13:18.044Z"
-  },
-  {
-    "key": "ORD_TEST_ADD_1792721598016",
-    "reason": "Kiểm thử tính năng ngắt máy khẩn cấp",
-    "revokedAt": "2026-10-23T02:13:18.043Z"
-  },
-  {
-    "key": "DEV:TEST_PC_1792721597836",
-    "reason": "Kiểm thử tính năng ngắt máy khẩn cấp",
-    "revokedAt": "2026-10-23T02:13:18.043Z"
-  },
-  {
-    "key": "TEST_PC_1792721597836",
-    "reason": "Kiểm thử tính năng ngắt máy khẩn cấp",
-    "revokedAt": "2026-10-23T02:13:18.042Z"
+    "key": "TEST_PC_1792723563480",
+    "reason": "Ki\u1ec3m th\u1eed t\u00ednh n\u0103ng ng\u1eaft m\u00e1y kh\u1ea9n c\u1ea5p",
+    "revokedAt": "2026-10-23T02:46:03.638Z"
   },
   {
     "key": "PHONE:0988776655",
-    "reason": "Kiểm thử tính năng ngắt máy khẩn cấp",
-    "revokedAt": "2026-10-23T02:13:18.042Z"
+    "reason": "Ki\u1ec3m th\u1eed t\u00ednh n\u0103ng ng\u1eaft m\u00e1y kh\u1ea9n c\u1ea5p",
+    "revokedAt": "2026-10-23T02:46:03.638Z"
   },
   {
     "key": "0988776655",
-    "reason": "Kiểm thử tính năng ngắt máy khẩn cấp",
-    "revokedAt": "2026-10-23T02:13:18.042Z"
+    "reason": "Ki\u1ec3m th\u1eed t\u00ednh n\u0103ng ng\u1eaft m\u00e1y kh\u1ea9n c\u1ea5p",
+    "revokedAt": "2026-10-23T02:46:03.638Z"
   },
   {
-    "key": "LIC_1792721597974_1GGJ0",
-    "reason": "Kiểm thử tính năng ngắt máy khẩn cấp",
-    "revokedAt": "2026-10-23T02:13:18.041Z"
+    "key": "LIC_1792723563601_4JDF4",
+    "reason": "Ki\u1ec3m th\u1eed t\u00ednh n\u0103ng ng\u1eaft m\u00e1y kh\u1ea9n c\u1ea5p",
+    "revokedAt": "2026-10-23T02:46:03.638Z"
   },
   {
-    "key": "GLFB-VIP-1GGJ0",
-    "reason": "Kiểm thử tính năng ngắt máy khẩn cấp",
-    "revokedAt": "2026-10-23T02:13:18.041Z"
-  },
-  {
-    "key": "ORD_1791776619046_GO50",
-    "reason": "Thử nghiệm ngắt máy",
-    "revokedAt": "2026-10-19T12:45:16.169Z"
-  },
-  {
-    "key": "ORD_1791879972267_9WNX",
-    "reason": "Thử nghiệm ngắt máy",
-    "revokedAt": "2026-10-19T12:45:16.169Z"
-  },
-  {
-    "key": "PHONE:164645464",
-    "reason": "Thử nghiệm ngắt máy",
-    "revokedAt": "2026-10-19T12:45:16.168Z"
-  },
-  {
-    "key": "164645464",
-    "reason": "Thử nghiệm ngắt máy",
-    "revokedAt": "2026-10-19T12:45:16.168Z"
-  },
-  {
-    "key": "GLFB-VIP-GO50X",
-    "reason": "Thử nghiệm ngắt máy",
-    "revokedAt": "2026-10-19T12:45:16.168Z"
-  },
-  {
-    "key": "GLFB-VIP-9WN2K",
-    "reason": "Thử nghiệm ngắt máy",
-    "revokedAt": "2026-10-19T12:45:16.168Z"
-  },
-  {
-    "key": "GLFB-VIP-QVHKJ",
-    "reason": "Thử nghiệm ngắt máy",
-    "revokedAt": "2026-10-19T12:45:16.167Z"
-  },
-  {
-    "key": "GLFB-VIP-RR79K",
-    "reason": "Thử nghiệm ngắt máy",
-    "revokedAt": "2026-10-19T12:45:16.167Z"
-  },
-  {
-    "key": "LIC_1791734634256_QU9IY",
-    "reason": "Thử nghiệm ngắt máy",
-    "revokedAt": "2026-10-19T12:45:16.167Z"
-  },
-  {
-    "key": "ORD_1792067831539_IWK1",
-    "reason": "Đơn hàng liên kết với bản quyền đã xóa",
-    "revokedAt": "2026-10-15T12:37:11.574Z"
-  },
-  {
-    "key": "DEV:DEVICE_SIGNAL_MV9IX0HM",
-    "reason": "Quản trị viên đã xóa thiết bị này khỏi danh sách",
-    "revokedAt": "2026-10-15T12:37:11.574Z"
-  },
-  {
-    "key": "DEVICE_SIGNAL_MV9IX0HM",
-    "reason": "Quản trị viên đã xóa thiết bị này khỏi danh sách",
-    "revokedAt": "2026-10-15T12:37:11.574Z"
-  },
-  {
-    "key": "LIC_1792067831551_X0NPC",
-    "reason": "Quản trị viên đã xóa người dùng khỏi danh sách",
-    "revokedAt": "2026-10-15T12:37:11.574Z"
-  },
-  {
-    "key": "GLFB-VIP-X0NPC",
-    "reason": "Quản trị viên đã xóa người dùng khỏi danh sách",
-    "revokedAt": "2026-10-15T12:37:11.574Z"
-  },
-  {
-    "key": "ORD_1792060053288_UZ3F",
-    "reason": "Đơn hàng liên kết với bản quyền đã xóa",
-    "revokedAt": "2026-10-15T10:27:33.325Z"
-  },
-  {
-    "key": "DEV:DEVICE_SIGNAL_MV9EAARC",
-    "reason": "Quản trị viên đã xóa thiết bị này khỏi danh sách",
-    "revokedAt": "2026-10-15T10:27:33.325Z"
-  },
-  {
-    "key": "DEVICE_SIGNAL_MV9EAARC",
-    "reason": "Quản trị viên đã xóa thiết bị này khỏi danh sách",
-    "revokedAt": "2026-10-15T10:27:33.325Z"
-  },
-  {
-    "key": "LIC_1792060053302_Y234B",
-    "reason": "Quản trị viên đã xóa người dùng khỏi danh sách",
-    "revokedAt": "2026-10-15T10:27:33.325Z"
-  },
-  {
-    "key": "GLFB-VIP-Y234B",
-    "reason": "Quản trị viên đã xóa người dùng khỏi danh sách",
-    "revokedAt": "2026-10-15T10:27:33.324Z"
-  },
-  {
-    "key": "ORD_1792059996079_X3IF",
-    "reason": "Đơn hàng liên kết với bản quyền đã xóa",
-    "revokedAt": "2026-10-15T10:26:36.121Z"
-  },
-  {
-    "key": "PHONE:0988112233",
-    "reason": "Quản trị viên đã xóa SĐT này khỏi danh sách",
-    "revokedAt": "2026-10-15T10:26:36.121Z"
-  },
-  {
-    "key": "0988112233",
-    "reason": "Quản trị viên đã xóa SĐT này khỏi danh sách",
-    "revokedAt": "2026-10-15T10:26:36.121Z"
-  },
-  {
-    "key": "DEV:DEVICE_SIGNAL_MV9E92LX",
-    "reason": "Quản trị viên đã xóa thiết bị này khỏi danh sách",
-    "revokedAt": "2026-10-15T10:26:36.121Z"
-  },
-  {
-    "key": "DEVICE_SIGNAL_MV9E92LX",
-    "reason": "Quản trị viên đã xóa thiết bị này khỏi danh sách",
-    "revokedAt": "2026-10-15T10:26:36.121Z"
-  },
-  {
-    "key": "LIC_1792059996094_6C2TV",
-    "reason": "Quản trị viên đã xóa người dùng khỏi danh sách",
-    "revokedAt": "2026-10-15T10:26:36.121Z"
-  },
-  {
-    "key": "GLFB-VIP-6C2TV",
-    "reason": "Quản trị viên đã xóa người dùng khỏi danh sách",
-    "revokedAt": "2026-10-15T10:26:36.121Z"
-  },
-  {
-    "key": "PHONE:0987654321",
-    "reason": "Quản trị viên đã xóa SĐT này khỏi danh sách",
-    "revokedAt": "2026-10-14T09:17:38.284Z"
-  },
-  {
-    "key": "0987654321",
-    "reason": "Quản trị viên đã xóa SĐT này khỏi danh sách",
-    "revokedAt": "2026-10-14T09:17:38.284Z"
-  },
-  {
-    "key": "DEV:GLFB-PC-TEST01",
-    "reason": "Quản trị viên đã xóa thiết bị này khỏi danh sách",
-    "revokedAt": "2026-10-14T09:17:38.284Z"
-  },
-  {
-    "key": "GLFB-PC-TEST01",
-    "reason": "Quản trị viên đã xóa thiết bị này khỏi danh sách",
-    "revokedAt": "2026-10-14T09:17:38.284Z"
-  },
-  {
-    "key": "LIC_1791969435822_Z5PIM",
-    "reason": "Quản trị viên đã xóa người dùng khỏi danh sách",
-    "revokedAt": "2026-10-14T09:17:38.284Z"
-  },
-  {
-    "key": "GLFB-VIP-Z5PIM",
-    "reason": "Quản trị viên đã xóa người dùng khỏi danh sách",
-    "revokedAt": "2026-10-14T09:17:38.284Z"
-  },
-  {
-    "key": "ORD_1791969425805_CUH4",
-    "reason": "Đơn hàng đã bị Quản trị viên xóa khỏi hệ thống",
-    "revokedAt": "2026-10-14T09:17:26.683Z"
+    "key": "GLFB-VIP-4JDF4",
+    "reason": "Ki\u1ec3m th\u1eed t\u00ednh n\u0103ng ng\u1eaft m\u00e1y kh\u1ea9n c\u1ea5p",
+    "revokedAt": "2026-10-23T02:46:03.637Z"
   }
 ]
