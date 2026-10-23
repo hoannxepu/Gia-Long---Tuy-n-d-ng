@@ -2,12 +2,97 @@
   {
     "key": "PHONE:0988776655",
     "reason": "Quản trị viên đã xóa SĐT này khỏi danh sách",
-    "revokedAt": "2026-10-23T03:29:08.368Z"
+    "revokedAt": "2026-10-23T04:09:06.161Z"
   },
   {
     "key": "0988776655",
     "reason": "Quản trị viên đã xóa SĐT này khỏi danh sách",
-    "revokedAt": "2026-10-23T03:29:08.368Z"
+    "revokedAt": "2026-10-23T04:09:06.161Z"
+  },
+  {
+    "key": "DEV:TEST_PC_1792728545898",
+    "reason": "Quản trị viên đã xóa thiết bị này khỏi danh sách",
+    "revokedAt": "2026-10-23T04:09:06.160Z"
+  },
+  {
+    "key": "TEST_PC_1792728545898",
+    "reason": "Quản trị viên đã xóa thiết bị này khỏi danh sách",
+    "revokedAt": "2026-10-23T04:09:06.160Z"
+  },
+  {
+    "key": "LIC_1792728546067_U3OB1",
+    "reason": "Quản trị viên đã xóa người dùng khỏi danh sách",
+    "revokedAt": "2026-10-23T04:09:06.160Z"
+  },
+  {
+    "key": "GLFB-VIP-U3OB1",
+    "reason": "Quản trị viên đã xóa người dùng khỏi danh sách",
+    "revokedAt": "2026-10-23T04:09:06.160Z"
+  },
+  {
+    "key": "ORD_MULTI_1792728493040",
+    "reason": "Đơn hàng liên kết với bản quyền đã xóa",
+    "revokedAt": "2026-10-23T04:08:58.558Z"
+  },
+  {
+    "key": "PHONE:0977889900",
+    "reason": "Quản trị viên đã xóa SĐT này khỏi danh sách",
+    "revokedAt": "2026-10-23T04:08:58.557Z"
+  },
+  {
+    "key": "0977889900",
+    "reason": "Quản trị viên đã xóa SĐT này khỏi danh sách",
+    "revokedAt": "2026-10-23T04:08:58.557Z"
+  },
+  {
+    "key": "DEV:PC_MULTI_1792728538359",
+    "reason": "Quản trị viên đã xóa thiết bị này khỏi danh sách",
+    "revokedAt": "2026-10-23T04:08:58.557Z"
+  },
+  {
+    "key": "PC_MULTI_1792728538359",
+    "reason": "Quản trị viên đã xóa thiết bị này khỏi danh sách",
+    "revokedAt": "2026-10-23T04:08:58.557Z"
+  },
+  {
+    "key": "DEV:PC_MULTI_1792728493040",
+    "reason": "Quản trị viên đã xóa thiết bị này khỏi danh sách",
+    "revokedAt": "2026-10-23T04:08:58.557Z"
+  },
+  {
+    "key": "PC_MULTI_1792728493040",
+    "reason": "Quản trị viên đã xóa thiết bị này khỏi danh sách",
+    "revokedAt": "2026-10-23T04:08:58.557Z"
+  },
+  {
+    "key": "LIC_1792728493245_2EECJ",
+    "reason": "Quản trị viên đã xóa người dùng khỏi danh sách",
+    "revokedAt": "2026-10-23T04:08:58.556Z"
+  },
+  {
+    "key": "GLFB-VIP-2EECJ",
+    "reason": "Quản trị viên đã xóa người dùng khỏi danh sách",
+    "revokedAt": "2026-10-23T04:08:58.556Z"
+  },
+  {
+    "key": "DEV:TEST_PC_1792728470683",
+    "reason": "Quản trị viên đã xóa thiết bị này khỏi danh sách",
+    "revokedAt": "2026-10-23T04:07:50.969Z"
+  },
+  {
+    "key": "TEST_PC_1792728470683",
+    "reason": "Quản trị viên đã xóa thiết bị này khỏi danh sách",
+    "revokedAt": "2026-10-23T04:07:50.969Z"
+  },
+  {
+    "key": "LIC_1792728470910_JO1G7",
+    "reason": "Quản trị viên đã xóa người dùng khỏi danh sách",
+    "revokedAt": "2026-10-23T04:07:50.969Z"
+  },
+  {
+    "key": "GLFB-VIP-JO1G7",
+    "reason": "Quản trị viên đã xóa người dùng khỏi danh sách",
+    "revokedAt": "2026-10-23T04:07:50.969Z"
   },
   {
     "key": "DEV:TEST_PC_1792726148022",

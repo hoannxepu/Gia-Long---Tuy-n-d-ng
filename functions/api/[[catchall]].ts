@@ -476,10 +476,10 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
     });
   }
 
-  // 2. Chế độ Proxy (Chỉ kích hoạt khi người dùng cấu hình biến môi trường BACKEND_URL riêng biệt)
-  if (env.BACKEND_URL && env.BACKEND_URL.startsWith('http')) {
+  // 2. Chế độ Proxy (Tự động chuyển tiếp đến máy chủ trung tâm để tất cả các máy và trình duyệt cùng chung 1 số liệu)
+  const centralBackend = (env.BACKEND_URL || 'https://ais-dev-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app').replace(/\/+$/, '');
+  if (centralBackend && centralBackend.startsWith('http')) {
     try {
-      const centralBackend = env.BACKEND_URL.replace(/\/+$/, '');
       const backendTarget = `${centralBackend}${pathname}${url.search}`;
       const proxyReqInit: RequestInit = {
         method: request.method,

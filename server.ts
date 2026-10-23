@@ -2264,6 +2264,7 @@ app.post('/api/admin/orders/approve', requireAdmin, (req: Request, res: Response
   res.json({
     success: true,
     message: `✓ Đã phê duyệt và CỘNG DỒN THÀNH CÔNG ${days} ngày cho máy! Hạn mới: ${expFormatted} (Mã: ${assignedKey})`,
+    assignedKey,
     order,
     license: returnedLicense,
     orders: loadOrders(),

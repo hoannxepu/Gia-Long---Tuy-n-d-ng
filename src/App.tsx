@@ -463,36 +463,19 @@ export default function App() {
   const [confirmPinInput, setConfirmPinInput] = useState<string>('');
   const [showNewPinPassword, setShowNewPinPassword] = useState<boolean>(false);
   const [isChangingPin, setIsChangingPin] = useState<boolean>(false);
-  const [isAdminUnlocked, setIsAdminUnlocked] = useState<boolean>(false);
-  const deletedOrderIdsRef = useRef<Set<string>>(
-    (() => {
-      try {
-        const saved = localStorage.getItem('glfb_deleted_orders');
-        if (saved) return new Set<string>(JSON.parse(saved));
-      } catch (e) {}
-      return new Set<string>();
-    })()
-  );
-  const deletedLicenseIdsRef = useRef<Set<string>>(
-    (() => {
-      try {
-        const saved = localStorage.getItem('glfb_deleted_licenses');
-        if (saved) return new Set<string>(JSON.parse(saved));
-      } catch (e) {}
-      return new Set<string>();
-    })()
-  );
+  const [isAdminUnlocked, setIsAdminUnlocked] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('glfb_admin_unlocked') === 'true';
+    } catch (e) {
+      return false;
+    }
+  });
   const notifiedOrderIdsRef = useRef<Set<string>>(new Set());
 
   const [licenses, setLicenses] = useState<AdminLicenseItem[]>(() => {
     try {
       const cached = localStorage.getItem('glfb_admin_licenses');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        const del = localStorage.getItem('glfb_deleted_licenses');
-        const delSet = del ? new Set(JSON.parse(del)) : new Set();
-        return parsed.filter((l: any) => l && !delSet.has(l.id) && !delSet.has(l.key));
-      }
+      if (cached) return JSON.parse(cached);
     } catch (e) {}
     return [];
   });
@@ -565,12 +548,7 @@ export default function App() {
   const [adminOrders, setAdminOrders] = useState<any[]>(() => {
     try {
       const cached = localStorage.getItem('glfb_admin_orders');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        const del = localStorage.getItem('glfb_deleted_orders');
-        const delSet = del ? new Set(JSON.parse(del)) : new Set();
-        return parsed.filter((o: any) => o && o.id && !delSet.has(o.id));
-      }
+      if (cached) return JSON.parse(cached);
     } catch (e) {}
     return [];
   });
@@ -704,7 +682,7 @@ export default function App() {
 
     // 1. Lấy tất cả đơn hàng đã duyệt tương ứng từ adminOrders
     const matchedOrders = adminOrders.filter((o) => {
-      if (!o || !o.id || deletedOrderIdsRef.current.has(o.id)) return false;
+      if (!o || !o.id) return false;
       const ordPhone = (o.phone || '').replace(/\D/g, '');
       const ordKey = (o.generatedKey || '').toUpperCase();
       const ordDev = (o.deviceId || '').toLowerCase();
@@ -1323,14 +1301,12 @@ export default function App() {
       });
       const data = await res.json();
       const ordersList: any[] = (data && data.success && Array.isArray(data.orders)) ? data.orders : [];
-
-      const filteredServerOrders = ordersList.filter((o) => o && o.id && !deletedOrderIdsRef.current.has(o.id));
-      setAdminOrders(filteredServerOrders);
+      setAdminOrders(ordersList);
       try {
-        localStorage.setItem('glfb_admin_orders', JSON.stringify(filteredServerOrders));
+        localStorage.setItem('glfb_admin_orders', JSON.stringify(ordersList));
       } catch (e) {}
 
-      const newPending = filteredServerOrders.filter((o: any) => o.status === 'pending');
+      const newPending = ordersList.filter((o: any) => o.status === 'pending');
       setPendingOrderCount(newPending.length);
       if (newPending.length > 0) {
         const latest = newPending[0];
@@ -1345,72 +1321,55 @@ export default function App() {
     }
   };
 
-  // Tra cứu số lượng đơn chờ duyệt (Đồng bộ chuẩn xác với dữ liệu thực tế)
+  // Tra cứu số lượng đơn chờ duyệt (Đồng bộ chuẩn xác tuyệt đối 100% giữa tất cả các máy tính & trình duyệt)
   const fetchPendingCount = async () => {
     try {
       const res = await fetch('/api/orders/pending-count');
       const data = await res.json();
       const serverCount = (data && data.success && typeof data.pendingCount === 'number') ? data.pendingCount : 0;
-      const latest = data?.latestPending;
-
-      // Nếu đơn mới nhất đã bị xóa bởi admin, bỏ qua
-      if (latest && latest.id && deletedOrderIdsRef.current.has(latest.id)) {
-        if (isAdminUnlockedRef.current) {
-          const count = adminOrdersRef.current.filter((o) => o && o.status === 'pending' && !deletedOrderIdsRef.current.has(o.id)).length;
-          setPendingOrderCount(count);
-        } else {
-          setPendingOrderCount(0);
-        }
-        return;
-      }
+      setPendingOrderCount(serverCount);
 
       if (isAdminUnlockedRef.current) {
-        const localPending = adminOrdersRef.current.filter((o) => o && o.status === 'pending' && !deletedOrderIdsRef.current.has(o.id)).length;
-        if (serverCount > localPending) {
-          // Có đơn đặt mua mới thật sự từ máy chủ, đồng bộ ngay
-          fetchOrders(adminPinRef.current, true);
-        }
-        setPendingOrderCount(localPending);
-      } else {
-        // Nếu đã có cache adminOrders trong máy, ưu tiên số thực tế nếu có
-        if (adminOrdersRef.current.length > 0) {
-          const localPending = adminOrdersRef.current.filter((o) => o && o.status === 'pending' && !deletedOrderIdsRef.current.has(o.id)).length;
-          setPendingOrderCount(localPending > 0 ? localPending : (serverCount > 0 ? serverCount : 0));
-        } else {
-          setPendingOrderCount(serverCount);
-        }
-      }
-
-      if (latest && latest.id && !deletedOrderIdsRef.current.has(latest.id)) {
-        notifiedOrderIdsRef.current.add(latest.id);
+        fetchOrders(adminPinRef.current, true);
       }
     } catch (e) {
-      const localPending = adminOrdersRef.current.filter((o) => o && o.status === 'pending' && !deletedOrderIdsRef.current.has(o.id)).length;
-      setPendingOrderCount(localPending);
+      console.warn('Lỗi lấy pending-count:', e);
     }
   };
-
-  // Đồng bộ số lượng chờ duyệt tức thì mỗi khi adminOrders thay đổi
-  useEffect(() => {
-    const realCount = adminOrders.filter(
-      (o) => o && o.status === 'pending' && !deletedOrderIdsRef.current.has(o.id)
-    ).length;
-    setPendingOrderCount(realCount);
-  }, [adminOrders, isAdminUnlocked]);
 
   useEffect(() => {
     fetchPendingCount();
     const timer = setInterval(() => {
       fetchPendingCount();
-    }, 8000);
+    }, 6000);
+
+    // Đồng bộ đa tab (Cross-tab broadcast sync qua LocalStorage):
+    // Khi một tab duyệt/xóa đơn hoặc đổi bản quyền, tất cả các tab khác trên máy cập nhật tức thì!
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'glfb_admin_unlocked') {
+        setIsAdminUnlocked(e.newValue === 'true');
+      }
+      if (e.key === 'glfb_admin_orders' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          setAdminOrders(parsed);
+          setPendingOrderCount(parsed.filter((o: any) => o && o.status === 'pending').length);
+        } catch (err) {}
+      }
+      if (e.key === 'glfb_admin_licenses' && e.newValue) {
+        try {
+          setLicenses(JSON.parse(e.newValue));
+        } catch (err) {}
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
 
     const onOrderFromExtension = (e: any) => {
       const order = e.detail || e.data?.order;
-      if (order && order.id && !deletedOrderIdsRef.current.has(order.id)) {
+      if (order && order.id) {
         setAdminOrders((prev) => {
-          if (deletedOrderIdsRef.current.has(order.id)) return prev;
           const map = new Map<string, any>();
-          prev.forEach((o) => { if (o && o.id && !deletedOrderIdsRef.current.has(o.id)) map.set(o.id, o); });
+          prev.forEach((o) => { if (o && o.id) map.set(o.id, o); });
           map.set(order.id, order);
           const merged = Array.from(map.values()).sort(
             (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
@@ -1424,8 +1383,8 @@ export default function App() {
       if (isAdminUnlocked) {
         fetchPendingCount();
         fetchOrders(adminPin, true);
-        if (order && !deletedOrderIdsRef.current.has(order.id)) {
-          triggerToast(`🔔 Có đơn đặt mua mới từ Extension: ${order.pkgName || 'Gói Bản Quyền'} (${order.clientName || 'Khách'})!`);
+        if (order) {
+          triggerToast(`🔔 Có đơn đặt mua mới: ${order.pkgName || 'Gói Bản Quyền'} (${order.clientName || 'Khách'})!`);
         }
       }
     };
@@ -1440,6 +1399,7 @@ export default function App() {
 
     return () => {
       clearInterval(timer);
+      window.removeEventListener('storage', handleStorageChange);
       window.removeEventListener('GIALONG_NEW_ORDER', onOrderFromExtension);
       window.removeEventListener('message', onWindowMessage);
     };
@@ -1655,11 +1615,6 @@ export default function App() {
 
     try {
       if (type === 'order') {
-        deletedOrderIdsRef.current.add(id);
-        try {
-          localStorage.setItem('glfb_deleted_orders', JSON.stringify(Array.from(deletedOrderIdsRef.current)));
-        } catch (e) {}
-
         const updatedOrders = adminOrders.filter((o) => o.id !== id);
         setAdminOrders(updatedOrders);
         try {
@@ -1676,16 +1631,15 @@ export default function App() {
         });
         const data = await res.json();
         if (data.success) {
-          const finalOrders = (data.orders || updatedOrders).filter((o: any) => o && !deletedOrderIdsRef.current.has(o.id));
+          const finalOrders = data.orders || updatedOrders;
           setAdminOrders(finalOrders);
           try {
             localStorage.setItem('glfb_admin_orders', JSON.stringify(finalOrders));
           } catch (e) {}
           if (data.history) setHistoryList(data.history);
           if (data.licenses) {
-            const filteredLics = data.licenses.filter((l: any) => !deletedLicenseIdsRef.current.has(l.id) && !deletedLicenseIdsRef.current.has(l.key));
-            setLicenses(filteredLics);
-            try { localStorage.setItem('glfb_admin_licenses', JSON.stringify(filteredLics)); } catch (e) {}
+            setLicenses(data.licenses);
+            try { localStorage.setItem('glfb_admin_licenses', JSON.stringify(data.licenses)); } catch (e) {}
           }
           triggerToast(`✓ Đã xóa đơn đặt mua của khách "${name}" thành công!`);
           fetchHistory(adminPin, true);
@@ -1693,12 +1647,6 @@ export default function App() {
           alert('Lỗi: ' + (data.error || 'Không thể xóa đơn'));
         }
       } else {
-        deletedLicenseIdsRef.current.add(id);
-        if (keyOrCode) deletedLicenseIdsRef.current.add(keyOrCode);
-        try {
-          localStorage.setItem('glfb_deleted_licenses', JSON.stringify(Array.from(deletedLicenseIdsRef.current)));
-        } catch (e) {}
-
         const updatedLics = licenses.filter((l) => l.id !== id && l.key !== id && l.key !== keyOrCode);
         setLicenses(updatedLics);
         try {
@@ -1715,16 +1663,15 @@ export default function App() {
         });
         const data = await res.json();
         if (data.success) {
-          const finalLics = (data.licenses || updatedLics).filter((l: any) => !deletedLicenseIdsRef.current.has(l.id) && !deletedLicenseIdsRef.current.has(l.key));
+          const finalLics = data.licenses || updatedLics;
           setLicenses(finalLics);
           try {
             localStorage.setItem('glfb_admin_licenses', JSON.stringify(finalLics));
           } catch (e) {}
           if (data.orders) {
-            const finalOrders = data.orders.filter((o: any) => !deletedOrderIdsRef.current.has(o.id));
-            setAdminOrders(finalOrders);
+            setAdminOrders(data.orders);
             try {
-              localStorage.setItem('glfb_admin_orders', JSON.stringify(finalOrders));
+              localStorage.setItem('glfb_admin_orders', JSON.stringify(data.orders));
             } catch (e) {}
           }
           if (actionModalLicense && (actionModalLicense.id === id || actionModalLicense.key === id || actionModalLicense.key === keyOrCode)) {
@@ -1756,10 +1703,7 @@ export default function App() {
       });
       const data = await res.json();
       if (data.success && Array.isArray(data.licenses)) {
-        const filteredLics = data.licenses.filter(
-          (l: any) => l && !deletedLicenseIdsRef.current.has(l.id) && !deletedLicenseIdsRef.current.has(l.key)
-        );
-        const finalLics = filteredLics.map((l: AdminLicenseItem) => {
+        const finalLics = data.licenses.map((l: AdminLicenseItem) => {
           const expMs = new Date(l.expiresAt).getTime();
           const nowMs = Date.now();
           const daysLeft = !isNaN(expMs) && expMs > nowMs ? Math.max(1, Math.ceil((expMs - nowMs) / 86400000)) : 0;
@@ -1851,9 +1795,12 @@ export default function App() {
         setAdminPin(cleanInput);
         try {
           localStorage.setItem('glfb_admin_pin', cleanInput);
+          localStorage.setItem('glfb_admin_unlocked', 'true');
         } catch (e) {}
         setIsAdminUnlocked(true);
         fetchLicenses(cleanInput);
+        fetchOrders(cleanInput);
+        fetchHistory(cleanInput);
       } else {
         alert('Khóa Quản Trị không chính xác! Vui lòng thử lại.');
       }
@@ -1862,9 +1809,12 @@ export default function App() {
         setAdminPin(cleanInput);
         try {
           localStorage.setItem('glfb_admin_pin', cleanInput);
+          localStorage.setItem('glfb_admin_unlocked', 'true');
         } catch (err) {}
         setIsAdminUnlocked(true);
         fetchLicenses(cleanInput);
+        fetchOrders(cleanInput);
+        fetchHistory(cleanInput);
       } else {
         alert('Khóa Quản Trị không chính xác! Vui lòng thử lại.');
       }
