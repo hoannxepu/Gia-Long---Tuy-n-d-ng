@@ -2426,7 +2426,7 @@ Em xin gửi anh/chị hướng dẫn cài đặt và kích hoạt bản quyền
         }
       }
       const contentDisposition = res.headers.get('Content-Disposition');
-      let downloadFileName = packageInfo?.fileName || `Gia_Long_FB_WebStore_v${packageInfo?.version || '1.0.3'}.zip`;
+      let downloadFileName = packageInfo?.fileName || `Gia_Long_FB_WebStore_v${packageInfo?.version || '1.0.4'}.zip`;
       if (contentDisposition && contentDisposition.includes('filename="')) {
         const match = contentDisposition.match(/filename="([^"]+)"/);
         if (match && match[1]) downloadFileName = match[1];
@@ -2484,7 +2484,7 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `Gia_Long_FB_Extension_v${packageInfo?.version || '1.0.2'}_Source.zip`;
+      a.download = `Gia_Long_FB_Extension_v${packageInfo?.version || '1.0.4'}_Source.zip`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -3526,7 +3526,7 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
                     <ol className="list-decimal pl-4 space-y-2 text-slate-300 text-xs">
                       <li>Truy cập <a href="https://partner.microsoft.com/dashboard/microsoftedge" target="_blank" rel="noreferrer" className="text-teal-400 underline font-mono font-bold">partner.microsoft.com</a> và đăng nhập tài khoản Microsoft.</li>
                       <li>Chọn <strong>"Developer"</strong> &rarr; <strong>"Microsoft Edge"</strong> &rarr; Bấm <strong>"Create new extension"</strong>.</li>
-                      <li>Tải file ZIP <strong className="text-white font-mono">Gia_Long_FB_WebStore_v1.0.2.zip</strong> lên.</li>
+                      <li>Tải file ZIP <strong className="text-white font-mono">Gia_Long_FB_WebStore_v1.0.4.zip</strong> (hoặc bấm nút "Tải Gói Chuẩn Store v1.0.4" bên dưới).</li>
                       <li>Điền tên tiện ích: <strong className="text-white">Gia Long - FB</strong>, danh mục: <strong>Productivity (Năng suất)</strong>.</li>
                       <li>Dán link Chính sách quyền riêng tư:
                         <div className="flex items-center gap-2 mt-1 bg-slate-900 p-1.5 rounded-lg border border-slate-800 font-mono text-[10.5px]">

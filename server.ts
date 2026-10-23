@@ -568,6 +568,7 @@ app.all(['/api/check', '/check'], (req: Request, res: Response) => {
     });
   }
 
+  const orders = loadOrders();
   const pendingOrd = orders.find((o) => o.status === 'pending' && (o.deviceId || '').toLowerCase() === cleanDev);
   if (pendingOrd) {
     return res.json({
@@ -1739,7 +1740,8 @@ app.post('/api/orders/create', (req: Request, res: Response) => {
       const samePhone = phone && o.phone && o.phone.replace(/\D/g, '') === String(phone).replace(/\D/g, '');
       const samePkg = o.pkgName === pkgName;
       const timeDiff = Math.abs(Date.now() - new Date(o.createdAt).getTime());
-      return (sameDev || samePhone) && samePkg && o.status === 'pending' && timeDiff < 2 * 60 * 1000;
+      const isDeviceMatch = cleanDeviceId ? sameDev : samePhone;
+      return isDeviceMatch && samePkg && o.status === 'pending' && timeDiff < 2 * 60 * 1000;
     });
 
     if (existing) {

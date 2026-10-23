@@ -1,5 +1,75 @@
 [
   {
+    "key": "ORD_TEST_1792721648268",
+    "reason": "Kiểm thử tính năng ngắt máy khẩn cấp",
+    "revokedAt": "2026-10-23T02:14:08.400Z"
+  },
+  {
+    "key": "ORD_TEST_ADD_1792721648378",
+    "reason": "Kiểm thử tính năng ngắt máy khẩn cấp",
+    "revokedAt": "2026-10-23T02:14:08.399Z"
+  },
+  {
+    "key": "DEV:TEST_PC_1792721648268",
+    "reason": "Kiểm thử tính năng ngắt máy khẩn cấp",
+    "revokedAt": "2026-10-23T02:14:08.399Z"
+  },
+  {
+    "key": "TEST_PC_1792721648268",
+    "reason": "Kiểm thử tính năng ngắt máy khẩn cấp",
+    "revokedAt": "2026-10-23T02:14:08.399Z"
+  },
+  {
+    "key": "LIC_1792721648369_L9GFX",
+    "reason": "Kiểm thử tính năng ngắt máy khẩn cấp",
+    "revokedAt": "2026-10-23T02:14:08.399Z"
+  },
+  {
+    "key": "GLFB-VIP-L9GFX",
+    "reason": "Kiểm thử tính năng ngắt máy khẩn cấp",
+    "revokedAt": "2026-10-23T02:14:08.399Z"
+  },
+  {
+    "key": "ORD_TEST_1792721597836",
+    "reason": "Kiểm thử tính năng ngắt máy khẩn cấp",
+    "revokedAt": "2026-10-23T02:13:18.044Z"
+  },
+  {
+    "key": "ORD_TEST_ADD_1792721598016",
+    "reason": "Kiểm thử tính năng ngắt máy khẩn cấp",
+    "revokedAt": "2026-10-23T02:13:18.043Z"
+  },
+  {
+    "key": "DEV:TEST_PC_1792721597836",
+    "reason": "Kiểm thử tính năng ngắt máy khẩn cấp",
+    "revokedAt": "2026-10-23T02:13:18.043Z"
+  },
+  {
+    "key": "TEST_PC_1792721597836",
+    "reason": "Kiểm thử tính năng ngắt máy khẩn cấp",
+    "revokedAt": "2026-10-23T02:13:18.042Z"
+  },
+  {
+    "key": "PHONE:0988776655",
+    "reason": "Kiểm thử tính năng ngắt máy khẩn cấp",
+    "revokedAt": "2026-10-23T02:13:18.042Z"
+  },
+  {
+    "key": "0988776655",
+    "reason": "Kiểm thử tính năng ngắt máy khẩn cấp",
+    "revokedAt": "2026-10-23T02:13:18.042Z"
+  },
+  {
+    "key": "LIC_1792721597974_1GGJ0",
+    "reason": "Kiểm thử tính năng ngắt máy khẩn cấp",
+    "revokedAt": "2026-10-23T02:13:18.041Z"
+  },
+  {
+    "key": "GLFB-VIP-1GGJ0",
+    "reason": "Kiểm thử tính năng ngắt máy khẩn cấp",
+    "revokedAt": "2026-10-23T02:13:18.041Z"
+  },
+  {
     "key": "ORD_1791776619046_GO50",
     "reason": "Thử nghiệm ngắt máy",
     "revokedAt": "2026-10-19T12:45:16.169Z"
