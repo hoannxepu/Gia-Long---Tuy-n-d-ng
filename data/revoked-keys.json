@@ -1,5 +1,45 @@
 [
   {
+    "key": "DEV:PC_MULTI_1792731562176",
+    "reason": "Quản trị viên đã xóa thiết bị này khỏi danh sách",
+    "revokedAt": "2026-10-23T04:59:22.547Z"
+  },
+  {
+    "key": "PC_MULTI_1792731562176",
+    "reason": "Quản trị viên đã xóa thiết bị này khỏi danh sách",
+    "revokedAt": "2026-10-23T04:59:22.547Z"
+  },
+  {
+    "key": "LIC_1792731562454_08J6X",
+    "reason": "Quản trị viên đã xóa người dùng khỏi danh sách",
+    "revokedAt": "2026-10-23T04:59:22.547Z"
+  },
+  {
+    "key": "GLFB-VIP-08J6X",
+    "reason": "Quản trị viên đã xóa người dùng khỏi danh sách",
+    "revokedAt": "2026-10-23T04:59:22.547Z"
+  },
+  {
+    "key": "DEV:PC_MULTI_1792731323613",
+    "reason": "Quản trị viên đã xóa thiết bị này khỏi danh sách",
+    "revokedAt": "2026-10-23T04:55:23.893Z"
+  },
+  {
+    "key": "PC_MULTI_1792731323613",
+    "reason": "Quản trị viên đã xóa thiết bị này khỏi danh sách",
+    "revokedAt": "2026-10-23T04:55:23.893Z"
+  },
+  {
+    "key": "LIC_1792731323822_7MPF1",
+    "reason": "Quản trị viên đã xóa người dùng khỏi danh sách",
+    "revokedAt": "2026-10-23T04:55:23.893Z"
+  },
+  {
+    "key": "GLFB-VIP-7MPF1",
+    "reason": "Quản trị viên đã xóa người dùng khỏi danh sách",
+    "revokedAt": "2026-10-23T04:55:23.893Z"
+  },
+  {
     "key": "PHONE:0988776655",
     "reason": "Quản trị viên đã xóa SĐT này khỏi danh sách",
     "revokedAt": "2026-10-23T04:09:06.161Z"

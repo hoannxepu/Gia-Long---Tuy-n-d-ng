@@ -1515,6 +1515,22 @@ export default function App() {
     return () => clearInterval(timer);
   }, [isAdminUnlocked, adminPin, driveToken]);
 
+  const handleForceFullSync = async () => {
+    try {
+      localStorage.removeItem('glfb_admin_licenses');
+      localStorage.removeItem('glfb_admin_orders');
+      localStorage.removeItem('glfb_admin_history');
+      await Promise.all([
+        fetchLicenses(adminPin, false),
+        fetchOrders(adminPin, false),
+        fetchHistory(adminPin, false),
+      ]);
+      triggerToast('✓ Đã xóa cache cục bộ và đồng bộ 100% dữ liệu chuẩn từ máy chủ trung tâm!');
+    } catch (err: any) {
+      alert('Lỗi đồng bộ: ' + (err.message || 'Không thể kết nối máy chủ'));
+    }
+  };
+
   const handleApproveOrder = async (orderId: string) => {
     notifiedOrderIdsRef.current.add(orderId);
     const targetOrder = adminOrders.find((o) => o && o.id === orderId);
@@ -2711,7 +2727,7 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
               <span>{isAdminUnlocked ? 'Bảng Quản Trị (Admin)' : 'Quản Trị Cấp Key'}</span>
               {(() => {
                 const effectiveCount = isAdminUnlocked
-                  ? adminOrders.filter((o) => o && o.status === 'pending' && !deletedOrderIdsRef.current.has(o.id)).length
+                  ? adminOrders.filter((o) => o && o.status === 'pending').length
                   : pendingOrderCount;
                 if (effectiveCount <= 0) return null;
                 return (
@@ -3748,6 +3764,28 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
                     >
                       <Download className="w-3 h-3" />
                       <span>Quét Lại Đơn</span>
+                    </button>
+                    <button
+                      onClick={async () => {
+                        try {
+                          localStorage.removeItem('glfb_admin_licenses');
+                          localStorage.removeItem('glfb_admin_orders');
+                          localStorage.removeItem('glfb_admin_history');
+                          await Promise.all([
+                            fetchLicenses(adminPin, false),
+                            fetchOrders(adminPin, false),
+                            fetchHistory(adminPin, false),
+                          ]);
+                          triggerToast('✓ Đã xóa cache cục bộ và đồng bộ 100% dữ liệu chuẩn từ máy chủ trung tâm!');
+                        } catch (err: any) {
+                          alert('Lỗi đồng bộ: ' + (err.message || 'Không thể kết nối máy chủ'));
+                        }
+                      }}
+                      className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-[11px] font-bold transition flex items-center gap-1 shadow-sm active:scale-98"
+                      title="Xóa bộ nhớ đệm cục bộ và đồng bộ chuẩn xác số liệu chung giữa 2 máy / trình duyệt"
+                    >
+                      <RefreshCw className="w-3 h-3 animate-spin-slow" />
+                      <span>Đồng Bộ Chung 2 Máy</span>
                     </button>
                   </div>
                 </div>
