@@ -1047,7 +1047,8 @@ app.post('/api/admin/licenses/create', requireAdmin, (req: Request, res: Respons
 // Gia hạn thêm ngày (Ví dụ khi khách đóng tiền 500k hoặc 1.5tr)
 app.post('/api/admin/licenses/extend', requireAdmin, (req: Request, res: Response) => {
   const { id, addDays } = req.body;
-  const days = parseInt(addDays, 10) || 30;
+  const parsedDays = parseInt(addDays, 10);
+  const days = isNaN(parsedDays) ? 30 : parsedDays;
 
   const licenses = loadLicenses();
   const found = licenses.find((l) => l.id === id || l.key === id || (id && l.key?.toUpperCase() === String(id).toUpperCase()));
@@ -1058,25 +1059,28 @@ app.post('/api/admin/licenses/extend', requireAdmin, (req: Request, res: Respons
 
   const now = Date.now();
   const currentExp = new Date(found.expiresAt).getTime();
-  // Nếu đã hết hạn thì cộng từ hôm nay, nếu chưa thì cộng dồn thêm vào ngày hết hạn
-  const baseTime = currentExp > now ? currentExp : now;
+  let baseTime = currentExp > now ? currentExp : now;
+  if (days < 0) {
+    baseTime = !isNaN(currentExp) ? currentExp : now;
+  }
   const newExp = new Date(baseTime + days * 24 * 60 * 60 * 1000).toISOString();
 
   found.expiresAt = newExp;
   saveLicenses(licenses);
 
+  const isDecrease = days < 0;
   addHistoryEntry({
-    action: 'extend',
-    actionName: 'Gia hạn thêm',
+    action: isDecrease ? 'update_date' : 'extend',
+    actionName: isDecrease ? `Giảm hạn (${days}N)` : `Gia hạn (+${days}N)`,
     clientName: found.clientName,
     phone: found.phone || '',
     deviceId: found.devices?.[0]?.deviceId || '',
     key: found.key,
     planType: found.planType,
-    pkgName: normalizePkgSymbol(days),
+    pkgName: normalizePkgSymbol(Math.abs(days)),
     daysAdded: days,
     newExpiresAt: newExp,
-    notes: `Gia hạn thêm ${days} ngày. Hạn mới: ${new Date(newExp).toLocaleDateString('vi-VN')}`,
+    notes: `${isDecrease ? 'Giảm' : 'Gia hạn thêm'} ${Math.abs(days)} ngày. Hạn mới: ${new Date(newExp).toLocaleDateString('vi-VN')}`,
   });
 
   // Thông báo sang Google Drive / Sheets nếu có
@@ -1197,8 +1201,11 @@ app.post('/api/admin/licenses/revoke', requireAdmin, (req: Request, res: Respons
   found.isSuspended = true;
   found.revokedAt = new Date().toISOString();
   found.revokeReason = revokeReason;
-  const disconnectedDevices = (found.devices || []).map((d) => d.deviceId).filter(Boolean);
-  (found as any).revokedDevices = Array.from(new Set([...((found as any).revokedDevices || []), ...disconnectedDevices]));
+  const currentDevs = (found.devices || []).map((d) => d.deviceId).filter(Boolean);
+  const knownDevs = ((found as any).knownDevices || []).filter(Boolean);
+  const prevRevoked = ((found as any).revokedDevices || []).filter(Boolean);
+  const disconnectedDevices = Array.from(new Set([...currentDevs, ...knownDevs, ...prevRevoked]));
+  (found as any).revokedDevices = disconnectedDevices;
   found.devices = []; // Ngắt ngay toàn bộ thiết bị đang kết nối
   saveLicenses(licenses);
 
@@ -1292,8 +1299,41 @@ app.post('/api/admin/licenses/unrevoke', requireAdmin, (req: Request, res: Respo
   found.isSuspended = false;
   delete found.revokedAt;
   delete found.revokeReason;
-  saveLicenses(licenses);
+
+  // Xóa key và id khỏi revoked keys
   removeRevokedKey(found.key);
+  removeRevokedKey(found.id);
+  if (found.aliasKeys && Array.isArray(found.aliasKeys)) {
+    for (const ak of found.aliasKeys) {
+      if (ak) removeRevokedKey(ak);
+    }
+  }
+  if (found.phone) {
+    const cleanPh = found.phone.replace(/\D/g, '');
+    if (cleanPh) {
+      removeRevokedKey(cleanPh);
+      removeRevokedKey(`PHONE:${cleanPh}`);
+    }
+  }
+
+  // Khôi phục lại các thiết bị và gỡ cấm khỏi danh sách revoked
+  const toRestoreDevs = Array.from(new Set([...((found as any).revokedDevices || []), ...((found as any).knownDevices || [])])).filter(Boolean);
+  for (const dId of toRestoreDevs) {
+    removeRevokedKey(dId);
+    removeRevokedKey(`DEV:${dId}`);
+    removeRevokedKey(`DEV:${dId.toUpperCase()}`);
+    removeRevokedKey(dId.toUpperCase());
+    if (!found.devices.some((d) => d.deviceId.toLowerCase() === dId.toLowerCase())) {
+      found.devices.push({
+        deviceId: dId,
+        deviceName: found.clientName || 'Thiết bị khôi phục',
+        activatedAt: new Date().toISOString(),
+        lastSeenAt: new Date().toISOString(),
+      });
+    }
+  }
+  (found as any).revokedDevices = [];
+  saveLicenses(licenses);
 
   addHistoryEntry({
     action: 'unrevoke',
@@ -1369,6 +1409,7 @@ app.post('/api/admin/licenses/reset-devices', requireAdmin, (req: Request, res: 
   }
 
   const count = found.devices.length;
+  (found as any).knownDevices = Array.from(new Set([...((found as any).knownDevices || []), ...(found.devices || []).map((d) => d.deviceId)]));
   found.devices = [];
   saveLicenses(licenses);
 
@@ -1467,12 +1508,44 @@ export interface OrderItem {
 
 const ORDERS_FILE = path.join(DATA_DIR, 'orders.json');
 
-async function syncGlobalStoreServer() {
-  // Đã gỡ bỏ restful-api.dev để tránh lỗi giới hạn trần và timeout
+async function syncGlobalStoreServer(order?: OrderItem) {
+  if (!order) return;
+  try {
+    fetch('https://gia-long---tuy-n-d-ng.pages.dev/api/orders/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(order),
+      signal: AbortSignal.timeout(3000),
+    }).catch(() => {});
+  } catch (e) {}
 }
 
 async function pullGlobalStoreServer() {
-  // Đã gỡ bỏ restful-api.dev để tránh lỗi giới hạn trần và timeout
+  try {
+    const pin = getActiveAdminPin();
+    const resp = await fetch('https://gia-long---tuy-n-d-ng.pages.dev/api/admin/orders', {
+      headers: { 'x-admin-pin': pin },
+      signal: AbortSignal.timeout(3500),
+    });
+    if (resp.ok) {
+      const data = await resp.json();
+      if (data && data.success && Array.isArray(data.orders)) {
+        const localOrders = loadOrders();
+        let changed = false;
+        for (const remoteOrd of data.orders) {
+          if (!remoteOrd || !remoteOrd.id) continue;
+          const exists = localOrders.find((lo) => lo.id === remoteOrd.id);
+          if (!exists && remoteOrd.status === 'pending') {
+            localOrders.unshift(remoteOrd);
+            changed = true;
+          }
+        }
+        if (changed) {
+          saveOrders(localOrders);
+        }
+      }
+    }
+  } catch (e) {}
 }
 
 function getInitialOrders(): OrderItem[] {
@@ -1785,6 +1858,9 @@ app.post('/api/orders/create', (req: Request, res: Response) => {
     } catch (e) {}
 
     console.log(`[Order API] Nhận đơn mới: ${newOrder.pkgName} từ khách ${newOrder.clientName} (SĐT: ${newOrder.phone})`);
+
+    // Tự động đồng bộ chéo đơn hàng sang Cloudflare Pages Production
+    syncGlobalStoreServer(newOrder);
 
     // Tự động đồng bộ sang Google Drive / Google Sheets nếu bật
     const currentSettings = loadSettings();
@@ -2218,32 +2294,22 @@ app.post('/api/admin/orders/delete', requireAdmin, (req: Request, res: Response)
   const target = orders.find((o) => o.id === targetId);
   const before = orders.length;
 
-  // Ghi nhận targetId vào danh sách đã xóa để không bao giờ bị phục hồi
-  addRevokedKey(String(targetId).toUpperCase(), 'Đơn hàng đã bị Quản trị viên xóa khỏi hệ thống');
-
-  // Xóa đơn mục tiêu và các đơn trùng lặp (cùng người mua, SĐT, gói tạo gần cùng lúc)
-  orders = orders.filter((o) => {
-    if (o.id === targetId) return false;
-    if (target && target.status === 'pending' && o.status === 'pending') {
-      const sameClient = (o.clientName || '').trim().toLowerCase() === (target.clientName || '').trim().toLowerCase();
-      const samePhone = (o.phone || '').trim() === (target.phone || '').trim();
-      const samePkg = o.pkgName === target.pkgName;
-      const timeDiff = Math.abs(new Date(o.createdAt).getTime() - new Date(target.createdAt).getTime());
-      if (sameClient && samePhone && samePkg && timeDiff < 3 * 60 * 1000) {
-        addRevokedKey(o.id.toUpperCase(), 'Đơn hàng trùng lặp đã bị xóa');
-        return false;
-      }
-    }
-    return true;
-  });
+  // CHỈ XÓA ĐƠN HÀNG KHỎI DANH SÁCH (Tuyệt đối không ảnh hưởng tới bản quyền hay máy khách)
+  orders = orders.filter((o) => o.id !== targetId);
   saveOrders(orders);
 
-  // Cập nhật lại giấy phép nếu đơn đã được duyệt trước đó
-  let licenses = loadLicenses();
-  if (target && target.status === 'approved') {
-    const { licenses: updatedLics } = autoConsolidateLicensesAndOrders();
-    licenses = updatedLics;
-  }
+  // Bản quyền khách hàng được giữ nguyên 100% không bị ảnh hưởng
+  const licenses = loadLicenses();
+
+  // Đồng bộ xóa đơn sang Cloudflare Pages nếu có kết nối
+  try {
+    fetch('https://gia-long---tuy-n-d-ng.pages.dev/api/admin/orders/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-admin-pin': getActiveAdminPin() },
+      body: JSON.stringify({ orderId: targetId, id: targetId }),
+      signal: AbortSignal.timeout(3000),
+    }).catch(() => {});
+  } catch (e) {}
 
   if (target) {
     addHistoryEntry({

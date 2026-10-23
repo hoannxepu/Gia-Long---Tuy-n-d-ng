@@ -1,8 +1,44 @@
 [
   {
+    "id": "lic_1792726124581_KKTDX",
+    "key": "GLFB-VIP-KKTDX",
+    "clientName": "Nguyễn Văn Kiểm Thử Toàn Diện",
+    "phone": "0988776655",
+    "planType": "individual",
+    "maxDevices": 1,
+    "devices": [],
+    "createdAt": "2026-10-23T03:28:44.581Z",
+    "expiresAt": "2027-11-25T03:28:44.581Z",
+    "isSuspended": true,
+    "aliasKeys": [],
+    "notes": "Bản quyền cấp từ duyệt đơn: Gói 12 Tháng (+390 ngày)",
+    "isRevoked": true,
+    "revokedAt": "2026-10-23T03:28:44.621Z",
+    "revokeReason": "Kiểm thử ngắt máy khẩn cấp",
+    "revokedDevices": []
+  },
+  {
+    "id": "lic_1792726023903_BC0H4",
+    "key": "GLFB-VIP-BC0H4",
+    "clientName": "Nguyễn Văn Kiểm Thử Toàn Diện",
+    "phone": "0988776655",
+    "planType": "individual",
+    "maxDevices": 1,
+    "devices": [],
+    "createdAt": "2026-10-23T03:27:03.903Z",
+    "expiresAt": "2027-11-25T03:27:03.903Z",
+    "isSuspended": true,
+    "aliasKeys": [],
+    "notes": "Bản quyền cấp từ duyệt đơn: Gói 12 Tháng (+390 ngày)",
+    "isRevoked": true,
+    "revokedAt": "2026-10-23T03:27:03.950Z",
+    "revokeReason": "Kiểm thử ngắt máy khẩn cấp",
+    "revokedDevices": []
+  },
+  {
     "id": "lic_1791734634256_QU9IY",
     "key": "GLFB-VIP-QU9IY",
-    "clientName": "c\u1ee7 t\u1ecfidfdsffdfds",
+    "clientName": "củ tỏidfdsffdfds",
     "phone": "164645464",
     "planType": "individual",
     "maxDevices": 1,
@@ -17,7 +53,7 @@
     "createdAt": "2026-10-11T16:03:54.256Z",
     "expiresAt": "2030-07-12T16:00:12.181Z",
     "isSuspended": false,
-    "notes": "B\u1ea3n quy\u1ec1n VIP Gia Long (G\u00f3i 1 N\u0103m)",
+    "notes": "Bản quyền VIP Gia Long (Gói 1 Năm)",
     "aliasKeys": [
       "GLFB-VIP-RR79K",
       "GLFB-VIP-QVHKJ",
@@ -30,14 +66,14 @@
   {
     "id": "lic_ord_1791782091454_jxzs",
     "key": "GLFB-VIP-DANANG",
-    "clientName": "L\u00ea Th\u1ecb Thu H\u00e0",
+    "clientName": "Lê Thị Thu Hà",
     "phone": "0966368310",
     "planType": "individual",
     "maxDevices": 1,
     "devices": [
       {
         "deviceId": "dev_danang_0966368310",
-        "deviceName": "L\u00ea Th\u1ecb Thu H\u00e0",
+        "deviceName": "Lê Thị Thu Hà",
         "activatedAt": "2026-10-17T14:23:02.934Z",
         "lastSeenAt": "2026-10-17T14:23:02.934Z"
       }
@@ -46,7 +82,7 @@
     "expiresAt": "2027-01-20T05:19:00.000Z",
     "isSuspended": false,
     "aliasKeys": [],
-    "notes": "B\u1ea3n quy\u1ec1n VIP Gia Long (G\u00f3i 3 Th\u00e1ng)",
+    "notes": "Bản quyền VIP Gia Long (Gói 3 Tháng)",
     "daysLeft": 95,
     "isExpired": false
   }

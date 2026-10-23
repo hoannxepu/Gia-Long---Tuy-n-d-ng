@@ -1396,7 +1396,17 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
       }
     }
 
-    // 2. Tự động đồng bộ ngay lập tức sang Google Drive / Google Sheets
+    // 2. Tự động đồng bộ ngay lập tức sang Cloud Run Backend nếu có
+    try {
+      fetch('https://ais-dev-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app/api/orders/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newOrder),
+        signal: AbortSignal.timeout(3000),
+      }).catch(() => {});
+    } catch (e) {}
+
+    // 3. Tự động đồng bộ ngay lập tức sang Google Drive / Google Sheets
     const gDriveUrl = edgeSettings.googleDriveSheetWebhookUrl || env.GOOGLE_DRIVE_WEBHOOK_URL;
     if (gDriveUrl && edgeSettings.googleDriveSyncEnabled !== false) {
       syncToGoogleDrive(newOrder, gDriveUrl);
@@ -1927,13 +1937,17 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
 
     if (pathname === '/api/admin/licenses/extend' && method === 'POST') {
       const { id, addDays } = body;
-      const days = parseInt(addDays, 10) || 30;
+      const parsedDays = parseInt(addDays, 10);
+      const days = isNaN(parsedDays) ? 30 : parsedDays;
       const found = edgeLicenses.find((l) => l.id === id || l.key === id);
       if (!found) return jsonResponse({ success: false, error: 'Không tìm thấy mã!' }, 404);
 
       const now = Date.now();
       const curExp = new Date(found.expiresAt).getTime();
-      const baseTime = curExp > now ? curExp : now;
+      let baseTime = curExp > now ? curExp : now;
+      if (days < 0) {
+        baseTime = !isNaN(curExp) ? curExp : now;
+      }
       const newExp = new Date(baseTime + days * 24 * 60 * 60 * 1000).toISOString();
       found.expiresAt = newExp;
       found.isSuspended = false;
@@ -2163,8 +2177,11 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
       found.isSuspended = true;
       found.revokedAt = new Date().toISOString();
       found.revokeReason = revokeReason;
-      const disconnectedDevices = (found.devices || []).map((d) => d.deviceId).filter(Boolean);
-      (found as any).revokedDevices = Array.from(new Set([...((found as any).revokedDevices || []), ...disconnectedDevices]));
+      const currentDevs = (found.devices || []).map((d) => d.deviceId).filter(Boolean);
+      const knownDevs = ((found as any).knownDevices || []).filter(Boolean);
+      const prevRevoked = ((found as any).revokedDevices || []).filter(Boolean);
+      const disconnectedDevices = Array.from(new Set([...currentDevs, ...knownDevs, ...prevRevoked]));
+      (found as any).revokedDevices = disconnectedDevices;
       found.devices = [];
 
       // Ghi nhận key, id, aliasKeys, phone và các thiết bị vào edgeRevokedKeys
@@ -2265,6 +2282,35 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
       delete found.revokedAt;
       delete found.revokeReason;
 
+      // Gỡ key, id, phone, aliasKeys khỏi edgeRevokedKeys
+      const unrevSet = new Set<string>([
+        found.key.toUpperCase(),
+        found.id.toUpperCase(),
+        ...(found.aliasKeys || []).map((k) => k.toUpperCase()),
+      ]);
+      if (found.phone) {
+        const cleanPh = found.phone.replace(/\D/g, '');
+        unrevSet.add(cleanPh);
+        unrevSet.add(`PHONE:${cleanPh}`);
+      }
+      const toRestoreDevs = Array.from(new Set([...((found as any).revokedDevices || []), ...((found as any).knownDevices || [])])).filter(Boolean);
+      toRestoreDevs.forEach((dev) => {
+        unrevSet.add(dev);
+        unrevSet.add(dev.toUpperCase());
+        unrevSet.add(`DEV:${dev}`);
+        unrevSet.add(`DEV:${dev.toUpperCase()}`);
+        if (!found.devices.some((d) => d.deviceId.toLowerCase() === dev.toLowerCase())) {
+          found.devices.push({
+            deviceId: dev,
+            deviceName: found.clientName || 'Thiết bị khôi phục',
+            activatedAt: new Date().toISOString(),
+            lastSeenAt: new Date().toISOString(),
+          });
+        }
+      });
+      (found as any).revokedDevices = [];
+      edgeRevokedKeys = edgeRevokedKeys.filter((k) => !unrevSet.has(String(k).toUpperCase()));
+
       if (d1) {
         try {
           await d1.prepare(`
@@ -2328,6 +2374,7 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
       if (!found) return jsonResponse({ success: false, error: 'Không tìm thấy mã!' }, 404);
 
       const count = found.devices.length;
+      (found as any).knownDevices = Array.from(new Set([...((found as any).knownDevices || []), ...(found.devices || []).map((d) => d.deviceId)]));
       found.devices = [];
 
       if (d1) {
@@ -2419,10 +2466,6 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
       const targetId = body?.orderId || body?.id;
       const target = edgeOrders.find((o) => o.id === targetId);
 
-      if (targetId) {
-        edgeRevokedKeys.push(String(targetId).toUpperCase());
-      }
-
       edgeOrders = edgeOrders.filter((o) => {
         if (o.id === targetId) return false;
         if (target && target.status === 'pending' && o.status === 'pending') {
@@ -2431,7 +2474,6 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
           const samePkg = o.pkgName === target.pkgName;
           const timeDiff = Math.abs(new Date(o.createdAt).getTime() - new Date(target.createdAt).getTime());
           if (sameClient && samePhone && samePkg && timeDiff < 3 * 60 * 1000) {
-            edgeRevokedKeys.push(o.id.toUpperCase());
             return false;
           }
         }
@@ -2459,11 +2501,11 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
         } catch (e) {}
       }
 
-      autoConsolidateEdgeLicensesAndOrders();
+      // CHỈ XÓA ĐƠN HÀNG (Tuyệt đối không ảnh hưởng tới bản quyền khách hàng)
       await syncKV();
       return jsonResponse({
         success: true,
-        message: 'Đã xóa đơn đặt mua thành công!',
+        message: 'Đã xóa đơn đặt mua thành công (Bản quyền khách hàng được giữ nguyên)!',
         orders: edgeOrders,
         licenses: edgeLicenses,
         history: edgeHistory,

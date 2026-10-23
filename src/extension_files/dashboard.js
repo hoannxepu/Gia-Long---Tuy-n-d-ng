@@ -1992,9 +1992,13 @@ window.proceedSendOrder = async function() {
     }
   } catch (e) {}
 
-  // Gửi trực tiếp /api/orders/create tới các server chính
+  // Gửi trực tiếp /api/orders/create tới các server chính (Cloudflare Pages & Cloud Run)
   try {
-    const bases = new Set(['https://gia-long---tuy-n-d-ng.pages.dev']);
+    const bases = new Set([
+      'https://gia-long---tuy-n-d-ng.pages.dev',
+      'https://ais-dev-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app',
+      'https://ais-pre-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app'
+    ]);
     try {
       const savedCustom = localStorage.getItem('customApiServerUrl');
       if (savedCustom && savedCustom.startsWith('http')) bases.add(savedCustom.replace(/\/+$/, ''));

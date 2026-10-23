@@ -1,26 +1,26 @@
 [
   {
     "id": "ord_1791879972267_9wnx",
-    "pkgName": "G\u00f3i 12 Th\u00e1ng",
-    "price": "10.800.000\u0111",
-    "clientName": "c\u1ee7 t\u1ecfidfdsffdfds",
+    "pkgName": "Gói 12 Tháng",
+    "price": "10.800.000đ",
+    "clientName": "củ tỏidfdsffdfds",
     "phone": "164645464",
     "deviceId": "dev_49omswx_mv370ms3",
     "createdAt": "2026-10-13T08:26:12.267Z",
     "status": "approved",
-    "note": "\u0110\u01a1n mua G\u00f3i 12 Th\u00e1ng",
+    "note": "Đơn mua Gói 12 Tháng",
     "generatedKey": "GLFB-VIP-QU9IY"
   },
   {
     "id": "ord_1791782091454_jxzs",
-    "pkgName": "G\u00f3i 3 Th\u00e1ng",
-    "price": "2.700.000\u0111",
-    "clientName": "L\u00ea Th\u1ecb Thu H\u00e0",
+    "pkgName": "Gói 3 Tháng",
+    "price": "2.700.000đ",
+    "clientName": "Lê Thị Thu Hà",
     "phone": "0966368310",
     "deviceId": "dev_danang_0966368310",
     "createdAt": "2026-10-12T05:19:00.000Z",
     "status": "approved",
-    "note": "\u0110\u01a1n mua G\u00f3i 3 Th\u00e1ng (\u0110\u00e0 N\u1eb5ng)",
+    "note": "Đơn mua Gói 3 Tháng (Đà Nẵng)",
     "generatedKey": "GLFB-VIP-DANANG"
   }
 ]

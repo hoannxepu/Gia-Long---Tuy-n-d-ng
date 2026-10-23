@@ -4928,25 +4928,51 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
                                   </button>
                                 </div>
 
-                                {/* Cộng Ngày Tùy Ý */}
-                                <div className="flex items-center gap-2 pt-0.5">
+                                {/* Các nút giảm ngày nhanh (-7n, -15n, -30n) */}
+                                <div className="flex items-center gap-1.5 pt-1">
+                                  <span className="text-[10px] text-slate-400 font-semibold shrink-0">Giảm bớt:</span>
+                                  <button
+                                    onClick={() => handleExtendLicense(actionModalLicense.id, -7)}
+                                    className="flex-1 py-1 px-1 bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/40 rounded-md text-[10.5px] font-bold transition active:scale-95 text-center"
+                                    title="Giảm bớt 7 ngày sử dụng"
+                                  >
+                                    -7 Ngày
+                                  </button>
+                                  <button
+                                    onClick={() => handleExtendLicense(actionModalLicense.id, -15)}
+                                    className="flex-1 py-1 px-1 bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/40 rounded-md text-[10.5px] font-bold transition active:scale-95 text-center"
+                                    title="Giảm bớt 15 ngày sử dụng"
+                                  >
+                                    -15 Ngày
+                                  </button>
+                                  <button
+                                    onClick={() => handleExtendLicense(actionModalLicense.id, -30)}
+                                    className="flex-1 py-1 px-1 bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/40 rounded-md text-[10.5px] font-bold transition active:scale-95 text-center"
+                                    title="Giảm bớt 30 ngày sử dụng"
+                                  >
+                                    -30 Ngày
+                                  </button>
+                                </div>
+
+                                {/* Cộng / Trừ Ngày Tùy Ý */}
+                                <div className="flex items-center gap-2 pt-1">
                                   <span className="text-xs text-slate-300 font-medium whitespace-nowrap">
-                                    Cộng thêm:
+                                    Tùy chỉnh:
                                   </span>
                                   <input
                                     type="number"
-                                    min="1"
+                                    min="-1000"
                                     max="1000"
                                     value={actionCustomDays}
-                                    onChange={(e) => setActionCustomDays(parseInt(e.target.value, 10) || 1)}
-                                    className="w-20 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-white text-center font-bold focus:outline-none focus:border-emerald-500"
+                                    onChange={(e) => setActionCustomDays(parseInt(e.target.value, 10) || 0)}
+                                    className="w-20 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-white text-center font-bold focus:outline-none focus:border-emerald-500 font-mono"
                                   />
                                   <span className="text-xs text-slate-400">ngày</span>
                                   <button
                                     onClick={() => handleExtendLicense(actionModalLicense.id, actionCustomDays)}
                                     className="ml-auto px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition shadow-sm active:scale-95"
                                   >
-                                    Cộng Thêm
+                                    {actionCustomDays >= 0 ? `+${actionCustomDays} Ngày` : `${actionCustomDays} Ngày`}
                                   </button>
                                 </div>
                               </div>

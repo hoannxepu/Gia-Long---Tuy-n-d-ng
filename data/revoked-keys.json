@@ -1,42 +1,112 @@
 [
   {
+    "key": "PHONE:0988776655",
+    "reason": "Quản trị viên đã xóa SĐT này khỏi danh sách",
+    "revokedAt": "2026-10-23T03:29:08.368Z"
+  },
+  {
+    "key": "0988776655",
+    "reason": "Quản trị viên đã xóa SĐT này khỏi danh sách",
+    "revokedAt": "2026-10-23T03:29:08.368Z"
+  },
+  {
+    "key": "DEV:TEST_PC_1792726148022",
+    "reason": "Quản trị viên đã xóa thiết bị này khỏi danh sách",
+    "revokedAt": "2026-10-23T03:29:08.368Z"
+  },
+  {
+    "key": "TEST_PC_1792726148022",
+    "reason": "Quản trị viên đã xóa thiết bị này khỏi danh sách",
+    "revokedAt": "2026-10-23T03:29:08.367Z"
+  },
+  {
+    "key": "LIC_1792726148301_W7YIV",
+    "reason": "Quản trị viên đã xóa người dùng khỏi danh sách",
+    "revokedAt": "2026-10-23T03:29:08.367Z"
+  },
+  {
+    "key": "GLFB-VIP-W7YIV",
+    "reason": "Quản trị viên đã xóa người dùng khỏi danh sách",
+    "revokedAt": "2026-10-23T03:29:08.367Z"
+  },
+  {
+    "key": "DEV:TEST_PC_1792726141564",
+    "reason": "Quản trị viên đã xóa thiết bị này khỏi danh sách",
+    "revokedAt": "2026-10-23T03:29:01.845Z"
+  },
+  {
+    "key": "TEST_PC_1792726141564",
+    "reason": "Quản trị viên đã xóa thiết bị này khỏi danh sách",
+    "revokedAt": "2026-10-23T03:29:01.845Z"
+  },
+  {
+    "key": "LIC_1792726141781_J10CZ",
+    "reason": "Quản trị viên đã xóa người dùng khỏi danh sách",
+    "revokedAt": "2026-10-23T03:29:01.845Z"
+  },
+  {
+    "key": "GLFB-VIP-J10CZ",
+    "reason": "Quản trị viên đã xóa người dùng khỏi danh sách",
+    "revokedAt": "2026-10-23T03:29:01.845Z"
+  },
+  {
+    "key": "LIC_1792726124581_KKTDX",
+    "reason": "Kiểm thử ngắt máy khẩn cấp",
+    "revokedAt": "2026-10-23T03:28:44.621Z"
+  },
+  {
+    "key": "GLFB-VIP-KKTDX",
+    "reason": "Kiểm thử ngắt máy khẩn cấp",
+    "revokedAt": "2026-10-23T03:28:44.621Z"
+  },
+  {
+    "key": "ORD_TEST_1792726124565",
+    "reason": "Đơn hàng đã bị Quản trị viên xóa khỏi hệ thống",
+    "revokedAt": "2026-10-23T03:28:44.590Z"
+  },
+  {
+    "key": "LIC_1792726023903_BC0H4",
+    "reason": "Kiểm thử ngắt máy khẩn cấp",
+    "revokedAt": "2026-10-23T03:27:03.951Z"
+  },
+  {
+    "key": "GLFB-VIP-BC0H4",
+    "reason": "Kiểm thử ngắt máy khẩn cấp",
+    "revokedAt": "2026-10-23T03:27:03.951Z"
+  },
+  {
+    "key": "ORD_TEST_1792726023877",
+    "reason": "Đơn hàng đã bị Quản trị viên xóa khỏi hệ thống",
+    "revokedAt": "2026-10-23T03:27:03.918Z"
+  },
+  {
     "key": "ORD_TEST_1792723563568",
-    "reason": "Ki\u1ec3m th\u1eed t\u00ednh n\u0103ng ng\u1eaft m\u00e1y kh\u1ea9n c\u1ea5p",
+    "reason": "Kiểm thử tính năng ngắt máy khẩn cấp",
     "revokedAt": "2026-10-23T02:46:03.639Z"
   },
   {
     "key": "ORD_TEST_ADD_1792723563619",
-    "reason": "Ki\u1ec3m th\u1eed t\u00ednh n\u0103ng ng\u1eaft m\u00e1y kh\u1ea9n c\u1ea5p",
+    "reason": "Kiểm thử tính năng ngắt máy khẩn cấp",
     "revokedAt": "2026-10-23T02:46:03.638Z"
   },
   {
     "key": "DEV:TEST_PC_1792723563480",
-    "reason": "Ki\u1ec3m th\u1eed t\u00ednh n\u0103ng ng\u1eaft m\u00e1y kh\u1ea9n c\u1ea5p",
+    "reason": "Kiểm thử tính năng ngắt máy khẩn cấp",
     "revokedAt": "2026-10-23T02:46:03.638Z"
   },
   {
     "key": "TEST_PC_1792723563480",
-    "reason": "Ki\u1ec3m th\u1eed t\u00ednh n\u0103ng ng\u1eaft m\u00e1y kh\u1ea9n c\u1ea5p",
-    "revokedAt": "2026-10-23T02:46:03.638Z"
-  },
-  {
-    "key": "PHONE:0988776655",
-    "reason": "Ki\u1ec3m th\u1eed t\u00ednh n\u0103ng ng\u1eaft m\u00e1y kh\u1ea9n c\u1ea5p",
-    "revokedAt": "2026-10-23T02:46:03.638Z"
-  },
-  {
-    "key": "0988776655",
-    "reason": "Ki\u1ec3m th\u1eed t\u00ednh n\u0103ng ng\u1eaft m\u00e1y kh\u1ea9n c\u1ea5p",
+    "reason": "Kiểm thử tính năng ngắt máy khẩn cấp",
     "revokedAt": "2026-10-23T02:46:03.638Z"
   },
   {
     "key": "LIC_1792723563601_4JDF4",
-    "reason": "Ki\u1ec3m th\u1eed t\u00ednh n\u0103ng ng\u1eaft m\u00e1y kh\u1ea9n c\u1ea5p",
+    "reason": "Kiểm thử tính năng ngắt máy khẩn cấp",
     "revokedAt": "2026-10-23T02:46:03.638Z"
   },
   {
     "key": "GLFB-VIP-4JDF4",
-    "reason": "Ki\u1ec3m th\u1eed t\u00ednh n\u0103ng ng\u1eaft m\u00e1y kh\u1ea9n c\u1ea5p",
+    "reason": "Kiểm thử tính năng ngắt máy khẩn cấp",
     "revokedAt": "2026-10-23T02:46:03.637Z"
   }
 ]
