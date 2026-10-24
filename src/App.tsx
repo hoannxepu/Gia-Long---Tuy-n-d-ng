@@ -463,19 +463,16 @@ export default function App() {
   const [confirmPinInput, setConfirmPinInput] = useState<string>('');
   const [showNewPinPassword, setShowNewPinPassword] = useState<boolean>(false);
   const [isChangingPin, setIsChangingPin] = useState<boolean>(false);
-  const [isAdminUnlocked, setIsAdminUnlocked] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem('glfb_admin_unlocked') === 'true';
-    } catch (e) {
-      return false;
-    }
-  });
+  const [isAdminUnlocked, setIsAdminUnlocked] = useState<boolean>(false);
   const notifiedOrderIdsRef = useRef<Set<string>>(new Set());
 
   const [licenses, setLicenses] = useState<AdminLicenseItem[]>(() => {
     try {
       const cached = localStorage.getItem('glfb_admin_licenses');
-      if (cached) return JSON.parse(cached);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed)) return parsed;
+      }
     } catch (e) {}
     return [];
   });
@@ -548,7 +545,10 @@ export default function App() {
   const [adminOrders, setAdminOrders] = useState<any[]>(() => {
     try {
       const cached = localStorage.getItem('glfb_admin_orders');
-      if (cached) return JSON.parse(cached);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed)) return parsed;
+      }
     } catch (e) {}
     return [];
   });
@@ -860,6 +860,40 @@ export default function App() {
         );
       } else {
         alert('Lỗi: ' + (data.error || 'Không thể lưu ngày'));
+      }
+    } catch (err: any) {
+      alert('Lỗi: ' + err.message);
+    }
+  };
+
+  const handleUpdateCustomerInfo = async (clientName: string, phone: string, notes: string) => {
+    if (!actionModalLicense) return;
+    try {
+      const res = await fetch('/api/admin/licenses/update', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-pin': adminPin,
+        },
+        body: JSON.stringify({
+          id: actionModalLicense.id,
+          clientName,
+          phone,
+          notes,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        triggerToast(data.message || '✓ Đã cập nhật thông tin khách hàng thành công!');
+        if (data.licenses) setLicenses(data.licenses);
+        if (data.history) setHistoryList(data.history);
+        fetchLicenses(adminPin, true);
+        fetchHistory(adminPin, true);
+        setActionModalLicense((prev) =>
+          prev ? { ...prev, clientName, phone, notes } : null
+        );
+      } else {
+        alert('Lỗi: ' + (data.error || 'Không thể cập nhật thông tin'));
       }
     } catch (err: any) {
       alert('Lỗi: ' + err.message);
@@ -1347,7 +1381,7 @@ export default function App() {
     // Khi một tab duyệt/xóa đơn hoặc đổi bản quyền, tất cả các tab khác trên máy cập nhật tức thì!
     const handleStorageChange = (e: StorageEvent) => {
       if (e.key === 'glfb_admin_unlocked') {
-        setIsAdminUnlocked(e.newValue === 'true');
+        // Ignored to prevent persistent session saving
       }
       if (e.key === 'glfb_admin_orders' && e.newValue) {
         try {
@@ -1484,11 +1518,9 @@ export default function App() {
 
   // Tự động kiểm tra đơn hàng mới định kỳ trong nền mà KHÔNG làm giật/nháy giao diện
   useEffect(() => {
-    if (!isAdminUnlocked) return;
-
-    fetchOrders(adminPin, false);
-    fetchLicenses(adminPin, false);
-    fetchHistory(adminPin, false);
+    fetchOrders(adminPin, true);
+    fetchLicenses(adminPin, true);
+    fetchHistory(adminPin, true);
 
     // Polling silent: chạy ngầm 5s/lần, tự động fetch cả orders, licenses, history để admin nhận thông tin ngay lập tức!
     let pollCount = 0;
@@ -1811,7 +1843,6 @@ export default function App() {
         setAdminPin(cleanInput);
         try {
           localStorage.setItem('glfb_admin_pin', cleanInput);
-          localStorage.setItem('glfb_admin_unlocked', 'true');
         } catch (e) {}
         setIsAdminUnlocked(true);
         fetchLicenses(cleanInput);
@@ -1825,7 +1856,6 @@ export default function App() {
         setAdminPin(cleanInput);
         try {
           localStorage.setItem('glfb_admin_pin', cleanInput);
-          localStorage.setItem('glfb_admin_unlocked', 'true');
         } catch (err) {}
         setIsAdminUnlocked(true);
         fetchLicenses(cleanInput);
@@ -4780,6 +4810,67 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
 
                         {/* 3. Thân Modal - Bố Cục Khoa Học & Cỡ Chữ Chuẩn Bao Quát */}
                         <div className="p-3.5 sm:p-5 overflow-y-auto space-y-4 flex-1">
+                          {/* ================= KHU VỰC CHỈNH SỬA THÔNG TIN KHÁCH HÀNG ================= */}
+                          <div className="bg-slate-950/85 border border-slate-800 rounded-xl p-3.5 space-y-3 shadow-md">
+                            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                              <div className="flex items-center gap-2">
+                                <Users className="w-4 h-4 text-emerald-400" />
+                                <h4 className="text-xs sm:text-sm font-bold text-white uppercase tracking-wide">
+                                  Cập Nhật Thông Tin Khách Hàng (Tên, SĐT, Ghi Chú)
+                                </h4>
+                              </div>
+                              <span className="text-[11px] text-amber-300 font-medium">
+                                Đảm bảo mọi khách hàng đều có đầy đủ thông tin liên hệ
+                              </span>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                              <div>
+                                <label className="text-[10.5px] font-bold text-slate-400 block mb-1">Tên Khách Hàng / Đơn Vị:</label>
+                                <input
+                                  type="text"
+                                  id="edit_client_name"
+                                  defaultValue={actionModalLicense.clientName}
+                                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-500 font-semibold"
+                                  placeholder="Nhập tên khách hàng..."
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[10.5px] font-bold text-slate-400 block mb-1">Số Điện Thoại (Zalo):</label>
+                                <input
+                                  type="text"
+                                  id="edit_client_phone"
+                                  defaultValue={actionModalLicense.phone || ''}
+                                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-500 font-mono"
+                                  placeholder="09... (Số điện thoại)"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[10.5px] font-bold text-slate-400 block mb-1">Ghi Chú:</label>
+                                <input
+                                  type="text"
+                                  id="edit_client_notes"
+                                  defaultValue={actionModalLicense.notes || ''}
+                                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-500"
+                                  placeholder="Ghi chú thêm..."
+                                />
+                              </div>
+                            </div>
+                            <div className="flex justify-end pt-1">
+                              <button
+                                onClick={() => {
+                                  const nameInput = (document.getElementById('edit_client_name') as HTMLInputElement)?.value || '';
+                                  const phoneInput = (document.getElementById('edit_client_phone') as HTMLInputElement)?.value || '';
+                                  const notesInput = (document.getElementById('edit_client_notes') as HTMLInputElement)?.value || '';
+                                  handleUpdateCustomerInfo(nameInput, phoneInput, notesInput);
+                                }}
+                                className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-sm active:scale-95"
+                              >
+                                <Check className="w-3.5 h-3.5" />
+                                <span>💾 Lưu Thông Tin Khách Hàng</span>
+                              </button>
+                            </div>
+                          </div>
+
                           {/* ================= KHU VỰC 1: BẢNG LỊCH SỬ CHI TIẾT CÁC LẦN MUA ================= */}
                           <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3.5 space-y-3 shadow-md">
                             <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">

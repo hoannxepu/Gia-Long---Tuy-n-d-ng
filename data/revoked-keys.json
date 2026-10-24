@@ -1,5 +1,25 @@
 [
   {
+    "key": "DEV:PC_MULTI_1792732521271",
+    "reason": "Quản trị viên đã xóa thiết bị này khỏi danh sách",
+    "revokedAt": "2026-10-23T05:15:21.585Z"
+  },
+  {
+    "key": "PC_MULTI_1792732521271",
+    "reason": "Quản trị viên đã xóa thiết bị này khỏi danh sách",
+    "revokedAt": "2026-10-23T05:15:21.584Z"
+  },
+  {
+    "key": "LIC_1792732521473_7QXS3",
+    "reason": "Quản trị viên đã xóa người dùng khỏi danh sách",
+    "revokedAt": "2026-10-23T05:15:21.584Z"
+  },
+  {
+    "key": "GLFB-VIP-7QXS3",
+    "reason": "Quản trị viên đã xóa người dùng khỏi danh sách",
+    "revokedAt": "2026-10-23T05:15:21.584Z"
+  },
+  {
     "key": "DEV:PC_MULTI_1792731562176",
     "reason": "Quản trị viên đã xóa thiết bị này khỏi danh sách",
     "revokedAt": "2026-10-23T04:59:22.547Z"

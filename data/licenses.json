@@ -1,5 +1,530 @@
 [
   {
+    "id": "lic_1792814662615_KIYAV",
+    "key": "GLFB-VIP-KIYAV",
+    "clientName": "Khách Đã Cập Nhật Vòng 5",
+    "phone": "0926537261",
+    "planType": "trial",
+    "maxDevices": 1,
+    "devices": [
+      {
+        "deviceId": "glfb-test-dev-5-4jb7",
+        "deviceName": "Khách Kiểm Thử Vòng 5",
+        "activatedAt": "2026-10-24T04:04:22.615Z",
+        "lastSeenAt": "2026-10-24T04:04:22.615Z"
+      }
+    ],
+    "createdAt": "2026-10-24T04:04:22.615Z",
+    "expiresAt": "2026-10-25T04:04:22.615Z",
+    "isSuspended": false,
+    "aliasKeys": [],
+    "notes": "Ghi chú kiểm thử cập nhật thông tin vòng 5"
+  },
+  {
+    "id": "lic_1792814662516_WZ08S",
+    "key": "GLFB-VIP-WZ08S",
+    "clientName": "Khách Đã Cập Nhật Vòng 4",
+    "phone": "0957583232",
+    "planType": "individual",
+    "maxDevices": 1,
+    "devices": [
+      {
+        "deviceId": "glfb-test-dev-4-uruf",
+        "deviceName": "Khách Kiểm Thử Vòng 4",
+        "activatedAt": "2026-10-24T04:04:22.516Z",
+        "lastSeenAt": "2026-10-24T04:04:22.516Z"
+      }
+    ],
+    "createdAt": "2026-10-24T04:04:22.516Z",
+    "expiresAt": "2027-11-18T04:04:22.516Z",
+    "isSuspended": false,
+    "aliasKeys": [],
+    "notes": "Ghi chú kiểm thử cập nhật thông tin vòng 4"
+  },
+  {
+    "id": "lic_1792814662403_IQX0T",
+    "key": "GLFB-VIP-IQX0T",
+    "clientName": "Khách Đã Cập Nhật Vòng 3",
+    "phone": "0926035988",
+    "planType": "trial",
+    "maxDevices": 1,
+    "devices": [
+      {
+        "deviceId": "glfb-test-dev-3-493p",
+        "deviceName": "Khách Kiểm Thử Vòng 3",
+        "activatedAt": "2026-10-24T04:04:22.403Z",
+        "lastSeenAt": "2026-10-24T04:04:22.403Z"
+      }
+    ],
+    "createdAt": "2026-10-24T04:04:22.403Z",
+    "expiresAt": "2026-10-25T04:04:22.403Z",
+    "isSuspended": false,
+    "aliasKeys": [],
+    "notes": "Ghi chú kiểm thử cập nhật thông tin vòng 3"
+  },
+  {
+    "id": "lic_1792814662286_TV398",
+    "key": "GLFB-VIP-TV398",
+    "clientName": "Khách Đã Cập Nhật Vòng 2",
+    "phone": "0950817596",
+    "planType": "individual",
+    "maxDevices": 1,
+    "devices": [
+      {
+        "deviceId": "glfb-test-dev-2-6ft7",
+        "deviceName": "Khách Kiểm Thử Vòng 2",
+        "activatedAt": "2026-10-24T04:04:22.286Z",
+        "lastSeenAt": "2026-10-24T04:04:22.286Z"
+      }
+    ],
+    "createdAt": "2026-10-24T04:04:22.286Z",
+    "expiresAt": "2027-11-18T04:04:22.286Z",
+    "isSuspended": false,
+    "aliasKeys": [],
+    "notes": "Ghi chú kiểm thử cập nhật thông tin vòng 2"
+  },
+  {
+    "id": "lic_1792814662170_4FQ22",
+    "key": "GLFB-VIP-4FQ22",
+    "clientName": "Khách Đã Cập Nhật Vòng 1",
+    "phone": "0932071221",
+    "planType": "trial",
+    "maxDevices": 1,
+    "devices": [
+      {
+        "deviceId": "glfb-test-dev-1-jjxb",
+        "deviceName": "Khách Kiểm Thử Vòng 1",
+        "activatedAt": "2026-10-24T04:04:22.170Z",
+        "lastSeenAt": "2026-10-24T04:04:22.170Z"
+      }
+    ],
+    "createdAt": "2026-10-24T04:04:22.170Z",
+    "expiresAt": "2026-10-25T04:04:22.170Z",
+    "isSuspended": false,
+    "aliasKeys": [],
+    "notes": "Ghi chú kiểm thử cập nhật thông tin vòng 1"
+  },
+  {
+    "id": "lic_1792734424704_HC2QF",
+    "key": "GLFB-VIP-HC2QF",
+    "clientName": "Khách Đã Cập Nhật Vòng 5",
+    "phone": "0964292987",
+    "planType": "trial",
+    "maxDevices": 1,
+    "devices": [
+      {
+        "deviceId": "glfb-test-dev-5-aju3",
+        "deviceName": "Khách Kiểm Thử Vòng 5",
+        "activatedAt": "2026-10-23T05:47:04.704Z",
+        "lastSeenAt": "2026-10-23T05:47:04.704Z"
+      }
+    ],
+    "createdAt": "2026-10-23T05:47:04.704Z",
+    "expiresAt": "2026-10-24T05:47:04.704Z",
+    "isSuspended": false,
+    "aliasKeys": [],
+    "notes": "Ghi chú kiểm thử cập nhật thông tin vòng 5"
+  },
+  {
+    "id": "lic_1792734424567_N1LY7",
+    "key": "GLFB-VIP-N1LY7",
+    "clientName": "Khách Đã Cập Nhật Vòng 4",
+    "phone": "0925514512",
+    "planType": "individual",
+    "maxDevices": 1,
+    "devices": [
+      {
+        "deviceId": "glfb-test-dev-4-i5m0",
+        "deviceName": "Khách Kiểm Thử Vòng 4",
+        "activatedAt": "2026-10-23T05:47:04.567Z",
+        "lastSeenAt": "2026-10-23T05:47:04.567Z"
+      }
+    ],
+    "createdAt": "2026-10-23T05:47:04.567Z",
+    "expiresAt": "2027-11-17T05:47:04.567Z",
+    "isSuspended": false,
+    "aliasKeys": [],
+    "notes": "Ghi chú kiểm thử cập nhật thông tin vòng 4"
+  },
+  {
+    "id": "lic_1792734424400_5553U",
+    "key": "GLFB-VIP-5553U",
+    "clientName": "Khách Đã Cập Nhật Vòng 3",
+    "phone": "0952475503",
+    "planType": "trial",
+    "maxDevices": 1,
+    "devices": [
+      {
+        "deviceId": "glfb-test-dev-3-79pt",
+        "deviceName": "Khách Kiểm Thử Vòng 3",
+        "activatedAt": "2026-10-23T05:47:04.400Z",
+        "lastSeenAt": "2026-10-23T05:47:04.400Z"
+      }
+    ],
+    "createdAt": "2026-10-23T05:47:04.400Z",
+    "expiresAt": "2026-10-24T05:47:04.400Z",
+    "isSuspended": false,
+    "aliasKeys": [],
+    "notes": "Ghi chú kiểm thử cập nhật thông tin vòng 3"
+  },
+  {
+    "id": "lic_1792734424275_RM71S",
+    "key": "GLFB-VIP-RM71S",
+    "clientName": "Khách Đã Cập Nhật Vòng 2",
+    "phone": "0958287000",
+    "planType": "individual",
+    "maxDevices": 1,
+    "devices": [
+      {
+        "deviceId": "glfb-test-dev-2-57z7",
+        "deviceName": "Khách Kiểm Thử Vòng 2",
+        "activatedAt": "2026-10-23T05:47:04.275Z",
+        "lastSeenAt": "2026-10-23T05:47:04.275Z"
+      }
+    ],
+    "createdAt": "2026-10-23T05:47:04.275Z",
+    "expiresAt": "2027-11-17T05:47:04.275Z",
+    "isSuspended": false,
+    "aliasKeys": [],
+    "notes": "Ghi chú kiểm thử cập nhật thông tin vòng 2"
+  },
+  {
+    "id": "lic_1792734424069_B31S1",
+    "key": "GLFB-VIP-B31S1",
+    "clientName": "Khách Đã Cập Nhật Vòng 1",
+    "phone": "0917869364",
+    "planType": "trial",
+    "maxDevices": 1,
+    "devices": [
+      {
+        "deviceId": "glfb-test-dev-1-6pv4",
+        "deviceName": "Khách Kiểm Thử Vòng 1",
+        "activatedAt": "2026-10-23T05:47:04.069Z",
+        "lastSeenAt": "2026-10-23T05:47:04.069Z"
+      }
+    ],
+    "createdAt": "2026-10-23T05:47:04.069Z",
+    "expiresAt": "2026-10-24T05:47:04.069Z",
+    "isSuspended": false,
+    "aliasKeys": [],
+    "notes": "Ghi chú kiểm thử cập nhật thông tin vòng 1"
+  },
+  {
+    "id": "lic_1792733637827_OOR9K",
+    "key": "GLFB-VIP-OOR9K",
+    "clientName": "Khách Đã Cập Nhật Vòng 5",
+    "phone": "0946959637",
+    "planType": "trial",
+    "maxDevices": 1,
+    "devices": [
+      {
+        "deviceId": "glfb-test-dev-5-vv92",
+        "deviceName": "Khách Kiểm Thử Vòng 5",
+        "activatedAt": "2026-10-23T05:33:57.827Z",
+        "lastSeenAt": "2026-10-23T05:33:57.827Z"
+      }
+    ],
+    "createdAt": "2026-10-23T05:33:57.827Z",
+    "expiresAt": "2026-10-24T05:33:57.827Z",
+    "isSuspended": false,
+    "aliasKeys": [],
+    "notes": "Ghi chú kiểm thử cập nhật thông tin vòng 5"
+  },
+  {
+    "id": "lic_1792733637725_CDUKE",
+    "key": "GLFB-VIP-CDUKE",
+    "clientName": "Khách Đã Cập Nhật Vòng 4",
+    "phone": "0946207364",
+    "planType": "individual",
+    "maxDevices": 1,
+    "devices": [
+      {
+        "deviceId": "glfb-test-dev-4-wte9",
+        "deviceName": "Khách Kiểm Thử Vòng 4",
+        "activatedAt": "2026-10-23T05:33:57.725Z",
+        "lastSeenAt": "2026-10-23T05:33:57.725Z"
+      }
+    ],
+    "createdAt": "2026-10-23T05:33:57.725Z",
+    "expiresAt": "2027-11-17T05:33:57.725Z",
+    "isSuspended": false,
+    "aliasKeys": [],
+    "notes": "Ghi chú kiểm thử cập nhật thông tin vòng 4"
+  },
+  {
+    "id": "lic_1792733637615_71TAV",
+    "key": "GLFB-VIP-71TAV",
+    "clientName": "Khách Đã Cập Nhật Vòng 3",
+    "phone": "0999793867",
+    "planType": "trial",
+    "maxDevices": 1,
+    "devices": [
+      {
+        "deviceId": "glfb-test-dev-3-dylg",
+        "deviceName": "Khách Kiểm Thử Vòng 3",
+        "activatedAt": "2026-10-23T05:33:57.615Z",
+        "lastSeenAt": "2026-10-23T05:33:57.615Z"
+      }
+    ],
+    "createdAt": "2026-10-23T05:33:57.615Z",
+    "expiresAt": "2026-10-24T05:33:57.615Z",
+    "isSuspended": false,
+    "aliasKeys": [],
+    "notes": "Ghi chú kiểm thử cập nhật thông tin vòng 3"
+  },
+  {
+    "id": "lic_1792733637520_W10A9",
+    "key": "GLFB-VIP-W10A9",
+    "clientName": "Khách Đã Cập Nhật Vòng 2",
+    "phone": "0962782649",
+    "planType": "individual",
+    "maxDevices": 1,
+    "devices": [
+      {
+        "deviceId": "glfb-test-dev-2-ef9b",
+        "deviceName": "Khách Kiểm Thử Vòng 2",
+        "activatedAt": "2026-10-23T05:33:57.520Z",
+        "lastSeenAt": "2026-10-23T05:33:57.520Z"
+      }
+    ],
+    "createdAt": "2026-10-23T05:33:57.520Z",
+    "expiresAt": "2027-11-17T05:33:57.520Z",
+    "isSuspended": false,
+    "aliasKeys": [],
+    "notes": "Ghi chú kiểm thử cập nhật thông tin vòng 2"
+  },
+  {
+    "id": "lic_1792733637408_TLDT8",
+    "key": "GLFB-VIP-TLDT8",
+    "clientName": "Khách Đã Cập Nhật Vòng 1",
+    "phone": "0922990534",
+    "planType": "trial",
+    "maxDevices": 1,
+    "devices": [
+      {
+        "deviceId": "glfb-test-dev-1-7fxn",
+        "deviceName": "Khách Kiểm Thử Vòng 1",
+        "activatedAt": "2026-10-23T05:33:57.408Z",
+        "lastSeenAt": "2026-10-23T05:33:57.408Z"
+      }
+    ],
+    "createdAt": "2026-10-23T05:33:57.408Z",
+    "expiresAt": "2026-10-24T05:33:57.408Z",
+    "isSuspended": false,
+    "aliasKeys": [],
+    "notes": "Ghi chú kiểm thử cập nhật thông tin vòng 1"
+  },
+  {
+    "id": "lic_1792733281489_SPZCZ",
+    "key": "GLFB-VIP-SPZCZ",
+    "clientName": "Khách Đã Cập Nhật Vòng 5",
+    "phone": "0977406248",
+    "planType": "trial",
+    "maxDevices": 1,
+    "devices": [
+      {
+        "deviceId": "glfb-test-dev-5-evde",
+        "deviceName": "Khách Kiểm Thử Vòng 5",
+        "activatedAt": "2026-10-23T05:28:01.489Z",
+        "lastSeenAt": "2026-10-23T05:28:01.489Z"
+      }
+    ],
+    "createdAt": "2026-10-23T05:28:01.489Z",
+    "expiresAt": "2026-10-24T05:28:01.489Z",
+    "isSuspended": false,
+    "aliasKeys": [],
+    "notes": "Ghi chú kiểm thử cập nhật thông tin vòng 5"
+  },
+  {
+    "id": "lic_1792733281394_WUXXE",
+    "key": "GLFB-VIP-WUXXE",
+    "clientName": "Khách Đã Cập Nhật Vòng 4",
+    "phone": "0978002640",
+    "planType": "individual",
+    "maxDevices": 1,
+    "devices": [
+      {
+        "deviceId": "glfb-test-dev-4-qr17",
+        "deviceName": "Khách Kiểm Thử Vòng 4",
+        "activatedAt": "2026-10-23T05:28:01.394Z",
+        "lastSeenAt": "2026-10-23T05:28:01.394Z"
+      }
+    ],
+    "createdAt": "2026-10-23T05:28:01.394Z",
+    "expiresAt": "2027-11-17T05:28:01.394Z",
+    "isSuspended": false,
+    "aliasKeys": [],
+    "notes": "Ghi chú kiểm thử cập nhật thông tin vòng 4"
+  },
+  {
+    "id": "lic_1792733281321_1T6G8",
+    "key": "GLFB-VIP-1T6G8",
+    "clientName": "Khách Đã Cập Nhật Vòng 3",
+    "phone": "0962429559",
+    "planType": "trial",
+    "maxDevices": 1,
+    "devices": [
+      {
+        "deviceId": "glfb-test-dev-3-5zvy",
+        "deviceName": "Khách Kiểm Thử Vòng 3",
+        "activatedAt": "2026-10-23T05:28:01.321Z",
+        "lastSeenAt": "2026-10-23T05:28:01.321Z"
+      }
+    ],
+    "createdAt": "2026-10-23T05:28:01.321Z",
+    "expiresAt": "2026-10-24T05:28:01.321Z",
+    "isSuspended": false,
+    "aliasKeys": [],
+    "notes": "Ghi chú kiểm thử cập nhật thông tin vòng 3"
+  },
+  {
+    "id": "lic_1792733281227_0C7TD",
+    "key": "GLFB-VIP-0C7TD",
+    "clientName": "Khách Đã Cập Nhật Vòng 2",
+    "phone": "0954106530",
+    "planType": "individual",
+    "maxDevices": 1,
+    "devices": [
+      {
+        "deviceId": "glfb-test-dev-2-sw5v",
+        "deviceName": "Khách Kiểm Thử Vòng 2",
+        "activatedAt": "2026-10-23T05:28:01.227Z",
+        "lastSeenAt": "2026-10-23T05:28:01.227Z"
+      }
+    ],
+    "createdAt": "2026-10-23T05:28:01.227Z",
+    "expiresAt": "2027-11-17T05:28:01.227Z",
+    "isSuspended": false,
+    "aliasKeys": [],
+    "notes": "Ghi chú kiểm thử cập nhật thông tin vòng 2"
+  },
+  {
+    "id": "lic_1792733281137_EO4S3",
+    "key": "GLFB-VIP-EO4S3",
+    "clientName": "Khách Đã Cập Nhật Vòng 1",
+    "phone": "0982345275",
+    "planType": "trial",
+    "maxDevices": 1,
+    "devices": [
+      {
+        "deviceId": "glfb-test-dev-1-2xel",
+        "deviceName": "Khách Kiểm Thử Vòng 1",
+        "activatedAt": "2026-10-23T05:28:01.137Z",
+        "lastSeenAt": "2026-10-23T05:28:01.137Z"
+      }
+    ],
+    "createdAt": "2026-10-23T05:28:01.137Z",
+    "expiresAt": "2026-10-24T05:28:01.137Z",
+    "isSuspended": false,
+    "aliasKeys": [],
+    "notes": "Ghi chú kiểm thử cập nhật thông tin vòng 1"
+  },
+  {
+    "id": "lic_1792732732265_ZGYVI",
+    "key": "GLFB-VIP-ZGYVI",
+    "clientName": "Khách Đã Cập Nhật Vòng 5",
+    "phone": "0958856316",
+    "planType": "trial",
+    "maxDevices": 1,
+    "devices": [
+      {
+        "deviceId": "glfb-test-dev-5-nlnw",
+        "deviceName": "Khách Kiểm Thử Vòng 5",
+        "activatedAt": "2026-10-23T05:18:52.265Z",
+        "lastSeenAt": "2026-10-23T05:18:52.265Z"
+      }
+    ],
+    "createdAt": "2026-10-23T05:18:52.265Z",
+    "expiresAt": "2026-10-24T05:18:52.265Z",
+    "isSuspended": false,
+    "aliasKeys": [],
+    "notes": "Ghi chú kiểm thử cập nhật thông tin vòng 5"
+  },
+  {
+    "id": "lic_1792732732185_IQGKZ",
+    "key": "GLFB-VIP-IQGKZ",
+    "clientName": "Khách Đã Cập Nhật Vòng 4",
+    "phone": "0920157834",
+    "planType": "individual",
+    "maxDevices": 1,
+    "devices": [
+      {
+        "deviceId": "glfb-test-dev-4-4qd0",
+        "deviceName": "Khách Kiểm Thử Vòng 4",
+        "activatedAt": "2026-10-23T05:18:52.185Z",
+        "lastSeenAt": "2026-10-23T05:18:52.185Z"
+      }
+    ],
+    "createdAt": "2026-10-23T05:18:52.185Z",
+    "expiresAt": "2027-11-17T05:18:52.185Z",
+    "isSuspended": false,
+    "aliasKeys": [],
+    "notes": "Ghi chú kiểm thử cập nhật thông tin vòng 4"
+  },
+  {
+    "id": "lic_1792732732114_UO4N1",
+    "key": "GLFB-VIP-UO4N1",
+    "clientName": "Khách Đã Cập Nhật Vòng 3",
+    "phone": "0944883738",
+    "planType": "trial",
+    "maxDevices": 1,
+    "devices": [
+      {
+        "deviceId": "glfb-test-dev-3-px7l",
+        "deviceName": "Khách Kiểm Thử Vòng 3",
+        "activatedAt": "2026-10-23T05:18:52.114Z",
+        "lastSeenAt": "2026-10-23T05:18:52.114Z"
+      }
+    ],
+    "createdAt": "2026-10-23T05:18:52.114Z",
+    "expiresAt": "2026-10-24T05:18:52.114Z",
+    "isSuspended": false,
+    "aliasKeys": [],
+    "notes": "Ghi chú kiểm thử cập nhật thông tin vòng 3"
+  },
+  {
+    "id": "lic_1792732732032_KYG40",
+    "key": "GLFB-VIP-KYG40",
+    "clientName": "Khách Đã Cập Nhật Vòng 2",
+    "phone": "0985102983",
+    "planType": "individual",
+    "maxDevices": 1,
+    "devices": [
+      {
+        "deviceId": "glfb-test-dev-2-o970",
+        "deviceName": "Khách Kiểm Thử Vòng 2",
+        "activatedAt": "2026-10-23T05:18:52.032Z",
+        "lastSeenAt": "2026-10-23T05:18:52.032Z"
+      }
+    ],
+    "createdAt": "2026-10-23T05:18:52.032Z",
+    "expiresAt": "2027-11-17T05:18:52.032Z",
+    "isSuspended": false,
+    "aliasKeys": [],
+    "notes": "Ghi chú kiểm thử cập nhật thông tin vòng 2"
+  },
+  {
+    "id": "lic_1792732731950_DBBR6",
+    "key": "GLFB-VIP-DBBR6",
+    "clientName": "Khách Đã Cập Nhật Vòng 1",
+    "phone": "0974395680",
+    "planType": "trial",
+    "maxDevices": 1,
+    "devices": [
+      {
+        "deviceId": "glfb-test-dev-1-1f4b",
+        "deviceName": "Khách Kiểm Thử Vòng 1",
+        "activatedAt": "2026-10-23T05:18:51.950Z",
+        "lastSeenAt": "2026-10-23T05:18:51.950Z"
+      }
+    ],
+    "createdAt": "2026-10-23T05:18:51.950Z",
+    "expiresAt": "2026-10-24T05:18:51.950Z",
+    "isSuspended": false,
+    "aliasKeys": [],
+    "notes": "Ghi chú kiểm thử cập nhật thông tin vòng 1"
+  },
+  {
     "id": "lic_1792726124581_KKTDX",
     "key": "GLFB-VIP-KKTDX",
     "clientName": "Nguyễn Văn Kiểm Thử Toàn Diện",
