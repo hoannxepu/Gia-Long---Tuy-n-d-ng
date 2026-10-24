@@ -448,13 +448,7 @@ export default function App() {
   const [copiedBundle, setCopiedBundle] = useState(false);
 
   // Admin License Portal State
-  const [adminPin, setAdminPin] = useState<string>(() => {
-    try {
-      return localStorage.getItem('glfb_admin_pin') || 'Ha26062018$';
-    } catch (e) {
-      return 'Ha26062018$';
-    }
-  });
+  const [adminPin, setAdminPin] = useState<string>('Ha26062018$');
   const [adminPinInput, setAdminPinInput] = useState<string>('');
   const [showPinPassword, setShowPinPassword] = useState<boolean>(false);
   const [showChangePinModal, setShowChangePinModal] = useState<boolean>(false);
@@ -1841,9 +1835,6 @@ export default function App() {
       const data = await res.json();
       if (data.success) {
         setAdminPin(cleanInput);
-        try {
-          localStorage.setItem('glfb_admin_pin', cleanInput);
-        } catch (e) {}
         setIsAdminUnlocked(true);
         fetchLicenses(cleanInput);
         fetchOrders(cleanInput);
@@ -1854,9 +1845,6 @@ export default function App() {
     } catch (e) {
       if (cleanInput === adminPin || cleanInput === 'Ha26062018$') {
         setAdminPin(cleanInput);
-        try {
-          localStorage.setItem('glfb_admin_pin', cleanInput);
-        } catch (err) {}
         setIsAdminUnlocked(true);
         fetchLicenses(cleanInput);
         fetchOrders(cleanInput);
@@ -3652,6 +3640,10 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
                         placeholder="Nhập khóa quản trị..."
                         className="w-full text-center tracking-wider text-sm sm:text-base font-mono font-bold bg-slate-950 border border-slate-700 rounded-lg px-9 py-2 sm:py-2.5 text-white focus:border-emerald-500 focus:outline-none"
                         autoFocus
+                        autoComplete="new-password"
+                        name="admin_pass_random"
+                        data-lpignore="true"
+                        spellCheck={false}
                       />
                       <button
                         type="button"
