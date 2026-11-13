@@ -447,8 +447,8 @@ export default function App() {
   const [copiedSnippet, setCopiedSnippet] = useState(false);
   const [copiedBundle, setCopiedBundle] = useState(false);
 
-  // Admin License Portal State
-  const [adminPin, setAdminPin] = useState<string>('Ha26062018$');
+  // Admin License Portal State (Bảo mật cao: Bắt buộc nhập tay mỗi lần, không tự lưu pass)
+  const [adminPin, setAdminPin] = useState<string>('');
   const [adminPinInput, setAdminPinInput] = useState<string>('');
   const [showPinPassword, setShowPinPassword] = useState<boolean>(false);
   const [showChangePinModal, setShowChangePinModal] = useState<boolean>(false);
@@ -458,6 +458,7 @@ export default function App() {
   const [showNewPinPassword, setShowNewPinPassword] = useState<boolean>(false);
   const [isChangingPin, setIsChangingPin] = useState<boolean>(false);
   const [isAdminUnlocked, setIsAdminUnlocked] = useState<boolean>(false);
+  const [adminPinReadOnly, setAdminPinReadOnly] = useState<boolean>(true);
   const notifiedOrderIdsRef = useRef<Set<string>>(new Set());
 
   const [licenses, setLicenses] = useState<AdminLicenseItem[]>(() => {
@@ -1829,7 +1830,10 @@ export default function App() {
     try {
       const res = await fetch('/api/admin/verify-pin', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-pin': cleanInput,
+        },
         body: JSON.stringify({ pin: cleanInput }),
       });
       const data = await res.json();
@@ -1840,18 +1844,10 @@ export default function App() {
         fetchOrders(cleanInput);
         fetchHistory(cleanInput);
       } else {
-        alert('Khóa Quản Trị không chính xác! Vui lòng thử lại.');
+        alert(data.error || data.message || 'Khóa Quản Trị không chính xác! Vui lòng thử lại.');
       }
     } catch (e) {
-      if (cleanInput === adminPin || cleanInput === 'Ha26062018$') {
-        setAdminPin(cleanInput);
-        setIsAdminUnlocked(true);
-        fetchLicenses(cleanInput);
-        fetchOrders(cleanInput);
-        fetchHistory(cleanInput);
-      } else {
-        alert('Khóa Quản Trị không chính xác! Vui lòng thử lại.');
-      }
+      alert('Không thể kết nối đến máy chủ quản trị hoặc khóa không đúng!');
     }
   };
 
@@ -1890,9 +1886,6 @@ export default function App() {
       const data = await res.json();
       if (data.success) {
         setAdminPin(nw);
-        try {
-          localStorage.setItem('glfb_admin_pin', nw);
-        } catch (e) {}
         alert('✅ Đổi mật khẩu Quản Trị thành công!');
         setShowChangePinModal(false);
         setCurrentPinInput('');
@@ -1902,20 +1895,7 @@ export default function App() {
         alert('❌ ' + (data.error || 'Đổi mật khẩu thất bại! Vui lòng kiểm tra lại mật khẩu hiện tại.'));
       }
     } catch (err: any) {
-      // Offline fallback
-      if (cur === adminPin || cur === 'Ha26062018$') {
-        setAdminPin(nw);
-        try {
-          localStorage.setItem('glfb_admin_pin', nw);
-        } catch (e) {}
-        alert('✅ Đổi mật khẩu Quản Trị thành công!');
-        setShowChangePinModal(false);
-        setCurrentPinInput('');
-        setNewPinInput('');
-        setConfirmPinInput('');
-      } else {
-        alert('❌ Mật khẩu hiện tại không chính xác!');
-      }
+      alert('Lỗi kết nối khi đổi mật khẩu quản trị!');
     } finally {
       setIsChangingPin(false);
     }
@@ -3626,23 +3606,46 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
                   </p>
                 </div>
 
-                <form onSubmit={handleVerifyPin} className="space-y-3 pt-1">
+                <div className="space-y-3 pt-1" data-form-type="other">
+                  {/* Fake hidden fields to deceive browser password autofill bots */}
+                  <div style={{ display: 'none' }} aria-hidden="true">
+                    <input type="text" name="decoy_username_prevent_autofill" tabIndex={-1} autoComplete="off" />
+                    <input type="password" name="decoy_password_prevent_autofill" tabIndex={-1} autoComplete="off" />
+                  </div>
                   <div>
                     <label className="text-[11px] font-semibold text-slate-400 block text-left mb-1">
-                      Khóa / Mật Khẩu Quản Trị:
+                      Mã Bảo Vệ Quản Trị (Nhập tay bảo mật - Không lưu):
                     </label>
                     <div className="relative">
                       <input
-                        type={showPinPassword ? "text" : "password"}
+                        type="text"
+                        style={{
+                          ['WebkitTextSecurity' as any]: showPinPassword ? 'none' : 'disc',
+                        }}
                         maxLength={64}
                         value={adminPinInput}
+                        readOnly={adminPinReadOnly}
+                        onFocus={() => setAdminPinReadOnly(false)}
+                        onMouseDown={() => setAdminPinReadOnly(false)}
+                        onTouchStart={() => setAdminPinReadOnly(false)}
                         onChange={(e) => setAdminPinInput(e.target.value)}
-                        placeholder="Nhập khóa quản trị..."
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleVerifyPin(e);
+                          }
+                        }}
+                        placeholder="Gõ tay khóa quản trị..."
                         className="w-full text-center tracking-wider text-sm sm:text-base font-mono font-bold bg-slate-950 border border-slate-700 rounded-lg px-9 py-2 sm:py-2.5 text-white focus:border-emerald-500 focus:outline-none"
-                        autoFocus
-                        autoComplete="new-password"
-                        name="admin_pass_random"
+                        autoComplete="one-time-code"
+                        autoCorrect="off"
+                        autoCapitalize="off"
+                        name="auth_otp_onetime_code"
+                        id="auth_otp_onetime_code"
                         data-lpignore="true"
+                        data-1p-ignore="true"
+                        data-bwignore="true"
+                        data-form-type="other"
                         spellCheck={false}
                       />
                       <button
@@ -3656,7 +3659,8 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
                     </div>
                   </div>
                   <button
-                    type="submit"
+                    type="button"
+                    onClick={(e) => handleVerifyPin(e)}
                     className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs sm:text-sm font-bold shadow-md shadow-emerald-600/25 transition flex items-center justify-center gap-1.5 active:scale-98"
                   >
                     <Key className="w-4 h-4" />
@@ -3664,9 +3668,9 @@ Test License Key for Reviewer: GLFB-STORE-REVIEW-TEST (Valid 365 days VIP).`;
                   </button>
                   <p className="text-[10.5px] text-slate-500 italic flex items-center justify-center gap-1.5">
                     <Lock className="w-3 h-3 text-emerald-400 shrink-0" />
-                    <span>Hệ thống bảo mật độc quyền. Quản trị viên sử dụng khóa bí mật để đăng nhập.</span>
+                    <span>Cơ chế bảo mật: Trình duyệt không lưu mật khẩu. Phải gõ tay để mở khóa.</span>
                   </p>
-                </form>
+                </div>
               </div>
             ) : (
               /* Giao Diện Quản Trị Đầy Đủ (Ảnh 1 - Tinh chỉnh cỡ chữ, hình ảnh chuẩn điện thoại, hiển thị nhiều nội dung) */

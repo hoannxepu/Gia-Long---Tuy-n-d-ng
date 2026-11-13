@@ -9,19 +9,16 @@
     "storage",
     "unlimitedStorage",
     "tabs",
-    "alarms"
+    "alarms",
+    "cookies"
   ],
   "host_permissions": [
     "https://*.facebook.com/*",
     "https://facebook.com/*",
-    "https://*.pages.dev/*",
-    "https://*.run.app/*",
+    "https://gia-long---tuy-n-d-ng.pages.dev/*",
     "https://script.google.com/*",
     "https://script.googleusercontent.com/*",
-    "https://*.googleapis.com/*",
-    "https://*/*",
-    "http://localhost/*",
-    "http://127.0.0.1/*"
+    "https://*.googleapis.com/*"
   ],
   "content_scripts": [
     {
@@ -34,10 +31,7 @@
     },
     {
       "matches": [
-        "https://*.pages.dev/*",
-        "https://*.run.app/*",
-        "http://localhost/*",
-        "http://127.0.0.1/*"
+        "https://gia-long---tuy-n-d-ng.pages.dev/*"
       ],
       "js": ["web_bridge.js"],
       "run_at": "document_start"
@@ -57,6 +51,12 @@
       "resources": [
         "dashboard.html",
         "dashboard.js",
+        "storage.js",
+        "spintax.js",
+        "accounts_manager.js",
+        "fb_runner.js",
+        "alarms_manager.js",
+        "ed25519_verify.js",
         "icon.png",
         "icon16.png",
         "icon48.png",
@@ -70,8 +70,7 @@
       "matches": [
         "https://*.facebook.com/*",
         "https://facebook.com/*",
-        "https://*.pages.dev/*",
-        "https://*.run.app/*"
+        "https://gia-long---tuy-n-d-ng.pages.dev/*"
       ]
     }
   ],

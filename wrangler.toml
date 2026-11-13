@@ -15,4 +15,5 @@ pages_build_output_dir = "dist"
 # database_id = "DIEN_UUID_36_KY_TU_VAO_DAY"
 
 [vars]
-ADMIN_PIN = "Ha26062018$"
+# Không lưu ADMIN_PIN hoặc SIGNING_SECRET tại đây để bảo mật.
+# Sử dụng: npx wrangler secret put ADMIN_PIN và npx wrangler secret put SIGNING_SECRET

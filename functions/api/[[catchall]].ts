@@ -263,6 +263,7 @@ function autoConsolidateEdgeLicensesAndOrders(): { licenses: LicenseItem[]; orde
 
     // Bảo lưu tuyệt đối ngày hết hạn do Quản trị viên thiết lập hoặc cấp phép (Không ghi đè bừa bãi)
     if (!primaryLic.expiresAt) {
+      const finalExpMs = earliestOrderMs + totalDays * 86400000;
       primaryLic.expiresAt = new Date(finalExpMs).toISOString();
       const pkgListStr = ords.map((o) => `${o.pkgName} (+${getOrderDurationDays(o.pkgName, o.price)}n)`).join(' + ');
       primaryLic.notes = `Bản quyền VIP cộng dồn ${ords.length} gói: ${pkgListStr} = Tổng ${totalDays} ngày (Hạn dùng đến ${new Date(finalExpMs).toLocaleDateString('vi-VN')})`;
@@ -313,11 +314,35 @@ function corsHeaders() {
   };
 }
 
-function jsonResponse(data: any, status = 200) {
+function adminCorsHeaders(reqOrigin?: string | null) {
+  const allowed = 'https://gia-long---tuy-n-d-ng.pages.dev';
+  const origin = reqOrigin && (reqOrigin === allowed || reqOrigin.endsWith('.pages.dev')) ? reqOrigin : allowed;
+  return {
+    'Access-Control-Allow-Origin': origin,
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Origin, X-Requested-With, Content-Type, Accept, Authorization, X-Admin-Pin',
+    'Content-Type': 'application/json; charset=utf-8',
+    'Access-Control-Allow-Credentials': 'true',
+  };
+}
+
+function jsonResponse(data: any, status = 200, isForAdmin = false, reqOrigin?: string | null) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: corsHeaders(),
+    headers: isForAdmin ? adminCorsHeaders(reqOrigin) : corsHeaders(),
   });
+}
+
+function timingSafeEqualStrings(a: string, b: string): boolean {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  const aBytes = new TextEncoder().encode(a);
+  const bBytes = new TextEncoder().encode(b);
+  if (aBytes.byteLength !== bBytes.byteLength) return false;
+  let diff = 0;
+  for (let i = 0; i < aBytes.byteLength; i++) {
+    diff |= aBytes[i] ^ bBytes[i];
+  }
+  return diff === 0;
 }
 
 function normalizePkgSymbol(pkgOrDays: any): string {
@@ -335,10 +360,12 @@ function normalizePkgSymbol(pkgOrDays: any): string {
 // HỆ THỐNG MÃ XÁC NHẬN BẢO MẬT (SIGNED TOKEN) CHO EXTENSION
 // Đảm bảo Extension chạy offline/cache 100% không tốn request
 // ========================================================
-function generateSignedToken(machineId: string, expiresAt: string, secret = 'GiaLongFB_D1_Secret_2026'): string {
+function generateSignedToken(machineId: string, expiresAt: string, secret?: string): string {
+  const cleanSecret = String(secret || '').trim();
+  if (!cleanSecret) return '';
   const cleanId = String(machineId || '').trim();
   const cleanExp = String(expiresAt || '').trim();
-  const payload = `${cleanId}:::${cleanExp}:::${secret}`;
+  const payload = `${cleanId}:::${cleanExp}:::${cleanSecret}`;
   let hash1 = 0;
   for (let i = 0; i < payload.length; i++) {
     hash1 = ((hash1 << 5) - hash1) + payload.charCodeAt(i);
@@ -355,9 +382,10 @@ function generateSignedToken(machineId: string, expiresAt: string, secret = 'Gia
   return 'GLFB_SIG_' + (typeof btoa !== 'undefined' ? btoa(rawToken) : Buffer.from(rawToken).toString('base64'));
 }
 
-function verifySignedToken(token: string, machineId: string, secret = 'GiaLongFB_D1_Secret_2026'): { valid: boolean; expiresAt?: string } {
+function verifySignedToken(token: string, machineId: string, secret?: string): { valid: boolean; expiresAt?: string } {
   try {
-    if (!token || !token.startsWith('GLFB_SIG_')) return { valid: false };
+    const cleanSecret = String(secret || '').trim();
+    if (!cleanSecret || !token || !token.startsWith('GLFB_SIG_')) return { valid: false };
     const raw = typeof atob !== 'undefined' 
       ? atob(token.replace('GLFB_SIG_', '')) 
       : Buffer.from(token.replace('GLFB_SIG_', ''), 'base64').toString('utf8');
@@ -365,8 +393,8 @@ function verifySignedToken(token: string, machineId: string, secret = 'GiaLongFB
     if (parts.length < 3) return { valid: false };
     const [tMachineId, tExpiresAt] = parts;
     if (tMachineId.toLowerCase() !== machineId.toLowerCase()) return { valid: false };
-    const expected = generateSignedToken(tMachineId, tExpiresAt, secret);
-    if (expected !== token) return { valid: false };
+    const expected = generateSignedToken(tMachineId, tExpiresAt, cleanSecret);
+    if (!expected || expected !== token) return { valid: false };
     if (new Date(tExpiresAt).getTime() < Date.now()) return { valid: false, expiresAt: tExpiresAt };
     return { valid: true, expiresAt: tExpiresAt };
   } catch (e) {
@@ -508,8 +536,8 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
   }
 
   // 3. Chế độ Xử lý Natively tại Cloudflare Edge (Memory + Google Drive Sync)
-  let adminPin = env.ADMIN_PIN || 'Ha26062018$';
-  const reqPin = String(request.headers.get('x-admin-pin') || url.searchParams.get('pin') || '').trim();
+  let adminPin = env.ADMIN_PIN ? String(env.ADMIN_PIN).trim() : '';
+  const reqPin = String(request.headers.get('x-admin-pin') || '').trim();
 
   if (env.GOOGLE_DRIVE_WEBHOOK_URL && !edgeSettings.googleDriveSheetWebhookUrl) {
     edgeSettings.googleDriveSheetWebhookUrl = env.GOOGLE_DRIVE_WEBHOOK_URL;
@@ -735,9 +763,13 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
   // Chuyển trạng thái sang 'active', tính hạn dùng, cấp Signed Token
   // ========================================================
   if ((pathname === '/api/admin/approve' || pathname === '/admin/approve') && method === 'POST') {
-    // Xác thực quyền Quản trị viên qua Header hoặc Body
-    if (reqPin !== adminPin && body.pin !== adminPin) {
-      return jsonResponse({ success: false, error: 'Sai mã PIN hoặc chưa có quyền Quản trị!' }, 401);
+    const origin = request.headers.get('origin');
+    if (!adminPin) {
+      return jsonResponse({ success: false, error: 'Chưa cấu hình biến môi trường ADMIN_PIN!' }, 500, true, origin);
+    }
+    // Bắt buộc xác thực quyền Quản trị viên qua Header x-admin-pin
+    if (!reqPin || !timingSafeEqualStrings(reqPin, adminPin)) {
+      return jsonResponse({ success: false, error: 'Sai mã PIN hoặc chưa có quyền Quản trị!' }, 401, true, origin);
     }
 
     const machineId = String(body.machine_id || body.deviceId || '').trim();
@@ -974,16 +1006,13 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
           });
         }
         const daysLeft = Math.max(1, Math.ceil((expMs - now) / (24 * 60 * 60 * 1000)));
-        const token = d1Lic.signed_token || generateSignedToken(machineId, d1Lic.expires_at, env.SIGNING_SECRET);
         return jsonResponse({
           success: true,
           status: 'active',
           machine_id: machineId,
-          pkg_name: d1Lic.pkg_name,
-          client_name: d1Lic.client_name,
+          plan: d1Lic.plan_type || 'individual',
           expires_at: d1Lic.expires_at,
           days_left: daysLeft,
-          token: token,
           message: '✓ Bản quyền hợp lệ và đang hoạt động!',
         });
       }
@@ -998,16 +1027,13 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
           const gData: any = await gRes.json();
           if (gData && gData.success && gData.status === 'active') {
             const expDate = gData.expires_at || new Date(Date.now() + 30 * 86400000).toISOString();
-            const token = generateSignedToken(machineId, expDate, env.SIGNING_SECRET);
             return jsonResponse({
               success: true,
               status: 'active',
               machine_id: machineId,
-              pkg_name: gData.pkg_name || 'Gói VIP Google Drive',
-              client_name: gData.client_name || 'Khách Google Drive',
+              plan: 'individual',
               expires_at: expDate,
               days_left: gData.days_left || 30,
-              token,
               message: '✓ Bản quyền hợp lệ từ Google Drive!',
             });
           }
@@ -1062,17 +1088,13 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
         });
       }
       const daysLeft = Math.max(1, Math.ceil((expMs - now) / (24 * 60 * 60 * 1000)));
-      const token = generateSignedToken(machineId, matchedLic.expiresAt, env.SIGNING_SECRET);
       return jsonResponse({
         success: true,
         status: 'active',
         machine_id: machineId,
-        pkg_name: matchedLic.notes || 'Gói VIP Gia Long',
-        client_name: matchedLic.clientName,
+        plan: matchedLic.planType || 'individual',
         expires_at: matchedLic.expiresAt,
         days_left: daysLeft,
-        token: token,
-        license_key: matchedLic.key,
         message: '✓ Bản quyền hợp lệ!',
       });
     }
@@ -1570,13 +1592,20 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
     });
   }
 
-  // ROUTE: Xác thực PIN Admin
+  // ROUTE: Xác thực PIN Admin (Chỉ chấp nhận qua Header x-admin-pin)
   if (pathname === '/api/admin/verify-pin' && method === 'POST') {
-    const pin = String(body.pin || '').trim();
-    if (pin && pin === adminPin) {
-      return jsonResponse({ success: true, message: 'Đăng nhập Quản Trị thành công!' });
+    const origin = request.headers.get('origin');
+    if (!adminPin) {
+      return jsonResponse({
+        success: false,
+        error: 'Máy chủ chưa cấu hình biến môi trường ADMIN_PIN.',
+      }, 500, true, origin);
     }
-    return jsonResponse({ success: false, message: 'Khóa Quản Trị không chính xác!' }, 401);
+    const incomingPin = reqPin;
+    if (incomingPin && timingSafeEqualStrings(incomingPin, adminPin)) {
+      return jsonResponse({ success: true, message: 'Đăng nhập Quản Trị thành công!' }, 200, true, origin);
+    }
+    return jsonResponse({ success: false, message: 'Khóa Quản Trị không chính xác!' }, 401, true, origin);
   }
 
   // ROUTE: Thông tin gói tải về
@@ -1587,7 +1616,7 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
       sizeKb: 332,
       updatedAt: new Date().toISOString(),
       fileName: 'Gia_Long_FB_WebStore_latest.zip',
-      version: '1.0.3',
+      version: '1.0.4',
     });
   }
 
@@ -1600,22 +1629,15 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
     return jsonResponse({ success: true, settings: edgeSettings });
   }
 
-  // ROUTE: Trạng thái cơ sở dữ liệu Cloudflare Edge (D1, KV, Cache, Drive)
-  if (pathname === '/api/admin/system/status' && method === 'GET') {
-    return jsonResponse({
-      success: true,
-      d1Active: Boolean(d1),
-      kvActive: Boolean(kv),
-      edgeCacheActive: typeof caches !== 'undefined' && Boolean((caches as any).default),
-      googleDriveSynced: Boolean(edgeSettings.googleDriveSheetWebhookUrl || env.GOOGLE_DRIVE_WEBHOOK_URL),
-      totalOrders: edgeOrders.length,
-      totalLicenses: edgeLicenses.length,
-      primaryDomain: 'gia-long---tuy-n-d-ng.pages.dev',
-    });
-  }
-
-  // ROUTE: Xuất toàn bộ cơ sở dữ liệu dạng JSON cho Google Drive & Backup
+  // ROUTE: Xuất toàn bộ cơ sở dữ liệu dạng JSON (Yêu cầu xác thực Admin qua x-admin-pin)
   if ((pathname === '/api/database/export.json' || pathname === '/database.json') && method === 'GET') {
+    const origin = request.headers.get('origin');
+    if (!adminPin) {
+      return jsonResponse({ success: false, error: 'Chưa cấu hình biến môi trường ADMIN_PIN!' }, 500, true, origin);
+    }
+    if (!reqPin || !timingSafeEqualStrings(reqPin, adminPin)) {
+      return jsonResponse({ success: false, error: 'Khóa Quản Trị không hợp lệ!' }, 401, true, origin);
+    }
     const { licenses } = autoConsolidateEdgeLicensesAndOrders();
     const data = {
       app: 'Gia Long - FB',
@@ -1626,16 +1648,34 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
       history: edgeHistory,
       settings: edgeSettings,
     };
-    return new Response(JSON.stringify(data, null, 2), {
-      status: 200,
-      headers: corsHeaders(),
-    });
+    return jsonResponse(data, 200, true, origin);
   }
 
   // Kiểm tra quyền Admin cho các route /api/admin/*
   if (pathname.startsWith('/api/admin/')) {
-    if (!reqPin || reqPin !== adminPin) {
-      return jsonResponse({ success: false, error: 'Khóa Quản Trị không hợp lệ!' }, 401);
+    const origin = request.headers.get('origin');
+    if (!adminPin) {
+      return jsonResponse({
+        success: false,
+        error: 'Máy chủ chưa được cấu hình biến môi trường ADMIN_PIN. Truy cập bị từ chối!',
+      }, 500, true, origin);
+    }
+    if (!reqPin || !timingSafeEqualStrings(reqPin, adminPin)) {
+      return jsonResponse({ success: false, error: 'Khóa Quản Trị không hợp lệ!' }, 401, true, origin);
+    }
+
+    // ROUTE: Trạng thái cơ sở dữ liệu Cloudflare Edge (D1, KV, Cache, Drive)
+    if (pathname === '/api/admin/system/status' && method === 'GET') {
+      return jsonResponse({
+        success: true,
+        d1Active: Boolean(d1),
+        kvActive: Boolean(kv),
+        edgeCacheActive: typeof caches !== 'undefined' && Boolean((caches as any).default),
+        googleDriveSynced: Boolean(edgeSettings.googleDriveSheetWebhookUrl || env.GOOGLE_DRIVE_WEBHOOK_URL),
+        totalOrders: edgeOrders.length,
+        totalLicenses: edgeLicenses.length,
+        primaryDomain: 'gia-long---tuy-n-d-ng.pages.dev',
+      }, 200, true, origin);
     }
 
     if (pathname === '/api/admin/licenses' && method === 'GET') {

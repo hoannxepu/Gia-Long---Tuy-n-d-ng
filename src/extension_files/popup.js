@@ -4,6 +4,7 @@
 let currentPosts = [];
 let currentGroups = [];
 let currentScheduledTimes = ['08:30', '11:30', '17:30', '20:00'];
+let currentScheduleSlots = [];
 let currentSelectedPostIndex = 0;
 let autoSaveTimer = null;
 let popupFoundGroups = [];
@@ -64,6 +65,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const popupInvertSelect = document.getElementById('popupInvertSelect');
   const popupDeleteSelected = document.getElementById('popupDeleteSelected');
   const shuffleGroupsToggle = document.getElementById('shuffleGroupsToggle');
+  const autoJoinOnPostToggle = document.getElementById('autoJoinOnPostToggle');
   const btnShuffleGroupsNow = document.getElementById('btnShuffleGroupsNow');
   const btnEditGroups = document.getElementById('btnEditGroups');
   const btnExportPopupGroups = document.getElementById('btnExportPopupGroups');
@@ -76,6 +78,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   const delayInput = document.getElementById('delayInput');
   const timeTagsContainer = document.getElementById('timeTagsContainer');
   const newTimeInput = document.getElementById('newTimeInput');
+  const popupSchedAccountSelect = document.getElementById('popupSchedAccountSelect');
+  const popupSchedAutoSwitch = document.getElementById('popupSchedAutoSwitch');
   const btnAddTime = document.getElementById('btnAddTime');
   const btnResetGoldenHours = document.getElementById('btnResetGoldenHours');
   const enableScheduleAuto = document.getElementById('enableScheduleAuto');
@@ -83,7 +87,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Elements Tab 4: Dò tìm nhóm
   const popupFinderKeyword = document.getElementById('popupFinderKeyword');
   const popupFinderMinMembers = document.getElementById('popupFinderMinMembers');
-  const popupFinderAutoJoin = document.getElementById('popupFinderAutoJoin');
   const btnPopupStartFind = document.getElementById('btnPopupStartFind');
   const popupFinderResultsArea = document.getElementById('popupFinderResultsArea');
   const popupFinderCountText = document.getElementById('popupFinderCountText');
@@ -95,6 +98,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Elements Tab 5: Lịch sử
   const popupHistoryBox = document.getElementById('popupHistoryBox');
   const btnPopupClearHistory = document.getElementById('btnPopupClearHistory');
+  const btnPopupExportHistoryCsv = document.getElementById('btnPopupExportHistoryCsv');
+  const popupHistoryAccountFilter = document.getElementById('popupHistoryAccountFilter');
+  const popupHistoryStatusFilter = document.getElementById('popupHistoryStatusFilter');
 
   // Nút chạy & tiến trình
   const startBtn = document.getElementById('startBtn');
@@ -106,41 +112,76 @@ document.addEventListener('DOMContentLoaded', async () => {
   // LƯU STORAGE BẢO TOÀN DỮ LIỆU
   function saveStorage(immediate = false) {
     clearTimeout(autoSaveTimer);
-    const saveFn = () => {
+    const saveFn = async () => {
       if (currentPosts[currentSelectedPostIndex]) {
         currentPosts[currentSelectedPostIndex].title = postTitleInput ? postTitleInput.value.trim() : 'Bài Tuyển Dụng';
         currentPosts[currentSelectedPostIndex].content = postContent ? postContent.value : '';
       }
+      currentScheduledTimes = currentScheduleSlots.map((s) => s.time);
+      if (typeof SharedStorage !== 'undefined' && SharedStorage.patch) {
+        await SharedStorage.patch('savedPosts', () => currentPosts);
+        await SharedStorage.patch('savedGroups', () => currentGroups);
+        await SharedStorage.patch('savedTimes', () => currentScheduledTimes);
+        await SharedStorage.patch('scheduledTimes', () => currentScheduledTimes);
+        await SharedStorage.patch('scheduleSlots', () => currentScheduleSlots);
+        await SharedStorage.patch('postingSettings', (old) => ({
+          ...(old || {}),
+          autoJoinOnPost: autoJoinOnPostToggle ? autoJoinOnPostToggle.checked : true,
+        }));
+      } else {
+        chrome.storage.local.set({
+          savedPosts: currentPosts,
+          savedGroups: currentGroups,
+          savedTimes: currentScheduledTimes,
+          scheduledTimes: currentScheduledTimes,
+          scheduleSlots: currentScheduleSlots,
+        });
+      }
       chrome.storage.local.set({
         isInitialized: true,
-        savedPosts: currentPosts,
-        savedGroups: currentGroups,
-        savedTimes: currentScheduledTimes,
-        scheduledTimes: currentScheduledTimes,
         selectedPostIdx: currentSelectedPostIndex,
-        delaySec: delayInput ? (parseInt(delayInput.value, 10) || 25) : 25,
+        delaySec: delayInput ? (parseInt(delayInput.value, 10) || 30) : 30,
         isScheduleActive: enableScheduleAuto ? enableScheduleAuto.checked : false,
         enableSpintax: enableSpintax ? enableSpintax.checked : true,
         shouldShuffleGroups: shuffleGroupsToggle ? shuffleGroupsToggle.checked : true,
+        autoJoinOnPost: autoJoinOnPostToggle ? autoJoinOnPostToggle.checked : true,
       });
     };
 
     if (immediate) {
       saveFn();
     } else {
-      autoSaveTimer = setTimeout(saveFn, 200);
+      autoSaveTimer = setTimeout(saveFn, 300);
     }
   }
 
   // Tải dữ liệu từ Storage
   chrome.storage.local.get(
-    ['isInitialized', 'savedGroups', 'savedPosts', 'savedTimes', 'scheduledTimes', 'isScheduleActive', 'selectedPostIdx', 'delaySec', 'enableSpintax', 'shouldShuffleGroups'],
+    ['isInitialized', 'savedGroups', 'savedPosts', 'savedTimes', 'scheduledTimes', 'scheduleSlots', 'isScheduleActive', 'selectedPostIdx', 'delaySec', 'enableSpintax', 'shouldShuffleGroups', 'autoJoinOnPost', 'postingSettings'],
     async (res) => {
       if (res.isInitialized) {
         currentPosts = Array.isArray(res.savedPosts) ? res.savedPosts : [];
         currentGroups = Array.isArray(res.savedGroups) ? res.savedGroups : [];
         const t = res.savedTimes || res.scheduledTimes;
-        if (t) currentScheduledTimes = t;
+        if (t && Array.isArray(t)) currentScheduledTimes = t;
+        if (Array.isArray(res.scheduleSlots) && res.scheduleSlots.length > 0) {
+          currentScheduleSlots = (typeof SharedStorage !== 'undefined' && SharedStorage.normalizeScheduleSlots)
+            ? SharedStorage.normalizeScheduleSlots(res.scheduleSlots, currentScheduledTimes)
+            : res.scheduleSlots;
+        } else {
+          currentScheduleSlots = currentScheduledTimes.map((tm, i) => ({
+            id: `slot_${String(tm).replace(':', '')}_${i}`,
+            time: tm,
+            enabled: true,
+            accountId: 'active',
+            accountUid: '',
+            accountName: 'Tài khoản đang chọn',
+            postIdx: -1,
+            autoSwitchAccount: true,
+          }));
+        }
+        currentScheduledTimes = currentScheduleSlots.map((s) => s.time);
+
         if (res.isScheduleActive !== undefined && enableScheduleAuto) {
           enableScheduleAuto.checked = res.isScheduleActive;
           chrome.runtime.sendMessage({ action: 'CHECK_LICENSE' }, (licRes) => {
@@ -153,6 +194,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (res.delaySec !== undefined && delayInput) delayInput.value = res.delaySec;
         if (res.enableSpintax !== undefined && enableSpintax) enableSpintax.checked = res.enableSpintax;
         if (res.shouldShuffleGroups !== undefined && shuffleGroupsToggle) shuffleGroupsToggle.checked = res.shouldShuffleGroups;
+        const autoJoinSetting = res.autoJoinOnPost !== undefined ? res.autoJoinOnPost : (res.postingSettings?.autoJoinOnPost !== false);
+        if (autoJoinOnPostToggle) autoJoinOnPostToggle.checked = autoJoinSetting !== false;
         if (res.selectedPostIdx !== undefined && res.selectedPostIdx < currentPosts.length) {
           currentSelectedPostIndex = res.selectedPostIdx;
         }
@@ -165,21 +208,125 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (preloadedRes.settings?.scheduledTimes) currentScheduledTimes = preloadedRes.settings.scheduledTimes;
           }
         } catch (e) {}
+        currentScheduleSlots = currentScheduledTimes.map((tm, i) => ({
+          id: `slot_${String(tm).replace(':', '')}_${i}`,
+          time: tm,
+          enabled: true,
+          accountId: 'active',
+          accountUid: '',
+          accountName: 'Tài khoản đang chọn',
+          postIdx: -1,
+          autoSwitchAccount: true,
+        }));
         saveStorage(true);
       }
 
       renderPostsDropdown();
       loadPostByIndex(currentSelectedPostIndex, false);
       renderGroupsList();
+      await loadPopupActiveAccount();
       renderTimeTags();
       updatePreview();
       renderPopupHistory();
     }
   );
 
+  const popupActiveAccountName = document.getElementById('popupActiveAccountName');
+  const popupActiveAccountBadge = document.getElementById('popupActiveAccountBadge');
+  const btnPopupDetectAccount = document.getElementById('btnPopupDetectAccount');
+
+  async function loadPopupActiveAccount() {
+    if (!popupActiveAccountName) return;
+    if (typeof AccountsManager !== 'undefined' && AccountsManager.getActiveAccount) {
+      const acc = await AccountsManager.getActiveAccount();
+      const allAccounts = AccountsManager.getAccounts ? await AccountsManager.getAccounts() : [];
+
+      if (popupSchedAccountSelect) {
+        const prevVal = popupSchedAccountSelect.value || 'active';
+        popupSchedAccountSelect.textContent = '';
+        const defaultOpt = document.createElement('option');
+        defaultOpt.value = 'active';
+        defaultOpt.textContent = '🔄 Nick đang chọn';
+        popupSchedAccountSelect.appendChild(defaultOpt);
+
+        allAccounts.forEach((a) => {
+          const opt = document.createElement('option');
+          opt.value = a.id;
+          opt.textContent = `👤 ${a.name || 'Nick FB'} (${a.uid || a.id})`;
+          popupSchedAccountSelect.appendChild(opt);
+        });
+        if ([...popupSchedAccountSelect.options].some((o) => o.value === prevVal)) {
+          popupSchedAccountSelect.value = prevVal;
+        }
+      }
+
+      if (acc) {
+        popupActiveAccountName.textContent = `${acc.name || 'Tài khoản FB'} (${acc.uid || acc.id})`;
+        if (popupActiveAccountBadge) {
+          const cooling = AccountsManager.isAccountCoolingDown(acc);
+          popupActiveAccountBadge.style.display = 'inline-block';
+          if (cooling && cooling.isCoolingDown) {
+            popupActiveAccountBadge.textContent = `Nghỉ ${cooling.remainingMinutes}p`;
+            popupActiveAccountBadge.style.background = '#881337';
+            popupActiveAccountBadge.style.color = '#fda4af';
+          } else {
+            popupActiveAccountBadge.textContent = 'Sẵn sàng';
+            popupActiveAccountBadge.style.background = '#065f46';
+            popupActiveAccountBadge.style.color = '#6ee7b7';
+          }
+        }
+      } else {
+        popupActiveAccountName.textContent = 'Chưa chọn tài khoản (Bấm Quét)';
+        if (popupActiveAccountBadge) popupActiveAccountBadge.style.display = 'none';
+      }
+    }
+  }
+
+  btnPopupDetectAccount?.addEventListener('click', () => {
+    if (btnPopupDetectAccount) btnPopupDetectAccount.textContent = 'Đang quét...';
+    chrome.runtime.sendMessage({ action: 'DETECT_CURRENT_FB_ACCOUNT_FROM_TAB' }, (res) => {
+      if (btnPopupDetectAccount) btnPopupDetectAccount.textContent = 'Quét Nick ↗';
+      if (res && res.success && res.account) {
+        loadPopupActiveAccount();
+        showToast(`✓ Đã nhận diện: ${res.account.name}`);
+      } else {
+        alert(res?.error || 'Không thể nhận diện tài khoản. Hãy mở sẵn tab Facebook đã đăng nhập!');
+      }
+    });
+  });
+
+  // Lắng nghe thay đổi storage từ background/dashboard
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== 'local') return;
+    if (changes.savedGroups) {
+      currentGroups = changes.savedGroups.newValue || [];
+      renderGroupsList();
+    }
+    if (changes.savedPosts) {
+      currentPosts = changes.savedPosts.newValue || [];
+      renderPostsDropdown();
+      loadPostByIndex(currentSelectedPostIndex, false);
+    }
+    if (changes.scheduleSlots) {
+      currentScheduleSlots = Array.isArray(changes.scheduleSlots.newValue) ? changes.scheduleSlots.newValue : [];
+      currentScheduledTimes = currentScheduleSlots.map((s) => s.time);
+      renderTimeTags();
+    }
+    if (changes.fbAccounts || changes.activeAccountId) {
+      loadPopupActiveAccount();
+    }
+    if (changes.postHistory) {
+      renderPopupHistory();
+    }
+    if (changes.postingStatus) {
+      const st = changes.postingStatus.newValue;
+      if (st && statusText) {
+        statusText.textContent = st.statusText || '';
+      }
+    }
+  });
+
   window.addEventListener('beforeunload', () => saveStorage(true));
-  window.addEventListener('pagehide', () => saveStorage(true));
-  window.addEventListener('blur', () => saveStorage(true));
   delayInput?.addEventListener('input', () => saveStorage());
 
   // 1. Quản lý bài viết
@@ -442,11 +589,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   // 2. Quản lý nhóm
+  autoJoinOnPostToggle?.addEventListener('change', () => saveStorage(true));
+  shuffleGroupsToggle?.addEventListener('change', () => saveStorage(true));
+
   function renderGroupsList() {
     if (!groupBox) return;
-    groupBox.innerHTML = '';
+    groupBox.textContent = '';
     const activeCount = currentGroups.filter((g) => g.enabled !== false).length;
-    if (groupCountBadge) groupCountBadge.innerText = `Đã chọn ${activeCount}/${currentGroups.length} Nhóm`;
+    if (groupCountBadge) groupCountBadge.textContent = `Đã chọn ${activeCount}/${currentGroups.length} Nhóm`;
 
     currentGroups.forEach((g) => {
       const row = document.createElement('div');
@@ -456,6 +606,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       left.style.display = 'flex';
       left.style.alignItems = 'center';
       left.style.gap = '6px';
+      left.style.minWidth = '0';
 
       const cb = document.createElement('input');
       cb.type = 'checkbox';
@@ -465,12 +616,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         g.enabled = cb.checked;
         saveStorage(true);
         const cur = currentGroups.filter((item) => item.enabled !== false).length;
-        if (groupCountBadge) groupCountBadge.innerText = `Đã chọn ${cur}/${currentGroups.length} Nhóm`;
+        if (groupCountBadge) groupCountBadge.textContent = `Đã chọn ${cur}/${currentGroups.length} Nhóm`;
       });
 
       const span = document.createElement('span');
-      span.innerText = g.name;
-      span.style.maxWidth = '210px';
+      span.textContent = g.name || 'Nhóm Facebook';
+      span.style.maxWidth = '185px';
       span.style.overflow = 'hidden';
       span.style.textOverflow = 'ellipsis';
       span.style.whiteSpace = 'nowrap';
@@ -478,11 +629,31 @@ document.addEventListener('DOMContentLoaded', async () => {
       left.appendChild(cb);
       left.appendChild(span);
 
+      if (g.status && g.status !== 'Chờ đăng') {
+        const badge = document.createElement('span');
+        badge.style.cssText = 'font-size: 9px; padding: 1px 4px; border-radius: 3px; white-space: nowrap;';
+        if (g.status.includes('Đã tự vào') || g.status === 'Đã đăng') {
+          badge.style.background = '#065f46';
+          badge.style.color = '#6ee7b7';
+        } else if (g.status.includes('Chờ duyệt') || g.status.includes('câu hỏi')) {
+          badge.style.background = '#78350f';
+          badge.style.color = '#fcd34d';
+        } else {
+          badge.style.background = '#334155';
+          badge.style.color = '#cbd5e1';
+        }
+        badge.textContent = g.status;
+        left.appendChild(badge);
+      }
+
       const link = document.createElement('a');
       link.className = 'group-link';
-      link.href = g.link;
+      const safeLink = (typeof SharedStorage !== 'undefined' && SharedStorage.normalizeGroupUrl)
+        ? SharedStorage.normalizeGroupUrl(g.link)
+        : (String(g.link || '').startsWith('https://www.facebook.com/groups/') ? g.link : '');
+      link.href = safeLink || 'https://www.facebook.com/groups/';
       link.target = '_blank';
-      link.innerText = 'Xem ↗';
+      link.textContent = 'Xem ↗';
 
       row.appendChild(left);
       row.appendChild(link);
@@ -577,43 +748,128 @@ document.addEventListener('DOMContentLoaded', async () => {
     showToast(`✓ Đã xuất file ${currentGroups.length} nhóm!`);
   });
 
-  // 3. Hẹn giờ
+  // 3. Hẹn giờ theo khung + tự chuyển tài khoản Facebook
+  function syncActiveScheduleIfEnabled() {
+    if (enableScheduleAuto && enableScheduleAuto.checked) {
+      chrome.runtime.sendMessage({
+        action: 'SCHEDULE_AUTO_POST',
+        payload: {
+          times: currentScheduledTimes,
+          slots: currentScheduleSlots,
+          delaySec: delayInput ? (parseInt(delayInput.value, 10) || 25) : 25,
+          isSpintaxEnabled: enableSpintax ? enableSpintax.checked : true,
+        },
+      });
+    }
+  }
+
   function renderTimeTags() {
     if (!timeTagsContainer) return;
-    timeTagsContainer.innerHTML = '';
-    currentScheduledTimes.forEach((t, i) => {
+    timeTagsContainer.textContent = '';
+    currentScheduledTimes = currentScheduleSlots.map((s) => s.time);
+
+    currentScheduleSlots.forEach((slot, i) => {
       const tag = document.createElement('div');
       tag.className = 'time-tag';
-      tag.innerHTML = `<span>⏰ ${t}</span><span class="del-time" data-i="${i}">✕</span>`;
-      timeTagsContainer.appendChild(tag);
-    });
 
-    document.querySelectorAll('.del-time').forEach((el) => {
-      el.addEventListener('click', (e) => {
-        const i = parseInt(e.target.getAttribute('data-i') || '0', 10);
-        currentScheduledTimes.splice(i, 1);
+      const infoSpan = document.createElement('span');
+      const accLabel = (slot.accountId && slot.accountId !== 'active')
+        ? (slot.accountName || slot.accountUid || slot.accountId)
+        : 'Nick đang chọn';
+      const switchIcon = slot.autoSwitchAccount !== false ? '🔀' : '👤';
+      infoSpan.textContent = `⏰ ${slot.time} · ${switchIcon} ${accLabel}`;
+
+      const delSpan = document.createElement('span');
+      delSpan.className = 'del-time';
+      delSpan.setAttribute('data-i', String(i));
+      delSpan.textContent = '✕';
+      delSpan.addEventListener('click', () => {
+        currentScheduleSlots.splice(i, 1);
+        currentScheduledTimes = currentScheduleSlots.map((s) => s.time);
         saveStorage(true);
         renderTimeTags();
+        syncActiveScheduleIfEnabled();
       });
+
+      tag.appendChild(infoSpan);
+      tag.appendChild(delSpan);
+      timeTagsContainer.appendChild(tag);
     });
   }
 
-  btnAddTime?.addEventListener('click', () => {
+  btnAddTime?.addEventListener('click', async () => {
     const val = newTimeInput?.value.trim();
     if (!val || !/^([01]\d|2[0-3]):([0-5]\d)$/.test(val)) return alert('Nhập đúng định dạng HH:mm (VD: 09:30)');
-    if (!currentScheduledTimes.includes(val)) {
-      currentScheduledTimes.push(val);
-      currentScheduledTimes.sort();
-      saveStorage(true);
-      renderTimeTags();
-      if (newTimeInput) newTimeInput.value = '';
-    }
-  });
 
-  btnResetGoldenHours?.addEventListener('click', () => {
-    currentScheduledTimes = ['08:30', '11:30', '17:30', '20:00'];
+    const selectedAccId = popupSchedAccountSelect ? popupSchedAccountSelect.value : 'active';
+    const autoSwitch = popupSchedAutoSwitch ? popupSchedAutoSwitch.checked : true;
+
+    let accName = 'Tài khoản đang chọn';
+    let accUid = '';
+    if (selectedAccId !== 'active' && typeof AccountsManager !== 'undefined' && AccountsManager.getAccounts) {
+      const allAccs = await AccountsManager.getAccounts();
+      const foundAcc = allAccs.find((a) => a.id === selectedAccId || a.uid === selectedAccId);
+      if (foundAcc) {
+        accName = foundAcc.name || 'Tài khoản FB';
+        accUid = foundAcc.uid || '';
+      }
+    }
+
+    const existingIdx = currentScheduleSlots.findIndex((s) => s.time === val);
+    const slotObj = {
+      id: `slot_${val.replace(':', '')}_${Date.now()}`,
+      time: val,
+      enabled: true,
+      accountId: selectedAccId,
+      accountUid: accUid,
+      accountName: accName,
+      postIdx: -1,
+      autoSwitchAccount: autoSwitch,
+    };
+
+    if (existingIdx >= 0) {
+      currentScheduleSlots[existingIdx] = { ...currentScheduleSlots[existingIdx], ...slotObj };
+    } else {
+      currentScheduleSlots.push(slotObj);
+    }
+
+    currentScheduleSlots.sort((a, b) => a.time.localeCompare(b.time));
+    currentScheduledTimes = currentScheduleSlots.map((s) => s.time);
     saveStorage(true);
     renderTimeTags();
+    syncActiveScheduleIfEnabled();
+    showToast(`✓ Đã hẹn khung ${val} (${accName})!`);
+  });
+
+  btnResetGoldenHours?.addEventListener('click', async () => {
+    const selectedAccId = popupSchedAccountSelect ? popupSchedAccountSelect.value : 'active';
+    const autoSwitch = popupSchedAutoSwitch ? popupSchedAutoSwitch.checked : true;
+    let accName = 'Tài khoản đang chọn';
+    let accUid = '';
+    if (selectedAccId !== 'active' && typeof AccountsManager !== 'undefined' && AccountsManager.getAccounts) {
+      const allAccs = await AccountsManager.getAccounts();
+      const foundAcc = allAccs.find((a) => a.id === selectedAccId || a.uid === selectedAccId);
+      if (foundAcc) {
+        accName = foundAcc.name || 'Tài khoản FB';
+        accUid = foundAcc.uid || '';
+      }
+    }
+
+    const golden = ['08:30', '11:30', '17:30', '20:00'];
+    currentScheduleSlots = golden.map((tm, idx) => ({
+      id: `slot_${tm.replace(':', '')}_${idx}`,
+      time: tm,
+      enabled: true,
+      accountId: selectedAccId,
+      accountUid: accUid,
+      accountName: accName,
+      postIdx: -1,
+      autoSwitchAccount: autoSwitch,
+    }));
+    currentScheduledTimes = [...golden];
+    saveStorage(true);
+    renderTimeTags();
+    syncActiveScheduleIfEnabled();
     showToast('✓ Đã nạp 4 mốc giờ vàng!');
   });
 
@@ -634,6 +890,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           action: 'SCHEDULE_AUTO_POST',
           payload: {
             times: currentScheduledTimes,
+            slots: currentScheduleSlots,
             delaySec: delayInput ? (parseInt(delayInput.value, 10) || 25) : 25,
             isSpintaxEnabled: enableSpintax ? enableSpintax.checked : true,
           },
@@ -659,7 +916,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     const kw = popupFinderKeyword?.value.trim();
     if (!kw) return alert('Vui lòng nhập từ khóa tìm nhóm!');
     const minMembers = popupFinderMinMembers ? parseInt(popupFinderMinMembers.value, 10) : 10000;
-    const autoJoin = popupFinderAutoJoin ? popupFinderAutoJoin.checked : false;
 
     if (btnPopupStartFind) {
       btnPopupStartFind.disabled = true;
@@ -668,7 +924,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     chrome.runtime.sendMessage({
       action: 'SEARCH_AND_SCAN_GROUPS',
-      payload: { keyword: kw, minMembers, autoJoin },
+      payload: { keyword: kw, minMembers },
     }, (res) => {
       if (btnPopupStartFind) {
         btnPopupStartFind.disabled = false;
@@ -688,11 +944,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   function renderPopupFoundGroups(list) {
     if (!popupFinderListBox || !popupFinderResultsArea) return;
     popupFinderResultsArea.style.display = 'block';
-    popupFinderListBox.innerHTML = '';
-    if (popupFinderCountText) popupFinderCountText.innerText = `${list.length} nhóm tìm được`;
+    popupFinderListBox.textContent = '';
+    if (popupFinderCountText) popupFinderCountText.textContent = `${list.length} nhóm tìm được`;
 
     if (!list.length) {
-      popupFinderListBox.innerHTML = '<div style="text-align: center; color: #64748b; padding: 10px;">Không có nhóm nào phù hợp.</div>';
+      const empty = document.createElement('div');
+      empty.style.cssText = 'text-align: center; color: #64748b; padding: 10px;';
+      empty.textContent = 'Không có nhóm nào phù hợp.';
+      popupFinderListBox.appendChild(empty);
       return;
     }
 
@@ -703,13 +962,41 @@ document.addEventListener('DOMContentLoaded', async () => {
       row.style.alignItems = 'center';
       row.style.gap = '6px';
 
-      row.innerHTML = `
-        <input type="checkbox" class="popup-finder-cb" data-idx="${idx}" checked style="accent-color: #0284c7; width: 14px; height: 14px;" />
-        <div style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-          <a href="${g.link}" target="_blank" style="color: #38bdf8; text-decoration: none; font-weight: bold; font-size: 11px;">${g.name}</a>
-          <div style="font-size: 9.5px; color: #10b981;">${g.memberText || ''} · <span style="color: ${g.joined ? '#10b981' : '#f59e0b'};">${g.joined ? 'Đã tham gia' : 'Chưa tham gia'}</span></div>
-        </div>
-      `;
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.className = 'popup-finder-cb';
+      cb.setAttribute('data-idx', String(idx));
+      cb.checked = true;
+      cb.style.accentColor = '#0284c7';
+      cb.style.width = '14px';
+      cb.style.height = '14px';
+
+      const infoWrap = document.createElement('div');
+      infoWrap.style.cssText = 'flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
+
+      const linkEl = document.createElement('a');
+      const safeUrl = (typeof SharedStorage !== 'undefined' && SharedStorage.normalizeGroupUrl)
+        ? SharedStorage.normalizeGroupUrl(g.link)
+        : (String(g.link || '').startsWith('https://www.facebook.com/groups/') ? g.link : '');
+      linkEl.href = safeUrl || 'https://www.facebook.com/groups/';
+      linkEl.target = '_blank';
+      linkEl.style.cssText = 'color: #38bdf8; text-decoration: none; font-weight: bold; font-size: 11px;';
+      linkEl.textContent = g.name || 'Nhóm Facebook';
+
+      const subEl = document.createElement('div');
+      subEl.style.cssText = 'font-size: 9.5px; color: #10b981;';
+      const memSpan = document.createElement('span');
+      memSpan.textContent = `${g.memberText || ''} · `;
+      const statusSpan = document.createElement('span');
+      statusSpan.style.color = g.joined ? '#10b981' : '#f59e0b';
+      statusSpan.textContent = g.joined ? 'Đã tham gia' : 'Chưa tham gia';
+      subEl.appendChild(memSpan);
+      subEl.appendChild(statusSpan);
+
+      infoWrap.appendChild(linkEl);
+      infoWrap.appendChild(subEl);
+      row.appendChild(cb);
+      row.appendChild(infoWrap);
       popupFinderListBox.appendChild(row);
     });
   }
@@ -792,38 +1079,168 @@ document.addEventListener('DOMContentLoaded', async () => {
     showToast(`✓ Đã xuất ${popupFoundGroups.length} nhóm sang Excel!`);
   });
 
-  // 5. LỊCH SỬ ĐĂNG BÀI
+  // 5. LỊCH SỬ ĐĂNG BÀI THEO TÀI KHOẢN (Rule 5: dùng textContent)
+  function populatePopupHistoryAccountFilter(historyList, accountsList) {
+    if (!popupHistoryAccountFilter) return;
+    const prevVal = popupHistoryAccountFilter.value || 'all';
+    popupHistoryAccountFilter.textContent = '';
+
+    const optAll = document.createElement('option');
+    optAll.value = 'all';
+    optAll.textContent = '👤 Tất cả nick FB';
+    popupHistoryAccountFilter.appendChild(optAll);
+
+    const seen = new Set();
+    const addOpt = (val, label) => {
+      const k = String(val || '').trim();
+      if (!k || seen.has(k)) return;
+      seen.add(k);
+      const opt = document.createElement('option');
+      opt.value = k;
+      opt.textContent = label;
+      popupHistoryAccountFilter.appendChild(opt);
+    };
+
+    if (Array.isArray(accountsList)) {
+      accountsList.forEach((acc) => {
+        if (!acc) return;
+        const key = acc.id || acc.uid || acc.fbUserId || acc.name || acc.displayName;
+        const name = acc.name || acc.displayName || 'Nick FB';
+        addOpt(key, `👤 ${name}`);
+      });
+    }
+    if (Array.isArray(historyList)) {
+      historyList.forEach((h) => {
+        if (!h) return;
+        const key = h.accountId || h.accountUid || h.accountName;
+        const name = h.accountName || h.accountId || 'Mặc định';
+        if (key) addOpt(key, `👤 ${name}`);
+      });
+    }
+
+    if (Array.from(popupHistoryAccountFilter.options).some((o) => o.value === prevVal)) {
+      popupHistoryAccountFilter.value = prevVal;
+    } else {
+      popupHistoryAccountFilter.value = 'all';
+    }
+  }
+
+  function getPopupFilteredHistory(rawHistory) {
+    const filters = {
+      accountId: popupHistoryAccountFilter ? popupHistoryAccountFilter.value : 'all',
+      status: popupHistoryStatusFilter ? popupHistoryStatusFilter.value : 'all',
+    };
+    if (typeof SharedStorage !== 'undefined' && typeof SharedStorage.filterHistoryEntries === 'function') {
+      return SharedStorage.filterHistoryEntries(rawHistory, filters);
+    }
+    return Array.isArray(rawHistory) ? rawHistory : [];
+  }
+
   async function renderPopupHistory() {
     if (!popupHistoryBox) return;
-    popupHistoryBox.innerHTML = '';
-    const res = await chrome.storage.local.get(['postHistory']);
-    const history = res.postHistory || [];
+    popupHistoryBox.textContent = '';
+    const res = await chrome.storage.local.get(['postHistory', 'fbAccounts']);
+    const history = Array.isArray(res.postHistory) ? res.postHistory : [];
+    const accountsList = Array.isArray(res.fbAccounts) ? res.fbAccounts : [];
 
-    if (!history.length) {
-      popupHistoryBox.innerHTML = '<div style="text-align: center; color: #64748b; padding: 15px;">Chưa có lịch sử đăng bài nào.</div>';
+    populatePopupHistoryAccountFilter(history, accountsList);
+    const filtered = getPopupFilteredHistory(history);
+
+    if (!filtered.length) {
+      const empty = document.createElement('div');
+      empty.style.cssText = 'text-align: center; color: #64748b; padding: 15px;';
+      empty.textContent = history.length === 0
+        ? 'Chưa có lịch sử đăng bài nào.'
+        : 'Không có lịch sử khớp bộ lọc.';
+      popupHistoryBox.appendChild(empty);
       return;
     }
 
-    history.slice(0, 50).forEach((h) => {
+    filtered.slice(0, 60).forEach((h) => {
       const item = document.createElement('div');
       item.className = 'history-item';
-      const badgeClass = h.status === 'success' ? 'badge-success' : (h.status === 'stopped' ? 'badge-stopped' : 'badge-failed');
-      const statusText = h.status === 'success' ? 'Thành công' : (h.status === 'stopped' ? 'Đã dừng' : 'Thất bại');
+      const badgeClass = h.status === 'success' ? 'badge-success' : (h.status === 'stopped' || h.status === 'uncertain' ? 'badge-stopped' : 'badge-failed');
+      const statusLabel = h.status === 'success' ? 'Thành công' : (h.status === 'uncertain' ? 'Chưa rõ' : (h.status === 'stopped' ? 'Đã dừng' : 'Thất bại'));
       const typeLabel = h.type === 'scheduled' ? '⏰ Hẹn giờ' : '⚡ Thủ công';
 
-      item.innerHTML = `
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-          <span style="font-weight: bold; color: #e2e8f0; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${h.groupName}</span>
-          <span class="${badgeClass}">${statusText}</span>
-        </div>
-        <div style="display: flex; justify-content: space-between; font-size: 9.5px; color: #94a3b8;">
-          <span>${h.timeFormatted || new Date(h.timestamp).toLocaleTimeString()} (${typeLabel})</span>
-          <span>${h.message || ''}</span>
-        </div>
-      `;
+      const topRow = document.createElement('div');
+      topRow.style.cssText = 'display: flex; justify-content: space-between; align-items: center;';
+
+      if (h.groupLink && String(h.groupLink).startsWith('https://www.facebook.com/groups/')) {
+        const grpLinkEl = document.createElement('a');
+        grpLinkEl.href = h.groupLink;
+        grpLinkEl.target = '_blank';
+        grpLinkEl.rel = 'noopener noreferrer';
+        grpLinkEl.style.cssText = 'font-weight: bold; color: #e2e8f0; max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: none;';
+        grpLinkEl.textContent = (h.groupName || 'Nhóm Facebook') + ' ↗';
+        topRow.appendChild(grpLinkEl);
+      } else {
+        const grpNameSpan = document.createElement('span');
+        grpNameSpan.style.cssText = 'font-weight: bold; color: #e2e8f0; max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
+        grpNameSpan.textContent = h.groupName || 'Nhóm Facebook';
+        topRow.appendChild(grpNameSpan);
+      }
+
+      const badgeSpan = document.createElement('span');
+      badgeSpan.className = badgeClass;
+      badgeSpan.textContent = statusLabel;
+      topRow.appendChild(badgeSpan);
+
+      const midRow = document.createElement('div');
+      midRow.style.cssText = 'display: flex; justify-content: space-between; align-items: center; font-size: 9.5px; color: #38bdf8;';
+      const accSpan = document.createElement('span');
+      const uidInfo = h.accountUid || (h.accountId && h.accountId !== 'default' ? h.accountId : '');
+      accSpan.textContent = uidInfo && uidInfo !== h.accountName
+        ? `👤 Nick: ${h.accountName || 'Mặc định'} (${uidInfo})`
+        : `👤 Nick: ${h.accountName || h.accountId || 'Mặc định'}`;
+      midRow.appendChild(accSpan);
+
+      if (h.autoJoined) {
+        const joinSpan = document.createElement('span');
+        joinSpan.style.cssText = 'color: #34d399; font-weight: 600;';
+        joinSpan.textContent = '🤝 Tự vào nhóm';
+        midRow.appendChild(joinSpan);
+      }
+
+      const botRow = document.createElement('div');
+      botRow.style.cssText = 'display: flex; justify-content: space-between; font-size: 9.5px; color: #94a3b8;';
+
+      const timeSpan = document.createElement('span');
+      timeSpan.textContent = `${h.timeFormatted || new Date(h.timestamp).toLocaleTimeString()} (${typeLabel})`;
+
+      const msgSpan = document.createElement('span');
+      msgSpan.textContent = h.message || '';
+
+      botRow.appendChild(timeSpan);
+      botRow.appendChild(msgSpan);
+
+      item.appendChild(topRow);
+      item.appendChild(midRow);
+      item.appendChild(botRow);
       popupHistoryBox.appendChild(item);
     });
   }
+
+  popupHistoryAccountFilter?.addEventListener('change', () => renderPopupHistory());
+  popupHistoryStatusFilter?.addEventListener('change', () => renderPopupHistory());
+
+  btnPopupExportHistoryCsv?.addEventListener('click', async () => {
+    const res = await chrome.storage.local.get(['postHistory']);
+    const history = Array.isArray(res.postHistory) ? res.postHistory : [];
+    const filtered = getPopupFilteredHistory(history);
+    if (!filtered.length) return alert('Chưa có lịch sử nào để xuất CSV!');
+    const csvContent = (typeof SharedStorage !== 'undefined' && typeof SharedStorage.formatHistoryToCsv === 'function')
+      ? SharedStorage.formatHistoryToCsv(filtered)
+      : '\uFEFFSTT,Thời Gian,Tài Khoản,Nhóm,Trạng Thái\n';
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `lich_su_fb_${filtered.length}_muc_${Date.now()}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast(`✓ Đã xuất ${filtered.length} dòng lịch sử ra CSV!`);
+  });
 
   btnPopupClearHistory?.addEventListener('click', async () => {
     if (confirm('Xóa toàn bộ lịch sử đăng bài?')) {
@@ -841,11 +1258,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!txt) return alert('Chưa có nội dung bài viết!');
 
     // KIỂM TRA BẢN QUYỀN TRƯỚC KHI THỰC HIỆN ĐĂNG
-    chrome.runtime.sendMessage({ action: 'CHECK_LICENSE' }, (licRes) => {
+    chrome.runtime.sendMessage({ action: 'CHECK_LICENSE' }, async (licRes) => {
       if (!licRes || !licRes.isValid) {
         alert(`🚨 BẢN QUYỀN CHƯA KÍCH HOẠT HOẶC ĐÃ HẾT HẠN!\n\n${licRes?.message || 'Vui lòng kích hoạt mã bản quyền để bắt đầu đăng bài.'}`);
         chrome.runtime.openOptionsPage();
         return;
+      }
+
+      let activeAcc = null;
+      if (typeof AccountsManager !== 'undefined' && AccountsManager.getActiveAccount) {
+        activeAcc = await AccountsManager.getActiveAccount();
       }
 
       const p = currentPosts[currentSelectedPostIndex];
@@ -860,12 +1282,22 @@ document.addEventListener('DOMContentLoaded', async () => {
         payload: {
           groups: active,
           content: txt,
+          variants: [p?.content, p?.contentVariant2, p?.contentVariant3].filter((v) => typeof v === 'string' && v.trim().length > 0),
           images: shouldAttach ? (p?.images?.slice(0, 3) || []) : [],
           isSpintaxEnabled: enableSpintax ? enableSpintax.checked : true,
-          delaySec: delayInput ? (parseInt(delayInput.value, 10) || 45) : 45,
+          delaySec: delayInput ? (parseInt(delayInput.value, 10) || 30) : 30,
           shouldShuffle: shuffleGroupsToggle ? shuffleGroupsToggle.checked : true,
+          autoJoinOnPost: autoJoinOnPostToggle ? autoJoinOnPostToggle.checked : true,
           postTitle: p?.title || 'Bài Tuyển Dụng',
+          accountId: activeAcc ? activeAcc.id : 'default',
+          accountName: activeAcc ? activeAcc.name : 'Tài khoản mặc định',
         },
+      }, (runRes) => {
+        if (runRes && runRes.success === false) {
+          if (startBtn) startBtn.style.display = 'block';
+          if (stopBtn) stopBtn.style.display = 'none';
+          alert(`🚨 KHÔNG THỂ BẮT ĐẦU:\n\n${runRes.error || 'Tài khoản đang trong thời gian nghỉ an toàn.'}`);
+        }
       });
     });
   });

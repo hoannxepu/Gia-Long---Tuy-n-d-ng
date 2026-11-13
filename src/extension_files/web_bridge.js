@@ -1,34 +1,45 @@
-// web_bridge.js - CẦU NỐI THỜI GIAN THỰC 2 CHIỀU GIỮA WEB APP VÀ CHROME EXTENSION
-// Mọi thao tác sửa bài, đổi ảnh, chỉnh nhóm trên Web App sẽ tự động đẩy ngay lập tức sang Extension!
+// web_bridge.js - CẦU NỐI THỜI GIAN THỰC BẢO MẬT GIỮA WEB APP VÀ CHROME EXTENSION
+// Tuân thủ nghiêm ngặt bảo mật Manifest V3: Chỉ chạy trên domain production chính thức
 
 (function () {
-  const isTarget = 
-    window.location.href.includes('dang-bai-fb') ||
-    window.location.href.includes('pages.dev') ||
-    window.location.href.includes('run.app') ||
-    window.location.href.includes('localhost') ||
-    document.title.includes('AutoRecruit') ||
-    document.title.includes('Gia Long');
+  const ALLOWED_ORIGIN = 'https://gia-long---tuy-n-d-ng.pages.dev';
+  const MAX_PAYLOAD_BYTES = 102400; // 100KB tối đa
 
-  if (!isTarget) return;
+  if (window.location.origin !== ALLOWED_ORIGIN) {
+    return;
+  }
 
-  console.log('[Gia Long - FB Bridge] Khởi động cầu nối thời gian thực trên:', window.location.href);
+  console.log('[Gia Long - FB Bridge] Khởi động cầu nối thời gian thực trên domain chính thức:', window.location.origin);
 
   try {
     document.documentElement.setAttribute('data-autorecruit-extension', 'true');
     document.documentElement.setAttribute('data-gialong-extension', 'true');
     window.__AUTORECRUIT_EXTENSION_INSTALLED__ = true;
     window.__GIALONG_EXTENSION_INSTALLED__ = true;
-    if (window.location.origin && window.location.origin.startsWith('http')) {
-      const serverUrl = window.location.origin.replace(/\/+$/, '');
-      chrome.runtime.sendMessage({
-        action: 'SET_SERVER_URL',
-        url: serverUrl,
-      });
-    }
   } catch (e) {}
 
   let lastSentHash = '';
+
+  function validateSyncSchema(payload) {
+    if (!payload || typeof payload !== 'object') return false;
+    const rawStr = JSON.stringify(payload);
+    if (rawStr.length > MAX_PAYLOAD_BYTES) {
+      console.warn('[Bridge Security] Payload vượt quá giới hạn 100KB, bỏ qua đồng bộ!');
+      return false;
+    }
+
+    if (payload.posts && (!Array.isArray(payload.posts) || payload.posts.length > 50)) {
+      console.warn('[Bridge Security] Danh sách bài viết không hợp lệ hoặc vượt quá 50 bài!');
+      return false;
+    }
+
+    if (payload.groups && (!Array.isArray(payload.groups) || payload.groups.length > 500)) {
+      console.warn('[Bridge Security] Danh sách nhóm không hợp lệ hoặc vượt quá 500 nhóm!');
+      return false;
+    }
+
+    return true;
+  }
 
   function broadcastUpdateToExtension(customPayload = null) {
     try {
@@ -41,6 +52,7 @@
       }
 
       if (!payload || !payload.posts) return;
+      if (!validateSyncSchema(payload)) return;
 
       const posts = payload.posts || [];
       const groups = payload.groups || [];
@@ -87,31 +99,31 @@
   });
 
   window.addEventListener('AUTORECRUIT_DATA_CHANGE', (event) => {
-    console.log('[AutoRecruit Real-time Bridge] Nhận tín hiệu Web App sửa dữ liệu:', event.detail);
     broadcastUpdateToExtension(event.detail);
   });
 
+  // Lắng nghe message với kiểm tra nghiêm ngặt event.source và event.origin
   window.addEventListener('message', (event) => {
+    if (event.source !== window || event.origin !== ALLOWED_ORIGIN) {
+      return;
+    }
+
     if (event.data && (event.data.type === 'AUTORECRUIT_DATA_CHANGE' || event.data.type === 'AUTORECRUIT_PUSH_TO_EXTENSION')) {
-      broadcastUpdateToExtension(event.detail || event.data.payload);
+      broadcastUpdateToExtension(event.data.payload);
     }
 
     if (event.data && event.data.type === 'AUTORECRUIT_ACTIVATE_KEY') {
-      const key = event.data.key;
-      chrome.runtime.sendMessage({ action: 'ACTIVATE_LICENSE', key }, (res) => {
-        window.postMessage({ type: 'AUTORECRUIT_ACTIVATE_RESULT', result: res }, '*');
-      });
+      const key = String(event.data.key || '').trim();
+      if (key) {
+        chrome.runtime.sendMessage({ action: 'ACTIVATE_LICENSE', key }, (res) => {
+          window.postMessage({ type: 'AUTORECRUIT_ACTIVATE_RESULT', result: res }, ALLOWED_ORIGIN);
+        });
+      }
     }
 
     if (event.data && event.data.type === 'AUTORECRUIT_CHECK_LICENSE') {
       chrome.runtime.sendMessage({ action: 'CHECK_LICENSE', forceRemote: true }, (res) => {
-        window.postMessage({ type: 'AUTORECRUIT_CHECK_LICENSE_RESULT', result: res }, '*');
-      });
-    }
-
-    if (event.data && event.data.type === 'AUTORECRUIT_FORCE_REVOKE') {
-      chrome.runtime.sendMessage({ action: 'FORCE_REVOKE_DEVICE' }, (res) => {
-        window.postMessage({ type: 'AUTORECRUIT_FORCE_REVOKE_RESULT', result: res }, '*');
+        window.postMessage({ type: 'AUTORECRUIT_CHECK_LICENSE_RESULT', result: res }, ALLOWED_ORIGIN);
       });
     }
   });
@@ -122,17 +134,15 @@
     }
   });
 
-  // LẮNG NGHE LỆNH TỪ EXTENSION BACKGROUND: Đồng bộ đơn mới trực tiếp vào Web Quản Trị / Cloudflare Pages
+  // Lắng nghe thông báo đơn mới từ Extension
   try {
     if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
       chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         if (msg.action === 'DISPATCH_NEW_ORDER_TO_WEBAPP') {
           const orderPayload = msg.order || msg.payload;
           if (orderPayload) {
-            console.log('[Gia Long Bridge] Nhận thông báo đơn mới từ Extension, hiển thị lên giao diện Admin:', orderPayload);
-            // Kích hoạt cập nhật giao diện Admin ngay lập tức mà không tạo trùng đơn trên máy chủ
             window.dispatchEvent(new CustomEvent('GIALONG_NEW_ORDER', { detail: orderPayload }));
-            window.postMessage({ type: 'GIALONG_NEW_ORDER', order: orderPayload }, '*');
+            window.postMessage({ type: 'GIALONG_NEW_ORDER', order: orderPayload }, ALLOWED_ORIGIN);
           }
           sendResponse({ received: true });
           return true;
@@ -141,19 +151,7 @@
     }
   } catch (e) {}
 
-  // Định kỳ cập nhật lại URL máy chủ cho Extension
-  window.addEventListener('focus', () => {
-    if (window.location.origin && window.location.origin.startsWith('http')) {
-      try {
-        chrome.runtime.sendMessage({
-          action: 'SET_SERVER_URL',
-          url: window.location.origin.replace(/\/+$/, ''),
-        });
-      } catch (e) {}
-    }
-  });
-
-  setInterval(broadcastUpdateToExtension, 2500);
+  setInterval(broadcastUpdateToExtension, 3000);
 
   setTimeout(() => {
     window.dispatchEvent(new CustomEvent('AUTORECRUIT_EXTENSION_READY'));

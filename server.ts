@@ -4,6 +4,8 @@ import { createServer as createViteServer } from 'vite';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { checkAdminCors, requireAdmin } from './src/security/admin_auth.ts';
+import { generateEd25519Token } from './src/security/ed25519_token.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -13,23 +15,6 @@ const PORT = parseInt(process.env.PORT || '3000', 10);
 const DATA_DIR = path.join(__dirname, 'data');
 const DIST_EXT_DIR = path.join(__dirname, 'dist-extension');
 const LICENSES_FILE = path.join(DATA_DIR, 'licenses.json');
-const ADMIN_PIN_FILE = path.join(DATA_DIR, 'admin-pin.json');
-
-function getActiveAdminPin(): string {
-  try {
-    if (fs.existsSync(ADMIN_PIN_FILE)) {
-      const data = JSON.parse(fs.readFileSync(ADMIN_PIN_FILE, 'utf-8'));
-      if (data && data.pin) return String(data.pin).trim();
-    }
-  } catch (e) {}
-  return process.env.ADMIN_PIN || 'Ha26062018$';
-}
-
-function setActiveAdminPin(pin: string) {
-  try {
-    fs.writeFileSync(ADMIN_PIN_FILE, JSON.stringify({ pin, updatedAt: new Date().toISOString() }, null, 2), 'utf-8');
-  } catch (e) {}
-}
 
 // Đảm bảo thư mục lưu dữ liệu tồn tại
 if (!fs.existsSync(DATA_DIR)) {
@@ -268,8 +253,14 @@ function addHistoryEntry(entry: Omit<LicenseHistoryItem, 'id' | 'createdAt'> & {
 // Cấu hình Middleware
 app.use(express.json({ limit: '10mb' }));
 
-// CORS Header mở rộng cho Chrome Extension
+// Áp dụng CORS riêng biệt và bảo mật cao cho toàn bộ route Quản Trị
+app.use(['/api/admin', '/admin'], checkAdminCors);
+
+// CORS Header thông thường cho các API mở của Chrome Extension (đăng ký, check status)
 app.use((req, res, next) => {
+  if (req.path.startsWith('/api/admin') || req.path.startsWith('/admin')) {
+    return next();
+  }
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, X-Admin-Pin');
@@ -279,40 +270,10 @@ app.use((req, res, next) => {
   next();
 });
 
-// Middleware kiểm tra quyền Admin
-function requireAdmin(req: Request, res: Response, next: () => void) {
-  const pin = String(req.headers['x-admin-pin'] || req.body?.adminPin || req.query?.pin || '').trim();
-  const currentPin = getActiveAdminPin();
-  if (!pin || pin === currentPin || pin === 'Ha26062018$' || currentPin === 'Ha26062018$' || req.method === 'GET') {
-    return next();
-  }
-  return res.status(401).json({ success: false, error: 'Khóa Quản Trị không hợp lệ!' });
-}
-
 // ============================================================================
 // 1. API DÀNH CHO EXTENSION (XÁC THỰC, ĐĂNG KÝ & KÍCH HOẠT D1 / CACHE)
 // ============================================================================
-
-// Sinh Signed Token bảo mật cho Extension lưu Cache 100% miễn phí
-function generateSignedToken(machineId: string, expiresAt: string, secret = process.env.SIGNING_SECRET || 'GiaLongFB_D1_Secret_2026'): string {
-  const cleanId = String(machineId || '').trim();
-  const cleanExp = String(expiresAt || '').trim();
-  const payload = `${cleanId}:::${cleanExp}:::${secret}`;
-  let hash1 = 0;
-  for (let i = 0; i < payload.length; i++) {
-    hash1 = ((hash1 << 5) - hash1) + payload.charCodeAt(i);
-    hash1 |= 0;
-  }
-  const h1 = Math.abs(hash1).toString(36).toUpperCase();
-  let hash2 = 5381;
-  for (let i = payload.length - 1; i >= 0; i--) {
-    hash2 = ((hash2 << 5) + hash2) + payload.charCodeAt(i);
-    hash2 |= 0;
-  }
-  const h2 = Math.abs(hash2).toString(36).toUpperCase();
-  const rawToken = `${cleanId}__${cleanExp}__${h1}${h2}`;
-  return 'GLFB_SIG_' + Buffer.from(rawToken).toString('base64');
-}
+// Mọi token bản quyền đều được ký bất đối xứng bằng Ed25519 (signLicenseToken)
 
 // 1. API Đăng Ký Gói (/register & /api/register)
 app.post(['/api/register', '/register'], (req: Request, res: Response) => {
@@ -378,7 +339,8 @@ app.post(['/api/admin/approve', '/admin/approve'], requireAdmin, (req: Request, 
   if (!days) days = 30;
 
   const expiresAt = new Date(Date.now() + days * 86400000).toISOString();
-  const token = generateSignedToken(targetDev, expiresAt);
+  const plan = days === 1 ? 'trial' : (targetPkg.includes('Doanh Nghiệp') || targetPkg.includes('Team') ? 'team' : 'individual');
+  const token = generateEd25519Token(targetDev, expiresAt, plan);
 
   const orders = loadOrders();
   const pendingOrd = orders.find((o) => (o.deviceId || '').toLowerCase() === targetDev.toLowerCase() && o.status === 'pending');
@@ -553,17 +515,13 @@ app.all(['/api/check', '/check'], (req: Request, res: Response) => {
       });
     }
     const daysLeft = Math.max(1, Math.ceil((expMs - now) / 86400000));
-    const token = generateSignedToken(machineId, matchedLic.expiresAt);
     return res.json({
       success: true,
       status: 'active',
       machine_id: machineId,
-      pkg_name: matchedLic.notes || 'Gói VIP Gia Long',
-      client_name: matchedLic.clientName,
+      plan: matchedLic.planType || 'individual',
       expires_at: matchedLic.expiresAt,
       days_left: daysLeft,
-      token,
-      license_key: matchedLic.key,
       message: '✓ Bản quyền hợp lệ và đang hoạt động!',
     });
   }
@@ -879,6 +837,7 @@ app.post('/api/license/activate', (req: Request, res: Response) => {
         activeDevicesCount: found.devices.length,
         expiresAt: found.expiresAt,
         daysLeft,
+        token: generateEd25519Token(deviceId, found.expiresAt, found.planType),
       },
     });
   }
@@ -902,6 +861,7 @@ app.post('/api/license/activate', (req: Request, res: Response) => {
   saveLicenses(licenses);
 
   const daysLeft = Math.max(0, Math.ceil((expiresAtMs - now) / (24 * 60 * 60 * 1000)));
+  const ed25519Token = generateEd25519Token(deviceId, found.expiresAt, found.planType);
   res.json({
     success: true,
     message: `✓ Kích hoạt thành công trên máy này! (${found.devices.length}/${found.maxDevices} máy)`,
@@ -913,6 +873,7 @@ app.post('/api/license/activate', (req: Request, res: Response) => {
       activeDevicesCount: found.devices.length,
       expiresAt: found.expiresAt,
       daysLeft,
+      token: ed25519Token,
     },
   });
 });
@@ -922,39 +883,30 @@ app.post('/api/license/activate', (req: Request, res: Response) => {
 // ============================================================================
 
 // Xác thực mã PIN / Khóa Quản trị
-app.post('/api/admin/verify-pin', (req: Request, res: Response) => {
-  const pin = String(req.body?.pin || '').trim();
-  const currentPin = getActiveAdminPin();
-  if (pin && pin === currentPin) {
-    return res.json({ success: true, message: 'Đăng nhập Quản Trị thành công!' });
-  }
-  res.status(401).json({ success: false, message: 'Khóa Quản Trị không chính xác!' });
+app.post('/api/admin/verify-pin', requireAdmin, (_req: Request, res: Response) => {
+  return res.json({ success: true, message: 'Đăng nhập Quản Trị thành công!' });
 });
 
 // Đổi mã PIN / Mật khẩu Quản trị
 app.post('/api/admin/change-pin', requireAdmin, (req: Request, res: Response) => {
-  const { currentPin, newPin } = req.body;
-  const activePin = getActiveAdminPin();
-  if (!currentPin || String(currentPin).trim() !== activePin) {
-    return res.status(400).json({ success: false, error: 'Mật khẩu hiện tại không chính xác!' });
-  }
+  const { newPin } = req.body;
   if (!newPin || String(newPin).trim().length < 6) {
     return res.status(400).json({ success: false, error: 'Mật khẩu mới phải có tối thiểu 6 ký tự!' });
   }
   const cleanNewPin = String(newPin).trim();
-  setActiveAdminPin(cleanNewPin);
+  process.env.ADMIN_PIN = cleanNewPin;
 
   addHistoryEntry({
     action: 'update_date',
     actionName: 'Đổi Mật Khẩu Quản Trị',
     clientName: 'Hệ Thống Quản Trị',
     key: 'ADMIN-SECURITY',
-    notes: 'Quản trị viên đã thay đổi mật khẩu / khóa quản trị thành công.',
+    notes: 'Quản trị viên đã thay đổi mật khẩu / khóa quản trị thành công trong biến môi trường.',
   });
 
   return res.json({
     success: true,
-    message: 'Đổi mật khẩu Quản trị thành công!',
+    message: 'Đổi mật khẩu Quản trị thành công! Hãy lưu ý cập nhật ADMIN_PIN trong secrets môi trường.',
     pin: cleanNewPin,
   });
 });
@@ -1522,7 +1474,7 @@ async function syncGlobalStoreServer(order?: OrderItem) {
 
 async function pullGlobalStoreServer() {
   try {
-    const pin = getActiveAdminPin();
+    const pin = process.env.ADMIN_PIN || '';
     const resp = await fetch('https://gia-long---tuy-n-d-ng.pages.dev/api/admin/orders', {
       headers: { 'x-admin-pin': pin },
       signal: AbortSignal.timeout(3500),
@@ -1749,8 +1701,8 @@ export function autoConsolidateLicensesAndOrders(): { licenses: LicenseItem[]; o
 
     // Bảo lưu tuyệt đối ngày hết hạn do Quản trị viên thiết lập hoặc cấp phép (Không ghi đè bừa bãi)
     if (!primaryLic.expiresAt) {
-      primaryLic.expiresAt = finalExpIso;
-      primaryLic.notes = newNotes;
+      primaryLic.expiresAt = new Date(earliestOrderMs + totalDays * 86400000).toISOString();
+      primaryLic.notes = `Bản quyền cấp từ duyệt đơn: ${ords[0].pkgName} (+${totalDays} ngày)`;
       licensesModified = true;
     }
     const currentExpMs = new Date(primaryLic.expiresAt).getTime();
@@ -1893,7 +1845,12 @@ app.post('/api/orders/sync', (req: Request, res: Response) => {
 
     for (const co of clientOrders) {
       if (!co || !co.id) continue;
-      const exists = serverOrders.find((so) => so.id === co.id || (so.phone && co.phone && so.phone === so.phone && so.pkgName === co.pkgName));
+      const cleanCoPhone = String(co.phone || '').replace(/\D/g, '');
+      const exists = serverOrders.find(
+        (so) =>
+          so.id === co.id ||
+          (so.phone && cleanCoPhone && so.phone.replace(/\D/g, '') === cleanCoPhone && so.pkgName === co.pkgName)
+      );
       if (!exists) {
         serverOrders.unshift({
           id: co.id,
@@ -2306,7 +2263,7 @@ app.post('/api/admin/orders/delete', requireAdmin, (req: Request, res: Response)
   try {
     fetch('https://gia-long---tuy-n-d-ng.pages.dev/api/admin/orders/delete', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-admin-pin': getActiveAdminPin() },
+      headers: { 'Content-Type': 'application/json', 'x-admin-pin': process.env.ADMIN_PIN || '' },
       body: JSON.stringify({ orderId: targetId, id: targetId }),
       signal: AbortSignal.timeout(3000),
     }).catch(() => {});
@@ -2383,7 +2340,7 @@ app.get('/api/settings', (_req: Request, res: Response) => {
   res.json({ success: true, settings: loadSettings() });
 });
 
-app.get('/api/admin/system/status', (_req: Request, res: Response) => {
+app.get('/api/admin/system/status', requireAdmin, (_req: Request, res: Response) => {
   const settings = loadSettings();
   const orders = loadOrders();
   const licenses = loadLicenses();
@@ -2635,8 +2592,8 @@ app.all(['/api/admin/google-drive/pull', '/admin/google-drive/pull'], requireAdm
   }
 });
 
-// API Xuất dữ liệu Database JSON trực tiếp (Live JSON Database)
-app.get(['/api/database/export.json', '/database.json'], (_req: Request, res: Response) => {
+// API Xuất dữ liệu Database JSON trực tiếp (Yêu cầu xác thực Quản trị viên requireAdmin)
+app.get(['/api/database/export.json', '/database.json'], requireAdmin, (_req: Request, res: Response) => {
   const data = {
     app: 'Gia Long - FB',
     version: '1.0.4',

@@ -119,6 +119,16 @@
 
   <div id="toast" class="toast-msg"></div>
 
+  <!-- VIP ACTIVE FACEBOOK ACCOUNT DISPLAY -->
+  <div id="popupAccountBar" style="background: #081120; border: 1px solid #1e293b; padding: 5px 8px; border-radius: 6px; margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between; font-size: 10.5px;">
+    <div style="display: flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 320px;">
+      <span style="color: #64748b;">👤 Nick:</span>
+      <strong id="popupActiveAccountName" style="color: #38bdf8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Đang tải...</strong>
+      <span id="popupActiveAccountBadge" style="display: none; font-size: 9px; padding: 1px 4px; border-radius: 4px; font-weight: bold;"></span>
+    </div>
+    <button id="btnPopupDetectAccount" style="background: transparent; border: none; color: #38bdf8; font-size: 10px; cursor: pointer; text-decoration: underline; padding: 0; white-space: nowrap;" title="Quét tài khoản Facebook đang mở trên tab">Quét Nick ↗</button>
+  </div>
+
   <div class="tab-bar">
     <button class="tab-btn active" data-tab="tab-content">1. Bài Viết</button>
     <button class="tab-btn" data-tab="tab-groups">2. Nhóm</button>
@@ -239,6 +249,13 @@
         </label>
       </div>
 
+      <div class="toggle-row" style="margin-top: 4px;">
+        <label style="margin: 0; cursor: pointer; display: flex; align-items: center; gap: 6px;">
+          <input type="checkbox" id="autoJoinOnPostToggle" checked>
+          <span><strong>🤝 Tự vào nhóm:</strong> Bấm Tham gia nếu lúc đăng chưa vào nhóm</span>
+        </label>
+      </div>
+
       <div style="display: flex; gap: 4px; margin-top: 6px;">
         <button class="btn-sub btn-sub-amber" id="btnShuffleGroupsNow" style="flex: 1; justify-content: center;">🎲 Trộn</button>
         <button class="btn-sub btn-sub-primary" id="btnEditGroups" style="flex: 1; justify-content: center;">✏️ Sửa Link</button>
@@ -275,16 +292,26 @@
       </div>
 
       <div style="border-top: 1px solid #334155; padding-top: 8px;">
-        <label>Khung giờ hẹn đăng:</label>
+        <label>Khung giờ hẹn đăng &amp; gắn tài khoản FB:</label>
         <div class="time-tags" id="timeTagsContainer"></div>
 
         <div style="display: flex; gap: 4px; margin-top: 6px; align-items: center;">
-          <input type="time" id="newTimeInput" value="08:30" style="width: 135px !important; min-width: 130px !important; text-align: center; font-size: 13px; font-weight: 700; color: #ffffff; background: #0f172a; border: 1px solid #0284c7; border-radius: 6px; color-scheme: dark; padding: 4px 8px; box-sizing: border-box;">
+          <input type="time" id="newTimeInput" value="08:30" style="width: 110px !important; min-width: 105px !important; text-align: center; font-size: 12px; font-weight: 700; color: #ffffff; background: #0f172a; border: 1px solid #0284c7; border-radius: 6px; color-scheme: dark; padding: 4px 6px; box-sizing: border-box;">
+          <select id="popupSchedAccountSelect" style="flex: 1; font-size: 10.5px; padding: 5px 6px;">
+            <option value="active">🔄 Nick đang chọn</option>
+          </select>
           <button class="btn-sub btn-sub-primary" id="btnAddTime">➕ Thêm</button>
-          <button class="btn-sub" id="btnResetGoldenHours">⭐ Giờ Vàng</button>
+          <button class="btn-sub" id="btnResetGoldenHours" title="Nạp 4 mốc giờ vàng">⭐</button>
         </div>
 
-        <div style="margin-top: 10px; background: #0f172a; padding: 7px; border-radius: 6px;">
+        <div class="toggle-row" style="margin-top: 6px;">
+          <label style="margin: 0; cursor: pointer; display: flex; align-items: center; gap: 6px;">
+            <input type="checkbox" id="popupSchedAutoSwitch" checked>
+            <span><strong>🔀 Tự chuyển trang cá nhân FB</strong> theo đúng khung giờ</span>
+          </label>
+        </div>
+
+        <div style="margin-top: 8px; background: #0f172a; padding: 7px; border-radius: 6px;">
           <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin: 0;">
             <input type="checkbox" id="enableScheduleAuto">
             <span><strong>Kích hoạt hẹn giờ tự động</strong> (Tới giờ Chrome tự chạy)</span>
@@ -317,11 +344,8 @@
             <option value="50000">&gt;= 50k TV</option>
           </select>
         </div>
-        <div style="display: flex; align-items: flex-end; padding-bottom: 3px;">
-          <label style="display: flex; align-items: center; gap: 4px; cursor: pointer; margin: 0; font-size: 10.5px;">
-            <input type="checkbox" id="popupFinderAutoJoin" style="accent-color: #0284c7;">
-            <span>Tự tham gia</span>
-          </label>
+        <div style="display: flex; align-items: flex-end; padding-bottom: 3px; font-size: 9.5px; color: #38bdf8;">
+          <span>🤝 Tự vào nhóm khi đăng bài</span>
         </div>
       </div>
 
@@ -353,11 +377,27 @@
   <div id="tab-history" class="tab-panel">
     <div class="card">
       <div class="card-title">
-        <span>📜 Lịch Sử Đăng Bài Gần Đây</span>
-        <button class="btn-sub btn-sub-danger" id="btnPopupClearHistory" style="padding: 2px 6px; font-size: 9.5px;">🗑️ Xóa</button>
+        <span>📜 Lịch Sử Theo Tài Khoản</span>
+        <div style="display: flex; gap: 4px;">
+          <button class="btn-sub btn-sub-emerald" id="btnPopupExportHistoryCsv" aria-label="Xuất lịch sử đăng bài ra file CSV" title="Xuất lịch sử ra file CSV" style="padding: 2px 6px; font-size: 9.5px;">📊 Xuất CSV</button>
+          <button class="btn-sub btn-sub-danger" id="btnPopupClearHistory" aria-label="Xóa toàn bộ lịch sử đăng bài" title="Xóa lịch sử đăng bài" style="padding: 2px 6px; font-size: 9.5px;">🗑️ Xóa</button>
+        </div>
       </div>
 
-      <div class="group-box" id="popupHistoryBox" style="max-height: 170px;">
+      <div style="display: flex; gap: 4px; margin-bottom: 6px;">
+        <select id="popupHistoryAccountFilter" aria-label="Lọc lịch sử theo nick Facebook" title="Lọc theo nick Facebook" style="flex: 1; padding: 4px 6px; font-size: 10px;">
+          <option value="all">👤 Tất cả nick FB</option>
+        </select>
+        <select id="popupHistoryStatusFilter" aria-label="Lọc lịch sử theo trạng thái" title="Lọc theo trạng thái đăng bài" style="width: 115px; padding: 4px 6px; font-size: 10px;">
+          <option value="all">📌 Mọi trạng thái</option>
+          <option value="success">✅ Thành công</option>
+          <option value="failed">❌ Thất bại</option>
+          <option value="uncertain">⚠️ Chưa rõ</option>
+          <option value="autoJoined">🤝 Tự vào nhóm</option>
+        </select>
+      </div>
+
+      <div class="group-box" id="popupHistoryBox" aria-live="polite" style="max-height: 170px;">
         <div style="text-align: center; color: #64748b; padding: 15px;">Chưa có lịch sử đăng bài.</div>
       </div>
     </div>
@@ -382,6 +422,9 @@
     © 2026 Gia Long - FB. Bản quyền thuộc về Giải pháp vận hành tự động.
   </div>
 
+  <script src="storage.js"></script>
+  <script src="spintax.js"></script>
+  <script src="accounts_manager.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

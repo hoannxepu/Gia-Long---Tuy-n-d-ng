@@ -1,63 +1,35 @@
 // background.js - Điều phối Đăng Bài Facebook & Hẹn Giờ Chuẩn 100% Manifest V3
 // Hỗ trợ: Dừng tức thì, Hẹn giờ chuẩn Alarms, Lịch sử đăng bài, Dò tìm & Tham gia nhóm, Giữ kết nối Web App
 
+try {
+  importScripts('storage.js');
+  importScripts('spintax.js');
+  importScripts('ed25519_verify.js');
+  importScripts('accounts_manager.js');
+  importScripts('fb_runner.js');
+  importScripts('alarms_manager.js');
+} catch (e) {
+  console.warn('[Background] importScripts notice:', e);
+}
+
 let isRunning = false;
 let shouldStop = false;
 let activeTabId = null;
-let keepAliveTimer = null;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// Ngủ có thể ngắt ngay lập tức khi bấm DỪNG (kiểm tra mỗi 100ms)
-async function interruptibleSleep(ms) {
-  const step = 100;
-  let elapsed = 0;
-  while (elapsed < ms) {
-    if (shouldStop) return;
-    await sleep(Math.min(step, ms - elapsed));
-    elapsed += step;
+// Chống ngủ Service Worker trong Manifest V3 thông qua Alarms chu kỳ 30s
+function startKeepAlive() {
+  if (typeof AlarmsManager !== 'undefined') {
+    AlarmsManager.startKeepAlive();
   }
 }
 
-// Chống ngủ Service Worker trong Manifest V3 & Tự động đồng bộ trạng thái duyệt đơn từ Admin
-let keepAliveCounter = 0;
-function startKeepAlive() {
-  stopKeepAlive();
-  keepAliveCounter = 0;
-  keepAliveTimer = setInterval(async () => {
-    chrome.runtime.getPlatformInfo(() => {});
-    keepAliveCounter++;
-    try {
-      // Định kỳ mỗi 5s kiểm tra bản quyền ngầm với Server
-      const licRes = await checkLicenseStatus(true);
-      if (!licRes.isValid || licRes.isRevoked) {
-        console.warn('[KeepAlive] 🚨 PHÁT HIỆN BẢN QUYỀN ĐÃ BỊ THU HỒI / NGẮT MÁY!');
-        shouldStop = true;
-        isRunning = false;
-        if (activeTabId) {
-          chrome.tabs.remove(activeTabId).catch(() => {});
-          activeTabId = null;
-        }
-        chrome.alarms.clearAll(() => {});
-        await updateStatus({
-          isRunning: false,
-          statusText: '🚨 BẢN QUYỀN ĐÃ BỊ THU HỒI / NGẮT MÁY! Toàn bộ tiến trình đã dừng.',
-        });
-        stopKeepAlive();
-        return;
-      }
-      // Đồng bộ đơn hàng
-      await fetchMyOrdersAndSync();
-    } catch (e) {}
-  }, 5000);
-}
-
 function stopKeepAlive() {
-  if (keepAliveTimer) {
-    clearInterval(keepAliveTimer);
-    keepAliveTimer = null;
+  if (typeof AlarmsManager !== 'undefined') {
+    AlarmsManager.stopKeepAlive();
   }
 }
 
@@ -68,18 +40,27 @@ async function updateStatus(status) {
   } catch (e) {}
 }
 
-// GHI LỊCH SỬ ĐĂNG BÀI
+// GHI LỊCH SỬ ĐĂNG BÀI (Đồng bộ qua FbRunner.appendHistoryEntry & SharedStorage mutex, giữ tối đa 1.000 bản ghi)
 async function addHistoryEntry(entry) {
   try {
-    const res = await chrome.storage.local.get(['postHistory']);
-    const history = res.postHistory || [];
+    if (typeof FbRunner !== 'undefined' && typeof FbRunner.appendHistoryEntry === 'function') {
+      await FbRunner.appendHistoryEntry(entry);
+      return;
+    }
+    const res = await chrome.storage.local.get(['postHistory', 'fbAccounts', 'activeAccountId']);
+    const history = Array.isArray(res.postHistory) ? res.postHistory : [];
+    const accounts = Array.isArray(res.fbAccounts) ? res.fbAccounts : [];
+    const activeAcc = accounts.find((a) => a.id === res.activeAccountId) || accounts[0] || null;
     const newEntry = {
-      id: 'hist_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+      id: 'hist_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
       timestamp: Date.now(),
       timeFormatted: new Date().toLocaleString('vi-VN'),
+      accountId: entry.accountId || (activeAcc ? activeAcc.id : 'default'),
+      accountName: entry.accountName || (activeAcc ? activeAcc.name : 'Tài khoản mặc định'),
+      cUser: entry.cUser || (activeAcc ? activeAcc.cUser || '' : ''),
       ...entry,
     };
-    const updated = [newEntry, ...history].slice(0, 150);
+    const updated = [newEntry, ...history].slice(0, 1000);
     await chrome.storage.local.set({ postHistory: updated });
     console.log('[AutoRecruit Background] Đã ghi lịch sử:', newEntry.status, newEntry.groupName);
   } catch (err) {
@@ -91,50 +72,26 @@ async function addHistoryEntry(entry) {
 // HỆ THỐNG QUẢN LÝ BẢN QUYỀN (LICENSE MANAGER)
 // Hỗ trợ cả Cá Nhân (1 máy) & Doanh Nghiệp (Team N máy)
 // ==========================================
-function generateHardwareFingerprint() {
-  try {
-    let str = '';
-    if (typeof navigator !== 'undefined') {
-      str += (navigator.userAgent || '') + '|';
-      str += (navigator.hardwareConcurrency || 4) + '|';
-      str += (navigator.language || 'vi-VN') + '|';
-      str += (navigator.platform || '') + '|';
-    }
-    try {
-      str += '|' + (Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Ho_Chi_Minh');
-    } catch (e) {}
-
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-      hash = ((hash << 5) - hash) + str.charCodeAt(i);
-      hash |= 0;
-    }
-    const shortHash = Math.abs(hash).toString(36).toUpperCase().padStart(6, '0').slice(-6);
-    const cpu = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) ? `${navigator.hardwareConcurrency}C` : 'PC';
-    return `GLFB-${cpu}-${shortHash}`;
-  } catch (e) {
-    return 'GLFB-PC-AUTO01';
-  }
-}
+const PRODUCTION_API_BASE = 'https://gia-long---tuy-n-d-ng.pages.dev';
 
 async function getOrCreateDeviceId() {
   try {
     const data = await chrome.storage.local.get(['autorecruit_device_id']);
-    if (data.autorecruit_device_id && data.autorecruit_device_id !== 'Đang lấy...' && !data.autorecruit_device_id.includes('đang lấy')) {
+    if (data.autorecruit_device_id && data.autorecruit_device_id !== 'Đang lấy...' && !data.autorecruit_device_id.includes('đang lấy') && String(data.autorecruit_device_id).trim() !== '') {
       return data.autorecruit_device_id;
     }
 
     try {
       if (chrome.storage && chrome.storage.sync) {
         const syncData = await chrome.storage.sync.get(['autorecruit_device_id']);
-        if (syncData.autorecruit_device_id && syncData.autorecruit_device_id !== 'Đang lấy...' && !syncData.autorecruit_device_id.includes('đang lấy')) {
+        if (syncData.autorecruit_device_id && syncData.autorecruit_device_id !== 'Đang lấy...' && !syncData.autorecruit_device_id.includes('đang lấy') && String(syncData.autorecruit_device_id).trim() !== '') {
           await chrome.storage.local.set({ autorecruit_device_id: syncData.autorecruit_device_id });
           return syncData.autorecruit_device_id;
         }
       }
     } catch (e) {}
 
-    const newId = generateHardwareFingerprint();
+    const newId = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : ('dev_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 9));
     await chrome.storage.local.set({ autorecruit_device_id: newId });
     try {
       if (chrome.storage && chrome.storage.sync) {
@@ -143,125 +100,29 @@ async function getOrCreateDeviceId() {
     } catch (e) {}
     return newId;
   } catch (e) {
-    return 'dev_pc_' + Date.now().toString(36);
+    return (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : 'dev_pc_' + Date.now().toString(36);
   }
 }
 
 async function getApiBaseUrl() {
   try {
-    const data = await chrome.storage.local.get(['customApiServerUrl', 'webapp_last_url', 'lastSyncedFromUrl']);
-    if (data.customApiServerUrl && data.customApiServerUrl.trim()) {
+    const data = await chrome.storage.local.get(['customApiServerUrl']);
+    if (data.customApiServerUrl && String(data.customApiServerUrl).trim().startsWith('http')) {
       return data.customApiServerUrl.trim().replace(/\/+$/, '');
     }
-    const candidate = data.webapp_last_url || data.lastSyncedFromUrl;
-    if (candidate && candidate.startsWith('http')) {
-      const u = new URL(candidate);
-      return u.origin;
-    }
-    // Tự động phát hiện tab Web Quản Trị đang mở trong trình duyệt
-    if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.query) {
-      const tabs = await chrome.tabs.query({});
-      for (const tab of tabs) {
-        if (tab.url && tab.url.startsWith('http')) {
-          try {
-            const u = new URL(tab.url);
-            if (
-              u.hostname.includes('pages.dev') ||
-              u.hostname.includes('run.app') ||
-              u.hostname === 'localhost' ||
-              u.hostname === '127.0.0.1' ||
-              tab.title?.includes('AutoRecruit') ||
-              tab.title?.includes('Gia Long')
-            ) {
-              const detectedOrigin = u.origin;
-              chrome.storage.local.set({ customApiServerUrl: detectedOrigin, webapp_last_url: detectedOrigin });
-              return detectedOrigin;
-            }
-          } catch (e) {}
-        }
-      }
-    }
   } catch (e) {}
-  return 'https://gia-long---tuy-n-d-ng.pages.dev';
+  return PRODUCTION_API_BASE;
 }
 
-// Tự động quét và tổng hợp TẤT CẢ các máy chủ khả dụng
+function getCandidateServerUrls(primaryBase = null) {
+  if (primaryBase && primaryBase.startsWith('http')) {
+    return [primaryBase.trim().replace(/\/+$/, '')];
+  }
+  return [PRODUCTION_API_BASE];
+}
+
 async function getAllServerCandidates(primaryBase = null) {
-  const candidates = new Set();
-  if (primaryBase && primaryBase.startsWith('http')) {
-    candidates.add(primaryBase.trim().replace(/\/+$/, ''));
-  }
-
-  // 1. Quét các tab đang mở trong trình duyệt của người dùng
-  try {
-    if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.query) {
-      const tabs = await chrome.tabs.query({});
-      for (const tab of tabs) {
-        if (tab.url && tab.url.startsWith('http')) {
-          try {
-            const u = new URL(tab.url);
-            if (
-              u.hostname.includes('pages.dev') ||
-              u.hostname.includes('run.app') ||
-              u.hostname === 'localhost' ||
-              u.hostname === '127.0.0.1' ||
-              tab.title?.includes('AutoRecruit') ||
-              tab.title?.includes('Gia Long')
-            ) {
-              candidates.add(u.origin);
-            }
-          } catch (e) {}
-        }
-      }
-    }
-  } catch (e) {}
-
-  // 2. Lấy các URL đã lưu trong storage
-  try {
-    const data = await chrome.storage.local.get([
-      'customApiServerUrl',
-      'webapp_last_url',
-      'lastSyncedFromUrl',
-      'known_server_urls',
-    ]);
-    if (data.customApiServerUrl && data.customApiServerUrl.startsWith('http')) {
-      candidates.add(data.customApiServerUrl.trim().replace(/\/+$/, ''));
-    }
-    if (data.webapp_last_url && data.webapp_last_url.startsWith('http')) {
-      candidates.add(data.webapp_last_url.trim().replace(/\/+$/, ''));
-    }
-    if (data.lastSyncedFromUrl && data.lastSyncedFromUrl.startsWith('http')) {
-      candidates.add(data.lastSyncedFromUrl.trim().replace(/\/+$/, ''));
-    }
-    if (Array.isArray(data.known_server_urls)) {
-      data.known_server_urls.forEach((u) => {
-        if (u && u.startsWith('http')) candidates.add(u.trim().replace(/\/+$/, ''));
-      });
-    }
-  } catch (e) {}
-
-  // 3. Danh sách máy chủ dự phòng chính thức (Cloudflare Pages & Google Cloud Run)
-  candidates.add('https://gia-long---tuy-n-d-ng.pages.dev');
-  candidates.add('https://ais-dev-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app');
-  candidates.add('https://ais-pre-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app');
-  candidates.add('http://localhost:3000');
-  candidates.add('http://127.0.0.1:3000');
-
-  return Array.from(candidates).filter(Boolean);
-}
-
-function getCandidateServerUrls(primaryBase) {
-  const list = [];
-  if (primaryBase && primaryBase.startsWith('http')) {
-    list.push(primaryBase.trim().replace(/\/+$/, ''));
-  }
-  list.push('https://gia-long---tuy-n-d-ng.pages.dev');
-  list.push('https://ais-dev-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app');
-  list.push('https://ais-pre-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app');
-  list.push('http://localhost:3000');
-  list.push('http://127.0.0.1:3000');
-
-  return list.filter((v, i, a) => Boolean(v) && a.indexOf(v) === i);
+  return getCandidateServerUrls(primaryBase);
 }
 
 // ========================================================
@@ -386,6 +247,12 @@ async function checkServerBackground(machineId, token) {
             postJobState: 'REVOKED_STOPPED',
           });
           await chrome.storage.local.remove(['signedToken', 'licenseKey', 'licenseData', 'isVip', 'currentLicense', 'licenseInfo']);
+          if (typeof FbRunner !== 'undefined' && typeof FbRunner.stopBatchPosting === 'function') {
+            await FbRunner.stopBatchPosting();
+          }
+          if (typeof AlarmsManager !== 'undefined' && typeof AlarmsManager.stopKeepAlive === 'function') {
+            await AlarmsManager.stopKeepAlive();
+          }
           chrome.alarms.clearAll(() => {});
           shouldStop = true;
           isRunning = false;
@@ -666,6 +533,21 @@ async function checkLicenseStatus(forceRemote = false) {
     const lastChecked = data.lastCheckedAt || 0;
 
     if (token && data.licenseStatus === 'active' && expiresAt) {
+      // Xác minh chữ ký Ed25519 trước khi tin tưởng cache (chống sửa tay trong DevTools / storage)
+      if (typeof self !== 'undefined' && typeof self.verifyEd25519LicenseToken === 'function') {
+        const verifyRes = await self.verifyEd25519LicenseToken(token, deviceId, lastChecked);
+        if (!verifyRes.valid) {
+          console.warn('[Security] Chữ ký Token Ed25519 không hợp lệ hoặc đã bị sửa đổi:', verifyRes.error);
+          await chrome.storage.local.remove(['signedToken', 'licenseKey', 'licenseData', 'isVip', 'currentLicense', 'licenseInfo']);
+          return {
+            isValid: false,
+            isActivated: false,
+            message: verifyRes.error || 'Chữ ký bản quyền không hợp lệ (Dữ liệu đã bị sửa đổi)!',
+            license: null,
+          };
+        }
+      }
+
       const expMs = new Date(expiresAt).getTime();
       const isExpired = !isNaN(expMs) && expMs < now;
 
@@ -960,232 +842,134 @@ async function deactivateLicenseKey() {
   return { success: true, message: 'Đã hủy kích hoạt bản quyền trên máy này.' };
 }
 
-// ==========================================
-// 1. CHẾ ĐỘ HẸN GIỜ ĐĂNG BÀI TỰ ĐỘNG CHUẨN 100%
-// ==========================================
-function getNextOccurrenceTimestamp(timeStr) {
-  const [hours, minutes] = timeStr.split(':').map((n) => parseInt(n, 10));
-  const now = new Date();
-  const target = new Date();
-  target.setHours(hours, minutes, 0, 0);
-
-  if (target.getTime() <= now.getTime()) {
-    target.setDate(target.getDate() + 1);
-  }
-  return target.getTime();
+if (typeof self !== 'undefined') {
+  self.checkLicenseStatus = checkLicenseStatus;
 }
 
-async function handleSetSchedule(config) {
-  const licCheck = await checkLicenseStatus();
+// ==========================================
+// 1. CHẾ ĐỘ HẸN GIỜ ĐĂNG BÀI TỰ ĐỘNG THEO KHUNG GIỜ & TỰ CHUYỂN TÀI KHOẢN FACEBOOK
+// ==========================================
+async function handleSetSchedule(config = {}) {
+  const licCheck = await checkLicenseStatus(false);
   if (!licCheck.isValid) {
     console.warn('[AutoRecruit Background] Không thể hẹn giờ: Chưa kích hoạt bản quyền VIP!');
-    chrome.alarms.clearAll(() => {
-      chrome.storage.local.set({ isScheduleActive: false });
-    });
+    if (typeof AlarmsManager !== 'undefined') {
+      await AlarmsManager.syncScheduleAlarms([], false);
+    }
+    await chrome.storage.local.set({ isScheduleActive: false });
     return {
       success: false,
       message: `Chưa kích hoạt bản quyền VIP hoặc đã hết hạn (${licCheck.message}). Không thể kích hoạt hẹn giờ tự động!`,
     };
   }
 
-  return new Promise((resolve) => {
-    chrome.alarms.clearAll(() => {
-      const times = config.times || ['08:30', '11:30', '17:30', '20:00'];
-      chrome.storage.local.set({
-        isScheduleActive: true,
-        savedTimes: times,
-        scheduledTimes: times,
-        scheduleConfigPayload: config,
-      });
+  const existing = await chrome.storage.local.get(['scheduleSlots', 'savedTimes', 'scheduledTimes']);
+  const rawTimes = Array.isArray(config.times) && config.times.length > 0
+    ? config.times
+    : (existing.savedTimes || existing.scheduledTimes || ['08:30', '11:30', '17:30', '20:00']);
+  const rawSlots = Array.isArray(config.slots) && config.slots.length > 0
+    ? config.slots
+    : existing.scheduleSlots;
 
-      times.forEach((timeStr, idx) => {
-        const targetTime = getNextOccurrenceTimestamp(timeStr);
-        chrome.alarms.create(`autorecruit_alarm_${idx}_${timeStr.replace(':', '_')}`, {
-          when: targetTime,
-          periodInMinutes: 1440,
-        });
-        const diffMinutes = Math.round((targetTime - Date.now()) / 60000);
-        console.log(`[AutoRecruit Background] Đã hẹn giờ lúc ${timeStr} (sau khoảng ${diffMinutes} phút nữa).`);
-      });
-      resolve({ success: true, message: 'Đã kích hoạt hẹn giờ tự động thành công!' });
-    });
+  const normalizedSlots = (typeof SharedStorage !== 'undefined' && SharedStorage.normalizeScheduleSlots)
+    ? SharedStorage.normalizeScheduleSlots(rawSlots, rawTimes)
+    : rawTimes.map((t) => ({
+        id: `slot_${String(t).replace(':', '_')}`,
+        time: String(t),
+        enabled: true,
+        accountId: 'active',
+        accountName: 'Tài khoản đang chọn',
+        postId: 'selected',
+        autoSwitchAccount: true,
+        lastRunDate: null,
+      }));
+
+  const timesList = normalizedSlots.map((s) => s.time);
+
+  if (typeof SharedStorage !== 'undefined' && SharedStorage.patch) {
+    await SharedStorage.patch('scheduleSlots', () => normalizedSlots);
+    await SharedStorage.patch('savedTimes', () => timesList);
+  }
+
+  await chrome.storage.local.set({
+    isScheduleActive: true,
+    scheduleSlots: normalizedSlots,
+    savedTimes: timesList,
+    scheduledTimes: timesList,
+    scheduleConfigPayload: config,
   });
+
+  if (typeof AlarmsManager !== 'undefined') {
+    await AlarmsManager.initAlarms();
+    await AlarmsManager.syncScheduleAlarms(normalizedSlots, true);
+  }
+
+  console.log('[AutoRecruit Background] ✓ Đã kích hoạt hẹn giờ theo khung giờ & tài khoản:', normalizedSlots);
+  return {
+    success: true,
+    slots: normalizedSlots,
+    times: timesList,
+    message: 'Đã kích hoạt hẹn giờ tự động theo khung giờ thành công!',
+  };
 }
 
-// BỘ LẮNG NGHE ALARMS: TỰ ĐỘNG CHẠY KHI ĐẾN GIỜ (KHI CHROME ĐANG MỞ)
+// BỘ LẮNG NGHE ALARMS: ĐIỀU PHỐI QUA ALARMS MANAGER (HỖ TRỢ TỰ CHUYỂN TÀI KHOẢN FB & ĐỦ 3 BIẾN THỂ)
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   console.log('[AutoRecruit Background] ⏰ ALARM KÍCH HOẠT:', alarm.name);
-
-  if (!alarm.name.startsWith('autorecruit_alarm_')) return;
-
-  const storage = await chrome.storage.local.get([
-    'isScheduleActive',
-    'savedPosts',
-    'savedGroups',
-    'selectedPostIdx',
-    'delaySec',
-    'enableSpintax',
-    'shouldShuffleGroups',
-  ]);
-
-  if (!storage.isScheduleActive) {
-    console.log('[AutoRecruit Background] Hẹn giờ đang tắt, bỏ qua.');
-    return;
+  if (typeof AlarmsManager !== 'undefined') {
+    await AlarmsManager.handleAlarmTrigger(alarm);
   }
-
-  // KIỂM TRA BẢN QUYỀN NGAY KHI TỚI GIỜ HẸN (BẢO ĐẢM NẾU CHƯA MUA HOẶC HẾT HẠN LÀ TUYỆT ĐỐI KHÔNG CHẠY!)
-  const licCheck = await checkLicenseStatus(true);
-  if (!licCheck.isValid) {
-    const errorText = `🚨 HẸN GIỜ ĐÃ BỊ HỦY: ${licCheck.message || 'Chưa kích hoạt bản quyền VIP hoặc đã hết hạn'}`;
-    console.warn('[AutoRecruit Background]', errorText);
-    chrome.alarms.clearAll(() => {
-      chrome.storage.local.set({ isScheduleActive: false });
-    });
-    await updateStatus({
-      isRunning: false,
-      currentIndex: 0,
-      totalGroups: 0,
-      statusText: errorText,
-    });
-    await addHistoryEntry({
-      groupName: 'Hệ Thống Bản Quyền',
-      groupLink: '',
-      postTitle: 'Hẹn Giờ Tự Động',
-      status: 'failed',
-      type: 'scheduled',
-      message: `🚨 ${errorText}. Không thể thực hiện đăng bài khi chưa kích hoạt bản quyền!`,
-    });
-    return;
-  }
-
-  if (isRunning) {
-    console.warn('[AutoRecruit Background] Đang có tiến trình chạy, bỏ qua lần hẹn giờ này.');
-    addHistoryEntry({
-      groupName: 'Hẹn Giờ Tự Động',
-      groupLink: '#',
-      postTitle: 'Bỏ qua',
-      status: 'failed',
-      type: 'scheduled',
-      message: 'Bị trùng do đang có tiến trình đăng dở.',
-    });
-    return;
-  }
-
-  let posts = storage.savedPosts || [];
-  let groups = (storage.savedGroups || []).filter((g) => g.enabled !== false);
-  const selectedIdx = storage.selectedPostIdx || 0;
-  let targetPost = posts[selectedIdx] || posts[0];
-
-  // Nếu chưa có trong storage, tải từ preloaded_data.json
-  if (!posts.length || !groups.length) {
-    try {
-      const preloaded = await fetch(chrome.runtime.getURL('preloaded_data.json')).then((r) => r.json()).catch(() => null);
-      if (preloaded) {
-        if (!posts.length && preloaded.posts?.length) posts = preloaded.posts;
-        if (!groups.length && preloaded.groups?.length) groups = preloaded.groups.filter((g) => g.enabled !== false);
-        targetPost = posts[0];
-      }
-    } catch (e) {}
-  }
-
-  if (!groups.length) {
-    console.warn('[AutoRecruit Background] Không có nhóm nào được chọn!');
-    return;
-  }
-
-  if (!targetPost || !targetPost.content) {
-    console.warn('[AutoRecruit Background] Không có nội dung bài viết!');
-    return;
-  }
-
-  // KIỂM TRA TÀI KHOẢN CÓ ĐANG TRONG THỜI GIAN NGHỈ NGƠI CHỐNG CHECKPOINT KHÔNG
-  const alertCheck = await chrome.storage.local.get(['fbSpamWarningAlert']);
-  if (alertCheck.fbSpamWarningAlert && alertCheck.fbSpamWarningAlert.isBlocked) {
-    const detectedAt = new Date(alertCheck.fbSpamWarningAlert.detectedAt).getTime();
-    const cooldownMs = 4 * 60 * 60 * 1000; // 4 tiếng nghỉ ngơi an toàn
-    if (Date.now() - detectedAt < cooldownMs) {
-      const remainingHours = Math.ceil((cooldownMs - (Date.now() - detectedAt)) / (60 * 60 * 1000));
-      console.warn(`[AutoRecruit Background] 🚨 Tài khoản đang trong thời gian nghỉ ngơi chống checkpoint (${remainingHours}h còn lại). Bỏ qua ca hẹn giờ.`);
-      await addHistoryEntry({
-        groupName: 'Hẹn Giờ Tự Động',
-        groupLink: '#',
-        postTitle: targetPost?.title || 'Bài Tuyển Dụng',
-        status: 'failed',
-        type: 'scheduled',
-        message: `🛡️ Tự động tạm hoãn đăng bài: Tài khoản đang trong thời gian nghỉ ngơi chống giới hạn Facebook (còn ~${remainingHours} tiếng).`,
-      });
-      return;
-    }
-  }
-
-  console.log(`[AutoRecruit Background] 🚀 TỰ ĐỘNG CHẠY HẸN GIỜ: ${groups.length} nhóm!`);
-
-  isRunning = true;
-  shouldStop = false;
-  startKeepAlive();
-
-  const postVariants = [
-    targetPost.content || '',
-    (targetPost.content || '') + '\u200B\u200C',
-    (targetPost.content || '') + '\uFEFF\u200D',
-  ];
-
-  runBatchPosting(
-    groups,
-    targetPost.content,
-    targetPost.images || [],
-    storage.enableSpintax !== undefined ? storage.enableSpintax : true,
-    storage.delaySec || 25,
-    storage.shouldShuffleGroups !== undefined ? storage.shouldShuffleGroups : true,
-    'scheduled',
-    targetPost.title || 'Bài Tuyển Dụng',
-    postVariants
-  )
-    .then(() => {
-      isRunning = false;
-      activeTabId = null;
-      stopKeepAlive();
-    })
-    .catch((err) => {
-      console.error('[AutoRecruit Background] Lỗi hẹn giờ:', err);
-      isRunning = false;
-      activeTabId = null;
-      stopKeepAlive();
-    });
 });
 
 // TỰ ĐỘNG KHÔI PHỤC HẸN GIỜ KHI KHỞI ĐỘNG LẠI CHROME HOẶC MỞ MÁY TÍNH
 async function restoreScheduleOnBoot() {
   try {
-    const licCheck = await checkLicenseStatus();
+    const licCheck = await checkLicenseStatus(false);
     if (!licCheck.isValid) {
       console.log('[AutoRecruit Background] Bản quyền chưa kích hoạt -> Không khôi phục hẹn giờ.');
-      chrome.alarms.clearAll();
+      if (typeof AlarmsManager !== 'undefined') {
+        await AlarmsManager.syncScheduleAlarms([], false);
+      }
       await chrome.storage.local.set({ isScheduleActive: false });
       return;
     }
-    const data = await chrome.storage.local.get(['isScheduleActive', 'savedTimes', 'scheduledTimes', 'delaySec', 'enableSpintax']);
-    const times = data.savedTimes || data.scheduledTimes;
-    if (data.isScheduleActive && times && times.length > 0) {
-      handleSetSchedule({
-        times: times,
-        delaySec: data.delaySec || 25,
+    const data = await chrome.storage.local.get([
+      'isScheduleActive',
+      'scheduleSlots',
+      'savedTimes',
+      'scheduledTimes',
+      'delaySec',
+      'enableSpintax',
+    ]);
+    const times = data.savedTimes || data.scheduledTimes || [];
+    const slots = data.scheduleSlots || [];
+    if (data.isScheduleActive && (slots.length > 0 || times.length > 0)) {
+      await handleSetSchedule({
+        slots,
+        times,
+        delaySec: data.delaySec || 30,
         isSpintaxEnabled: data.enableSpintax !== false,
       });
-      console.log('[AutoRecruit Background] ✓ Đã tự động nạp lại các mốc hẹn giờ:', times);
+      console.log('[AutoRecruit Background] ✓ Đã tự động nạp lại các khung giờ hẹn đăng:', slots.length || times.length);
     }
   } catch (err) {
     console.warn('[AutoRecruit Background] Lỗi khôi phục hẹn giờ:', err);
   }
 }
 
-chrome.runtime.onStartup.addListener(() => {
-  console.log('[AutoRecruit Background] Chrome vừa khởi động -> Nạp lại lịch hẹn giờ...');
+chrome.runtime.onStartup.addListener(async () => {
+  console.log('[AutoRecruit Background] Chrome vừa khởi động -> Khởi tạo dữ liệu & khôi phục trạng thái...');
+  if (typeof SharedStorage !== 'undefined') await SharedStorage.runStorageMigrations();
+  if (typeof AlarmsManager !== 'undefined') await AlarmsManager.initAlarms();
+  if (typeof FbRunner !== 'undefined') await FbRunner.checkAndRecoverRunState();
   restoreScheduleOnBoot();
 });
 
-chrome.runtime.onInstalled.addListener(() => {
-  console.log('[AutoRecruit Background] Extension vừa nạp/cập nhật -> Kiểm tra lịch hẹn giờ...');
+chrome.runtime.onInstalled.addListener(async () => {
+  console.log('[AutoRecruit Background] Extension vừa nạp/cập nhật -> Chạy migration & nạp alarms...');
+  if (typeof SharedStorage !== 'undefined') await SharedStorage.runStorageMigrations();
+  if (typeof AlarmsManager !== 'undefined') await AlarmsManager.initAlarms();
+  if (typeof FbRunner !== 'undefined') await FbRunner.checkAndRecoverRunState();
   restoreScheduleOnBoot();
 });
 
@@ -1193,22 +977,18 @@ chrome.runtime.onInstalled.addListener(() => {
 // 2. LẮNG NGHE THÔNG ĐIỆP
 // ==========================================
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  // 1. BẮT ĐẦU ĐĂNG BÀI
+  // 1. BẮT ĐẦU ĐĂNG BÀI BỀN VỮNG
   if (request.action === 'START_BATCH_POSTING') {
-    if (isRunning) {
-      sendResponse({ success: false, message: 'Đang có một tiến trình đang chạy!' });
-      return true;
-    }
-
     const payload = request.payload || request;
     const groups = payload.groups || [];
     const content = payload.content || payload.postContent || '';
     const variants = payload.variants || [];
     const images = payload.images || [];
     const isSpintaxEnabled = payload.isSpintaxEnabled !== undefined ? payload.isSpintaxEnabled : true;
-    const delaySec = parseInt(payload.delaySec, 10) || 25;
-    const shouldShuffle = payload.shouldShuffle !== undefined ? payload.shouldShuffle : true;
+    const delaySec = parseInt(payload.delaySec, 10) || 30;
     const postTitle = payload.postTitle || 'Bài Tuyển Dụng';
+    const accountId = payload.accountId || null;
+    const accountName = payload.accountName || null;
 
     if (!groups.length) {
       sendResponse({ success: false, message: 'Danh sách nhóm trống!' });
@@ -1219,20 +999,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     checkLicenseStatus().then(async (licCheck) => {
       if (!licCheck.isValid) {
         const errorText = `🚨 BẢN QUYỀN CHƯA KÍCH HOẠT HOẶC ĐÃ HẾT HẠN: ${licCheck.message}`;
-        await updateStatus({
-          isRunning: false,
-          currentIndex: 0,
-          totalGroups: groups.length,
-          statusText: errorText,
-        });
-        await addHistoryEntry({
-          groupName: 'Hệ Thống Bản Quyền',
-          groupLink: '',
-          postTitle: postTitle,
-          status: 'failed',
-          type: 'manual',
-          message: errorText,
-        });
+        if (typeof FbRunner !== 'undefined') {
+          await FbRunner.appendHistoryEntry({
+            groupName: 'Hệ Thống Bản Quyền',
+            groupLink: '',
+            postTitle,
+            status: 'failed',
+            statusCode: 'LICENSE_INVALID',
+            message: errorText,
+          });
+        }
+        sendResponse({ success: false, message: errorText });
         return;
       }
 
@@ -1242,75 +1019,115 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         const trialPostsCount = trialData.trialPostsCount || 0;
         if (trialPostsCount >= 20) {
           const errorText = `🚨 ĐÃ HẾT HẠN MỨC DÙNG THỬ (20/20 BÀI ĐĂNG)!\n\nGói dùng thử 1 ngày đã hoàn thành tối đa 20 bài đăng. Vui lòng đặt mua Gói Bản Quyền Chính Thức để tiếp tục đăng không giới hạn!`;
-          await updateStatus({
-            isRunning: false,
-            currentIndex: 0,
-            totalGroups: groups.length,
-            statusText: '🎯 Đã đạt giới hạn 20 bài đăng của Gói Dùng Thử. Vui lòng nâng cấp bản quyền chính thức!',
-          });
-          await addHistoryEntry({
-            groupName: 'Gói Dùng Thử',
-            groupLink: '',
-            postTitle: postTitle,
-            status: 'failed',
-            type: 'manual',
-            message: errorText,
-          });
+          if (typeof FbRunner !== 'undefined') {
+            await FbRunner.appendHistoryEntry({
+              groupName: 'Gói Dùng Thử',
+              groupLink: '',
+              postTitle,
+              status: 'failed',
+              statusCode: 'TRIAL_LIMIT_REACHED',
+              message: errorText,
+            });
+          }
+          sendResponse({ success: false, message: errorText });
           return;
         }
       }
 
-      isRunning = true;
-      shouldStop = false;
-      startKeepAlive();
-
-      runBatchPosting(groups, content, images, isSpintaxEnabled, delaySec, shouldShuffle, 'manual', postTitle, variants)
-        .then(() => {
-          isRunning = false;
-          activeTabId = null;
-          stopKeepAlive();
-        })
-        .catch((err) => {
-          console.error('[AutoRecruit Background] Lỗi tiến trình:', err);
-          isRunning = false;
-          activeTabId = null;
-          stopKeepAlive();
-        });
+      try {
+        if (typeof FbRunner !== 'undefined') {
+          const startResult = await FbRunner.startBatchPosting({
+            groups,
+            content,
+            variants,
+            images,
+            isSpintaxEnabled,
+            delaySec,
+            postTitle,
+            accountId,
+            accountName,
+          });
+          sendResponse({ success: true, message: 'Đã bắt đầu tiến trình đăng bài bền vững!', runId: startResult.runId });
+        } else {
+          sendResponse({ success: false, message: 'FbRunner chưa được nạp' });
+        }
+      } catch (err) {
+        console.error('[AutoRecruit Background] Lỗi khởi chạy tiến trình:', err);
+        sendResponse({ success: false, message: err.message || 'Lỗi khởi chạy tiến trình' });
+      }
     });
 
-    sendResponse({ success: true, message: 'Đang kiểm tra bản quyền & bắt đầu tiến trình...' });
     return true;
   }
 
   // 2. DỪNG TIẾN TRÌNH LẬP TỨC
   if (request.action === 'STOP_BATCH_POSTING') {
     console.log('[AutoRecruit Background] Nhận lệnh DỪNG TIẾN TRÌNH!');
-    shouldStop = true;
-    isRunning = false;
-    stopKeepAlive();
-
-    if (activeTabId) {
-      chrome.tabs.remove(activeTabId).catch(() => {});
-      activeTabId = null;
+    if (typeof FbRunner !== 'undefined') {
+      FbRunner.stopBatchPosting()
+        .then((res) => sendResponse(res))
+        .catch((err) => sendResponse({ success: false, message: err.message }));
+    } else {
+      sendResponse({ success: true, message: 'Đã dừng' });
     }
+    return true;
+  }
 
-    updateStatus({
-      isRunning: false,
-      currentIndex: 0,
-      totalGroups: 0,
-      statusText: '⏹️ Đã dừng tiến trình theo yêu cầu của bạn.',
-    });
+  // 2.1 TRUY VẤN TRẠNG THÁI RUN STATE
+  if (request.action === 'GET_RUN_STATE') {
+    if (typeof FbRunner !== 'undefined') {
+      FbRunner.getRunState().then((state) => sendResponse({ success: true, state }));
+    } else {
+      sendResponse({ success: true, state: null });
+    }
+    return true;
+  }
 
-    addHistoryEntry({
-      groupName: 'Tiến trình đăng',
-      groupLink: '#',
-      postTitle: 'Tất cả bài',
-      status: 'stopped',
-      type: 'manual',
-      message: 'Người dùng bấm nút Dừng tức thì.',
-    });
+  // 2.2 QUẢN LÝ TÀI KHOẢN FACEBOOK
+  if (request.action === 'GET_FB_ACCOUNTS') {
+    if (typeof AccountsManager !== 'undefined') {
+      Promise.all([
+        AccountsManager.getAccounts(),
+        AccountsManager.getActiveAccount(),
+      ]).then(([accounts, active]) => {
+        sendResponse({ success: true, accounts, activeAccount: active });
+      }).catch((err) => sendResponse({ success: false, error: err.message }));
+    } else {
+      sendResponse({ success: false, error: 'AccountsManager chưa sẵn sàng' });
+    }
+    return true;
+  }
 
-    sendResponse({ success: true, message: 'Đã dừng ngay lập tức.' });
+  if (request.action === 'SET_ACTIVE_FB_ACCOUNT') {
+    if (typeof AccountsManager !== 'undefined') {
+      AccountsManager.setActiveAccount(request.accountId)
+        .then((res) => sendResponse(res))
+        .catch((err) => sendResponse({ success: false, error: err.message }));
+    } else {
+      sendResponse({ success: false, error: 'AccountsManager chưa sẵn sàng' });
+    }
+    return true;
+  }
+
+  if (request.action === 'DETECT_CURRENT_FB_ACCOUNT_FROM_TAB') {
+    if (typeof AccountsManager !== 'undefined') {
+      AccountsManager.detectCurrentAccountFromTab()
+        .then((res) => sendResponse(res))
+        .catch((err) => sendResponse({ success: false, error: err.message }));
+    } else {
+      sendResponse({ success: false, error: 'AccountsManager chưa sẵn sàng' });
+    }
+    return true;
+  }
+
+  if (request.action === 'REMOVE_FB_ACCOUNT') {
+    if (typeof AccountsManager !== 'undefined') {
+      AccountsManager.removeAccount(request.accountId)
+        .then((res) => sendResponse(res))
+        .catch((err) => sendResponse({ success: false, error: err.message }));
+    } else {
+      sendResponse({ success: false, error: 'AccountsManager chưa sẵn sàng' });
+    }
     return true;
   }
 
@@ -1324,10 +1141,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   // 4. Hủy hẹn giờ
   if (request.action === 'CANCEL_SCHEDULE') {
-    chrome.alarms.clearAll(() => {
+    const clearPromise = (typeof AlarmsManager !== 'undefined' && AlarmsManager.syncScheduleAlarms)
+      ? AlarmsManager.syncScheduleAlarms([], false)
+      : Promise.resolve();
+    clearPromise.then(() => {
       chrome.storage.local.set({ isScheduleActive: false });
+      sendResponse({ success: true });
     });
-    sendResponse({ success: true });
     return true;
   }
 
@@ -1359,6 +1179,23 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   // 5. Đồng bộ thời gian thực từ Web App (pages.dev)
   if (request.action === 'REALTIME_WEBAPP_SYNC' || request.action === 'SYNC_FROM_WEBAPP_PAGE') {
+    // Kiểm tra sender an toàn: chỉ nhận từ runtime nội bộ và domain production chính thức
+    const senderUrl = sender?.url || '';
+    const isAllowedSender = (!sender?.id || sender.id === chrome.runtime.id) &&
+      (!senderUrl || senderUrl.startsWith('https://gia-long---tuy-n-d-ng.pages.dev'));
+    if (!isAllowedSender) {
+      console.warn('[Background Security] Từ chối REALTIME_WEBAPP_SYNC từ nguồn lạ:', senderUrl);
+      sendResponse({ success: false, error: 'Nguồn gửi không được phép!' });
+      return true;
+    }
+
+    // Không được ghi đè bài viết / nhóm khi đang có tiến trình chạy bài
+    if (activeTabId !== null || isRunning) {
+      console.warn('[Background Security] Đang trong tiến trình đăng bài, hoãn đồng bộ bài viết/nhóm để tránh xung đột!');
+      sendResponse({ success: false, message: 'Đang chạy đăng bài, tạm thời không ghi đè!' });
+      return true;
+    }
+
     const { posts, groups, settings, activePost, url, googleDriveWebhookUrl } = request.payload || {};
     if (posts && posts.length) {
       const targetPost = activePost || posts.find((p) => p.status === 'active') || posts[0];
@@ -1380,7 +1217,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         toSet.googleDriveSheetWebhookUrl = gdriveUrl.trim();
       }
       chrome.storage.local.set(toSet);
-      console.log('[AutoRecruit Background] ✓ Đã nhận dữ liệu đồng bộ từ Web App & Google Drive Webhook');
+      console.log('[AutoRecruit Background] ✓ Đã nhận dữ liệu đồng bộ an toàn từ Web App');
     }
     sendResponse({ success: true });
     return true;
@@ -1905,52 +1742,54 @@ async function runBatchPosting(
   });
 }
 
-// DÒ TÌM NHÓM FACEBOOK THEO TỪ KHÓA
-async function handleSearchGroups({ keyword, minMembers = 0, autoJoin = false }) {
+// DÒ TÌM NHÓM FACEBOOK THEO TỪ KHÓA (Không bấm Tham gia hàng loạt trên trang tìm kiếm, đóng tab an toàn bằng await)
+async function handleSearchGroups({ keyword, minMembers = 0 }) {
   if (!keyword) throw new Error('Vui lòng nhập từ khóa tìm kiếm nhóm!');
 
   // Sử dụng đường dẫn tìm kiếm chuẩn của Facebook: https://www.facebook.com/search/groups/?q=...
   const searchUrl = `https://www.facebook.com/search/groups/?q=${encodeURIComponent(keyword)}`;
   const tab = await chrome.tabs.create({ url: searchUrl, active: true });
 
-  // Chờ nạp trang
-  for (let wait = 0; wait < 12; wait++) {
-    try {
-      const t = await chrome.tabs.get(tab.id);
-      if (t.status === 'complete') break;
-    } catch (e) {}
-    await sleep(1000);
-  }
-  await sleep(3500);
+  try {
+    // Chờ nạp trang
+    for (let wait = 0; wait < 12; wait++) {
+      try {
+        const t = await chrome.tabs.get(tab.id);
+        if (t.status === 'complete') break;
+      } catch (e) {}
+      await sleep(1000);
+    }
+    await sleep(3500);
 
-  let response = null;
-  for (let r = 0; r < 5; r++) {
-    try {
-      response = await chrome.tabs.sendMessage(tab.id, {
-        action: 'SCAN_AND_PARSE_GROUPS',
-        minMembers: parseInt(minMembers, 10) || 0,
-        autoJoin: !!autoJoin,
-      });
-      if (response && response.groups) break;
-    } catch (err) {
-      console.log(`[AutoRecruit Background] Đợi content script nạp trang tìm kiếm (lần ${r + 1}/5)...`);
-      if (r === 2) {
-        try {
-          await chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            files: ['content.js'],
-          });
-        } catch (injErr) {}
+    let response = null;
+    for (let r = 0; r < 5; r++) {
+      try {
+        response = await chrome.tabs.sendMessage(tab.id, {
+          action: 'SCAN_AND_PARSE_GROUPS',
+          minMembers: parseInt(minMembers, 10) || 0,
+        });
+        if (response && response.groups) break;
+      } catch (err) {
+        console.log(`[AutoRecruit Background] Đợi content script nạp trang tìm kiếm (lần ${r + 1}/5)...`);
+        if (r === 2) {
+          try {
+            await chrome.scripting.executeScript({
+              target: { tabId: tab.id },
+              files: ['content.js'],
+            });
+          } catch (injErr) {}
+        }
+        await sleep(2000);
       }
-      await sleep(2000);
+    }
+
+    await sleep(1000);
+    return response || { success: true, groups: [] };
+  } finally {
+    if (tab?.id) {
+      await chrome.tabs.remove(tab.id).catch(() => {});
     }
   }
-
-  setTimeout(() => {
-    if (tab?.id) chrome.tabs.remove(tab.id).catch(() => {});
-  }, 3000);
-
-  return response || { success: true, groups: [] };
 }
 
 // TỰ ĐỘNG THAM GIA CÁC NHÓM ĐÃ CHỌN VÀ THÊM VÀO DANH SÁCH ĐĂNG BÀI

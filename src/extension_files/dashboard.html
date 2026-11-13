@@ -183,6 +183,7 @@
       <div class="nav-tabs">
         <button class="nav-tab-btn active" id="tabNavMain">Bảng Điều Khiển</button>
         <button class="nav-tab-btn" id="tabNavFinder">Dò Tìm Nhóm</button>
+        <button class="nav-tab-btn" id="tabNavAccounts">Tài Khoản FB</button>
         <button class="nav-tab-btn" id="tabNavHistory">Lịch Sử Đăng Bài</button>
         <button class="nav-tab-btn" id="tabNavLicense">Bản Quyền & Gia Hạn</button>
       </div>
@@ -245,16 +246,18 @@
 
         <div>
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; flex-wrap: wrap; gap: 4px;">
-            <label style="margin: 0; font-weight: 700;">Nội dung tuyển dụng:</label>
-            <span style="font-size: 10.5px; background: rgba(16, 185, 129, 0.15); color: #34d399; padding: 2px 7px; border-radius: 4px; border: 1px solid rgba(16, 185, 129, 0.3); font-weight: 700;">
-              🛡️ Biến Thể Tự Động (Chống Trùng Lặp FB)
-            </span>
+            <label style="margin: 0; font-weight: 700;">Nội dung tuyển dụng (3 Biến Thể):</label>
+            <div style="display: inline-flex; gap: 4px;">
+              <button type="button" class="btn btn-primary" id="btnVariant1" style="padding: 2px 8px; font-size: 10.5px;">Biến thể 1</button>
+              <button type="button" class="btn btn-sub" id="btnVariant2" style="padding: 2px 8px; font-size: 10.5px;">Biến thể 2</button>
+              <button type="button" class="btn btn-sub" id="btnVariant3" style="padding: 2px 8px; font-size: 10.5px;">Biến thể 3</button>
+            </div>
           </div>
 
-          <textarea id="postContent" placeholder="Nhập nội dung tuyển dụng của bạn..." style="height: 120px;"></textarea>
+          <textarea id="postContent" placeholder="Nhập nội dung tuyển dụng của bạn (hỗ trợ Spintax {A|B|C})..." style="height: 120px;"></textarea>
           
           <div style="font-size: 10.5px; color: #94a3b8; margin-top: 4px; line-height: 1.4;">
-            💡 <em>Hệ thống tự động tối ưu mã chống quét trùng lặp khi đăng từng nhóm. Giữ nguyên 100% nội dung chính, giúp người xem nắm trúng trọng tâm bài tuyển dụng.</em>
+            💡 <em>Bạn có thể soạn tối đa 3 biến thể nội dung khác nhau và dùng Spintax <code>{A|B|C}</code> để xoay vòng tự nhiên giữa các nhóm.</em>
           </div>
         </div>
 
@@ -353,16 +356,17 @@
         <div>
           <label>Giãn cách nghỉ an toàn giữa 2 nhóm:</label>
           <div style="display: flex; align-items: center; gap: 6px;">
-            <input type="number" id="delayInput" value="45" min="25" max="300" style="width: 65px; text-align: center;" />
-            <span style="font-size: 11.5px; color: #94a3b8;">giây (Khuyến cáo: &gt;30s, tối ưu 35s - 55s chống chặn spam)</span>
+            <input type="number" id="delayInput" value="45" min="30" max="300" style="width: 65px; text-align: center;" />
+            <span style="font-size: 11.5px; color: #94a3b8;">giây (Khuyến cáo: &gt;=30s + Jitter 5-15s chống giới hạn tần suất)</span>
           </div>
-          <div style="margin-top: 5px; font-size: 10.5px; color: #10b981; background: #064e3b33; padding: 4px 8px; border-radius: 6px; border: 1px solid #05966944;">
-            🛡️ <strong>Anti-Spam Shield:</strong> Tự biến thiên mã băm ảnh, chèn salt vô hình và ngắt khẩn cấp khi Facebook giới hạn tần suất.
-          </div>
+          <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin-top: 6px;">
+            <input type="checkbox" id="dashAutoJoinOnPostToggle" checked style="width: 15px; height: 15px; accent-color: #0284c7; cursor: pointer;" />
+            <span style="font-size: 11.5px; color: #38bdf8;"><strong>🤝 Tự vào nhóm khi đăng:</strong> Tự bấm Tham gia nếu phát hiện chưa vào nhóm</span>
+          </label>
         </div>
 
         <div style="border-top: 1px solid #1e293b; padding-top: 10px;">
-          <label>Khung Giờ Hẹn Đăng Tự Động (Khi Chrome đang bật):</label>
+          <label>Khung Giờ Hẹn Đăng &amp; Phân Công Tài Khoản Facebook:</label>
           <div class="time-tags" id="timeTagsContainer"></div>
           
           <!-- Mẫu nhập Giờ : Phút chuẩn hóa: Số to, rõ ràng, tương phản cao, không bị che cắt -->
@@ -408,12 +412,30 @@
               title="Hoặc bấm chọn giờ chuẩn từ đồng hồ"
             />
 
-            <button class="btn btn-primary" id="btnAddTime" style="padding: 8px 14px; font-size: 12px; font-weight: 800; height: 38px;">➕ Thêm</button>
+            <button class="btn btn-primary" id="btnAddTime" style="padding: 8px 14px; font-size: 12px; font-weight: 800; height: 38px;">➕ Thêm Khung</button>
             <button class="btn btn-sub" id="btnGoldenHours" style="padding: 8px 12px; font-size: 11.5px; height: 38px;">⭐ Giờ Vàng</button>
           </div>
-          <div style="font-size: 10.5px; color: #94a3b8; margin-top: 4px;">
-            💡 <em>Gõ trực tiếp số vào ô (VD: 08 : 30) hoặc bấm đồng hồ để chọn &rarr; Bấm <strong>"+ Thêm"</strong>.</em>
+
+          <!-- Chọn tài khoản Facebook & bài viết cho khung giờ sắp thêm -->
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 8px;">
+            <div>
+              <label style="font-size: 10.5px; color: #94a3b8;">Nick FB cho khung giờ:</label>
+              <select id="schedAccountSelect" style="font-size: 11px; padding: 5px 8px;">
+                <option value="active">🔄 Tài khoản đang chọn</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size: 10.5px; color: #94a3b8;">Bài viết cho khung giờ:</label>
+              <select id="schedPostSelect" style="font-size: 11px; padding: 5px 8px;">
+                <option value="selected">📝 Bài viết đang chọn</option>
+              </select>
+            </div>
           </div>
+
+          <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin-top: 6px;">
+            <input type="checkbox" id="schedAutoSwitchToggle" checked style="width: 15px; height: 15px; accent-color: #0284c7; cursor: pointer;" />
+            <span style="font-size: 11px; color: #cbd5e1;">🔀 <strong>Tự chuyển trang cá nhân FB</strong> theo tài khoản gắn với khung giờ</span>
+          </label>
 
           <!-- Ô tick chọn cập nhật & hiển thị trạng thái đã cập nhật hẹn giờ -->
           <div style="margin-top: 10px; background: #0a0f1d; padding: 8px 10px; border-radius: 8px; border: 1px solid #22324f; display: flex; flex-direction: column; gap: 6px;">
@@ -520,18 +542,72 @@
       </div>
     </div>
 
-    <!-- VIEW 3: LỊCH SỬ ĐĂNG BÀI -->
-    <div id="viewHistory" class="card" style="display: none;">
+    <!-- VIEW 2.5: QUẢN LÝ TÀI KHOẢN FACEBOOK -->
+    <div id="viewAccounts" class="card" style="display: none;">
       <div class="card-header">
         <div>
-          <span class="card-title">📜 Nhật Ký & Lịch Sử Đăng Bài</span>
+          <span class="card-title">👥 Quản Lý Tài Khoản Facebook (Multi-Account)</span>
           <p style="font-size: 11px; color: #94a3b8; margin-top: 2px;">
-            Ghi nhận kết quả đăng bài (Thủ công & Hẹn giờ tự động) để theo dõi và kiểm soát.
+            Quản lý các tài khoản Facebook, nhận diện tự động từ trình duyệt và theo dõi trạng thái Cooldown độc lập của từng nick.
           </p>
         </div>
-        <div style="display: flex; gap: 6px;">
+        <div style="display: flex; gap: 8px;">
+          <button class="btn btn-primary" id="btnDetectCurrentAccount">🔍 Quét &amp; Nhận Diện Nick FB Hiện Tại</button>
+        </div>
+      </div>
+
+      <div style="margin-bottom: 14px; background: rgba(2, 132, 199, 0.1); border: 1px solid rgba(56, 189, 248, 0.25); padding: 10px 14px; border-radius: 8px; font-size: 12px; color: #bae6fd; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span>👤 Nick đang chọn để đăng:</span>
+          <strong id="activeAccountNameLabel" style="color: #38bdf8;">Chưa chọn tài khoản</strong>
+        </div>
+        <span id="activeAccountCooldownLabel" style="font-size: 11.5px; color: #34d399;">✓ Trạng thái: Sẵn sàng</span>
+      </div>
+
+      <div id="accountsListContainer" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px;">
+        <!-- Danh sách tài khoản sẽ render động qua JS -->
+      </div>
+    </div>
+
+    <!-- VIEW 3: LỊCH SỬ ĐĂNG BÀI -->
+    <div id="viewHistory" class="card" style="display: none;">
+      <div class="card-header" style="flex-wrap: wrap; gap: 10px;">
+        <div>
+          <span class="card-title">📜 Nhật Ký &amp; Lịch Sử Đăng Bài Theo Tài Khoản</span>
+          <p style="font-size: 11px; color: #94a3b8; margin-top: 2px;">
+            Ghi nhận kết quả đăng bài theo từng nick Facebook (Thủ công &amp; Hẹn giờ tự động), lọc theo tài khoản và xuất báo cáo CSV.
+          </p>
+        </div>
+        <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+          <button class="btn btn-sub" id="btnExportHistoryCsv" style="background: rgba(16, 185, 129, 0.15); border-color: rgba(16, 185, 129, 0.4); color: #34d399;">📊 Xuất Excel (CSV)</button>
           <button class="btn btn-sub" id="btnExportHistory">📥 Xuất File JSON</button>
           <button class="btn btn-danger" id="btnClearHistory">🗑️ Xóa Lịch Sử</button>
+        </div>
+      </div>
+
+      <!-- THANH BỘ LỌC LỊCH SỬ THEO TÀI KHOẢN & TRẠNG THÁI -->
+      <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; margin-bottom: 10px; padding: 10px 12px; background: #0f172a; border: 1px solid #1e293b; border-radius: 8px;">
+        <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; flex: 1;">
+          <select id="historyFilterAccount" aria-label="Lọc lịch sử theo tài khoản Facebook" title="Lọc theo tài khoản Facebook" style="width: auto; min-width: 190px; padding: 6px 10px; font-size: 11.5px;">
+            <option value="all">👤 Tất cả tài khoản FB</option>
+          </select>
+          <select id="historyFilterStatus" aria-label="Lọc lịch sử theo trạng thái đăng bài" title="Lọc theo trạng thái đăng bài" style="width: auto; min-width: 150px; padding: 6px 10px; font-size: 11.5px;">
+            <option value="all">📌 Mọi trạng thái</option>
+            <option value="success">✅ Thành công</option>
+            <option value="failed">❌ Thất bại</option>
+            <option value="uncertain">⚠️ Chưa rõ (Uncertain)</option>
+            <option value="stopped">⏹️ Đã dừng</option>
+            <option value="autoJoined">🤝 Đã tự vào nhóm</option>
+          </select>
+          <select id="historyFilterType" aria-label="Lọc lịch sử theo loại chạy" title="Lọc theo loại chạy thủ công hoặc hẹn giờ" style="width: auto; min-width: 140px; padding: 6px 10px; font-size: 11.5px;">
+            <option value="all">🔄 Mọi loại chạy</option>
+            <option value="manual">⚡ Thủ công</option>
+            <option value="scheduled">⏰ Hẹn giờ</option>
+          </select>
+          <input type="text" id="historySearchInput" aria-label="Tìm kiếm trong lịch sử đăng bài" placeholder="🔍 Tìm tên nhóm, bài viết, nick, chi tiết..." style="width: auto; min-width: 220px; flex: 1; padding: 6px 10px; font-size: 11.5px;" />
+        </div>
+        <div id="historyStatsSummary" aria-live="polite" style="font-size: 11px; color: #94a3b8; font-weight: 600;">
+          Tổng: 0 bản ghi
         </div>
       </div>
 
@@ -541,6 +617,7 @@
             <tr>
               <th>Thời Gian</th>
               <th>Loại</th>
+              <th>Tài Khoản FB</th>
               <th>Nhóm Nhận Bài</th>
               <th>Bài Viết</th>
               <th>Trạng Thái</th>
@@ -577,7 +654,7 @@
             <div>
               <div style="display: flex; align-items: center; gap: 8px;">
                 <h3 style="margin: 0; font-size: 15px; font-weight: 800; color: #ffffff;">THÔNG TIN BẢN QUYỀN MÁY TÍNH</h3>
-                <span id="licBadgeStatus" class="badge-success" style="font-size: 11px; padding: 2px 9px; border-radius: 999px;">Đang kiểm tra...</span>
+                <span id="licBadgeStatusCard" class="badge-success" style="font-size: 11px; padding: 2px 9px; border-radius: 999px;">Đang kiểm tra...</span>
               </div>
               <p style="margin: 2px 0 0 0; font-size: 11px; color: #94a3b8;">Đồng bộ trực tuyến 100% với máy chủ Quản trị viên</p>
             </div>
@@ -1430,6 +1507,9 @@
     </div>
   </footer>
 
+  <script src="storage.js"></script>
+  <script src="spintax.js"></script>
+  <script src="accounts_manager.js"></script>
   <script src="dashboard.js"></script>
 </body>
 </html>

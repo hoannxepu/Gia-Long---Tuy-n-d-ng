@@ -4,6 +4,7 @@
 let posts = [];
 let groups = [];
 let scheduledTimes = ['08:30', '11:30', '17:30', '20:00'];
+let scheduleSlots = [];
 let selectedPostIdx = 0;
 let currentVariantTab = 1;
 let autoSaveTimer = null;
@@ -13,29 +14,10 @@ let scannedGroupsTemp = [];
 let cachedDeviceId = '';
 
 function generateHardwareFingerprint() {
-  try {
-    let str = '';
-    if (typeof navigator !== 'undefined') {
-      str += (navigator.userAgent || '') + '|';
-      str += (navigator.hardwareConcurrency || 4) + '|';
-      str += (navigator.language || 'vi-VN') + '|';
-      str += (navigator.platform || '') + '|';
-    }
-    try {
-      str += '|' + (Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Ho_Chi_Minh');
-    } catch (e) {}
-
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-      hash = ((hash << 5) - hash) + str.charCodeAt(i);
-      hash |= 0;
-    }
-    const shortHash = Math.abs(hash).toString(36).toUpperCase().padStart(6, '0').slice(-6);
-    const cpu = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) ? `${navigator.hardwareConcurrency}C` : 'PC';
-    return `GLFB-${cpu}-${shortHash}`;
-  } catch (e) {
-    return 'GLFB-PC-AUTO01';
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
   }
+  return 'dev_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 8);
 }
 
 function updateDeviceDomElements(id) {
@@ -103,16 +85,18 @@ document.addEventListener('DOMContentLoaded', () => {
   // Navigation Tabs
   const tabNavMain = document.getElementById('tabNavMain');
   const tabNavFinder = document.getElementById('tabNavFinder');
+  const tabNavAccounts = document.getElementById('tabNavAccounts');
   const tabNavHistory = document.getElementById('tabNavHistory');
   const tabNavLicense = document.getElementById('tabNavLicense');
   const viewMain = document.getElementById('viewMain');
   const viewFinder = document.getElementById('viewFinder');
+  const viewAccounts = document.getElementById('viewAccounts');
   const viewHistory = document.getElementById('viewHistory');
   const viewLicense = document.getElementById('viewLicense');
 
   function switchTab(target) {
-    [tabNavMain, tabNavFinder, tabNavHistory, tabNavLicense].forEach((b) => b?.classList.remove('active'));
-    [viewMain, viewFinder, viewHistory, viewLicense].forEach((v) => { if (v) v.style.display = 'none'; });
+    [tabNavMain, tabNavFinder, tabNavAccounts, tabNavHistory, tabNavLicense].forEach((b) => b?.classList.remove('active'));
+    [viewMain, viewFinder, viewAccounts, viewHistory, viewLicense].forEach((v) => { if (v) v.style.display = 'none'; });
 
     if (target === 'main') {
       tabNavMain?.classList.add('active');
@@ -120,6 +104,10 @@ document.addEventListener('DOMContentLoaded', () => {
     } else if (target === 'finder') {
       tabNavFinder?.classList.add('active');
       if (viewFinder) viewFinder.style.display = 'flex';
+    } else if (target === 'accounts') {
+      tabNavAccounts?.classList.add('active');
+      if (viewAccounts) viewAccounts.style.display = 'block';
+      renderAccountsList();
     } else if (target === 'history') {
       tabNavHistory?.classList.add('active');
       if (viewHistory) viewHistory.style.display = 'flex';
@@ -133,6 +121,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   tabNavMain?.addEventListener('click', () => switchTab('main'));
   tabNavFinder?.addEventListener('click', () => switchTab('finder'));
+  tabNavAccounts?.addEventListener('click', () => switchTab('accounts'));
   tabNavHistory?.addEventListener('click', () => switchTab('history'));
   tabNavLicense?.addEventListener('click', () => switchTab('license'));
 
@@ -169,12 +158,21 @@ document.addEventListener('DOMContentLoaded', () => {
   const bulkLinksInput = document.getElementById('bulkLinksInput');
   const btnSaveBulkLinks = document.getElementById('btnSaveBulkLinks');
 
-  // Elements Cột 3 (Hẹn giờ)
+  // Elements Cột 1 (3 Biến thể)
+  const btnVariant1 = document.getElementById('btnVariant1');
+  const btnVariant2 = document.getElementById('btnVariant2');
+  const btnVariant3 = document.getElementById('btnVariant3');
+
+  // Elements Cột 3 (Hẹn giờ & Tài khoản theo khung)
   const delayInput = document.getElementById('delayInput');
+  const dashAutoJoinOnPostToggle = document.getElementById('dashAutoJoinOnPostToggle');
   const timeTagsContainer = document.getElementById('timeTagsContainer');
   const timeInput = document.getElementById('timeInput');
   const btnAddTime = document.getElementById('btnAddTime');
   const btnGoldenHours = document.getElementById('btnGoldenHours');
+  const schedAccountSelect = document.getElementById('schedAccountSelect');
+  const schedPostSelect = document.getElementById('schedPostSelect');
+  const schedAutoSwitchToggle = document.getElementById('schedAutoSwitchToggle');
   const scheduleToggle = document.getElementById('scheduleToggle');
   const btnStartRun = document.getElementById('btnStartRun');
   const btnStopRun = document.getElementById('btnStopRun');
@@ -199,6 +197,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const historyTableBody = document.getElementById('historyTableBody');
   const btnClearHistory = document.getElementById('btnClearHistory');
   const btnExportHistory = document.getElementById('btnExportHistory');
+  const btnExportHistoryCsv = document.getElementById('btnExportHistoryCsv');
+  const historyFilterAccount = document.getElementById('historyFilterAccount');
+  const historyFilterStatus = document.getElementById('historyFilterStatus');
+  const historyFilterType = document.getElementById('historyFilterType');
+  const historySearchInput = document.getElementById('historySearchInput');
+  const historyStatsSummary = document.getElementById('historyStatsSummary');
 
   function showToast(msg) {
     if (!toast) return;
@@ -207,10 +211,10 @@ document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => { toast.style.display = 'none'; }, 2600);
   }
 
-  // HÀM LƯU TỨC THÌ VÀO STORAGE
+  // HÀM LƯU TỨC THÌ VÀO STORAGE DÙNG SHARED STORAGE VỚI HÀNG ĐỢI TUẦN TỰ
   function triggerAutoSave(immediate = false) {
     clearTimeout(autoSaveTimer);
-    const saveFn = () => {
+    const saveFn = async () => {
       if (posts[selectedPostIdx]) {
         posts[selectedPostIdx].title = postTitle ? postTitle.value.trim() : 'Bài Tuyển Dụng';
         if (currentVariantTab === 1) {
@@ -221,39 +225,119 @@ document.addEventListener('DOMContentLoaded', () => {
           posts[selectedPostIdx].contentVariant3 = postContent ? postContent.value : '';
         }
       }
+
+      if (typeof SharedStorage !== 'undefined' && SharedStorage.normalizeScheduleSlots) {
+        scheduleSlots = SharedStorage.normalizeScheduleSlots(scheduleSlots, scheduledTimes);
+        scheduledTimes = scheduleSlots.map((s) => s.time);
+      }
+
+      const autoJoinVal = dashAutoJoinOnPostToggle ? dashAutoJoinOnPostToggle.checked : true;
+
+      if (typeof SharedStorage !== 'undefined' && SharedStorage.patch) {
+        await SharedStorage.patch('savedPosts', () => posts);
+        await SharedStorage.patch('savedGroups', () => groups);
+        await SharedStorage.patch('savedTimes', () => scheduledTimes);
+        await SharedStorage.patch('scheduleSlots', () => scheduleSlots);
+        await SharedStorage.patch('postingSettings', (old) => ({
+          ...(old || {}),
+          autoJoinOnPost: autoJoinVal,
+        }));
+      } else {
+        chrome.storage.local.set({
+          savedPosts: posts,
+          savedGroups: groups,
+          savedTimes: scheduledTimes,
+          scheduleSlots: scheduleSlots,
+        });
+      }
       chrome.storage.local.set({
         isInitialized: true,
-        savedPosts: posts,
-        savedGroups: groups,
-        savedTimes: scheduledTimes,
-        scheduledTimes: scheduledTimes,
         selectedPostIdx: selectedPostIdx,
-        delaySec: delayInput ? (parseInt(delayInput.value, 10) || 25) : 25,
+        delaySec: delayInput ? (parseInt(delayInput.value, 10) || 30) : 30,
         isScheduleActive: scheduleToggle ? scheduleToggle.checked : false,
-        enableSpintax: true,
-        shouldShuffleGroups: true,
+        scheduledTimes: scheduledTimes,
+        autoJoinOnPost: autoJoinVal,
       });
     };
 
     if (immediate) {
       saveFn();
     } else {
-      autoSaveTimer = setTimeout(saveFn, 200);
+      autoSaveTimer = setTimeout(saveFn, 300);
+    }
+  }
+
+  async function renderScheduleDropdowns() {
+    if (schedPostSelect) {
+      const prevPostVal = schedPostSelect.value || 'selected';
+      schedPostSelect.textContent = '';
+      const defOpt = document.createElement('option');
+      defOpt.value = 'selected';
+      defOpt.textContent = '📝 Bài viết đang chọn';
+      schedPostSelect.appendChild(defOpt);
+
+      posts.forEach((p, idx) => {
+        const opt = document.createElement('option');
+        opt.value = p.id || String(idx);
+        opt.textContent = `Bài ${idx + 1}: ${p.title || 'Bài Tuyển Dụng'}`;
+        schedPostSelect.appendChild(opt);
+      });
+      schedPostSelect.value = Array.from(schedPostSelect.options).some((o) => o.value === prevPostVal)
+        ? prevPostVal
+        : 'selected';
+    }
+
+    if (schedAccountSelect) {
+      const prevAccVal = schedAccountSelect.value || 'active';
+      schedAccountSelect.textContent = '';
+      const defAccOpt = document.createElement('option');
+      defAccOpt.value = 'active';
+      defAccOpt.textContent = '🔄 Tài khoản đang chọn';
+      schedAccountSelect.appendChild(defAccOpt);
+
+      const st = await chrome.storage.local.get(['fbAccounts']);
+      const fbAccounts = Array.isArray(st.fbAccounts) ? st.fbAccounts : [];
+      fbAccounts.forEach((acc) => {
+        const opt = document.createElement('option');
+        opt.value = acc.id;
+        opt.textContent = `👤 ${acc.name || 'Facebook'} (${acc.uid || acc.id})`;
+        opt.setAttribute('data-acc-name', acc.name || 'Facebook');
+        schedAccountSelect.appendChild(opt);
+      });
+      schedAccountSelect.value = Array.from(schedAccountSelect.options).some((o) => o.value === prevAccVal)
+        ? prevAccVal
+        : 'active';
     }
   }
 
   // Tải dữ liệu từ Storage: Nếu đã khởi tạo thì đọc 100% từ storage
   chrome.storage.local.get(
-    ['isInitialized', 'savedPosts', 'savedGroups', 'savedTimes', 'scheduledTimes', 'selectedPostIdx', 'isScheduleActive', 'delaySec'],
+    [
+      'isInitialized',
+      'savedPosts',
+      'savedGroups',
+      'savedTimes',
+      'scheduledTimes',
+      'scheduleSlots',
+      'selectedPostIdx',
+      'isScheduleActive',
+      'delaySec',
+      'autoJoinOnPost',
+      'postingSettings',
+    ],
     async (res) => {
       if (res.isInitialized) {
         posts = Array.isArray(res.savedPosts) ? res.savedPosts : [];
         groups = Array.isArray(res.savedGroups) ? res.savedGroups : [];
-        const times = res.savedTimes || res.scheduledTimes;
-        if (times) scheduledTimes = times;
+        const times = res.savedTimes || res.scheduledTimes || ['08:30', '11:30', '17:30', '20:00'];
+        scheduledTimes = times;
+        if (typeof SharedStorage !== 'undefined' && SharedStorage.normalizeScheduleSlots) {
+          scheduleSlots = SharedStorage.normalizeScheduleSlots(res.scheduleSlots, times);
+        } else {
+          scheduleSlots = Array.isArray(res.scheduleSlots) ? res.scheduleSlots : [];
+        }
         if (res.isScheduleActive !== undefined && scheduleToggle) {
           scheduleToggle.checked = res.isScheduleActive;
-          // Kiểm tra xem bản quyền có hợp lệ không, nếu không thì tắt toggle
           chrome.runtime.sendMessage({ action: 'CHECK_LICENSE' }, (licRes) => {
             if (!licRes || !licRes.isValid) {
               if (scheduleToggle) scheduleToggle.checked = false;
@@ -263,6 +347,10 @@ document.addEventListener('DOMContentLoaded', () => {
           });
         }
         if (res.delaySec !== undefined && delayInput) delayInput.value = res.delaySec;
+        const autoJoinSetting = res.autoJoinOnPost !== undefined
+          ? res.autoJoinOnPost
+          : (res.postingSettings?.autoJoinOnPost !== false);
+        if (dashAutoJoinOnPostToggle) dashAutoJoinOnPostToggle.checked = autoJoinSetting !== false;
         if (res.selectedPostIdx !== undefined && res.selectedPostIdx < posts.length) {
           selectedPostIdx = res.selectedPostIdx;
         }
@@ -275,20 +363,78 @@ document.addEventListener('DOMContentLoaded', () => {
             if (preloaded.settings?.scheduledTimes) scheduledTimes = preloaded.settings.scheduledTimes;
           }
         } catch (e) {}
+        if (typeof SharedStorage !== 'undefined' && SharedStorage.normalizeScheduleSlots) {
+          scheduleSlots = SharedStorage.normalizeScheduleSlots([], scheduledTimes);
+        }
         triggerAutoSave(true);
       }
 
       renderPostDropdown();
+      await renderScheduleDropdowns();
       loadPost(selectedPostIdx, false);
       renderGroupList();
       renderTimes();
     }
   );
 
+  // Lắng nghe thay đổi từ storage để tự động đồng bộ giao diện
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== 'local') return;
+    if (changes.savedGroups && !document.activeElement?.closest('#groupList')) {
+      groups = changes.savedGroups.newValue || [];
+      renderGroupList();
+    }
+    if (changes.savedPosts && !document.activeElement?.closest('#postContent')) {
+      posts = changes.savedPosts.newValue || [];
+      renderPostDropdown();
+      renderScheduleDropdowns();
+      loadPost(selectedPostIdx, false);
+    }
+    if (changes.fbAccounts || changes.activeAccountId) {
+      renderScheduleDropdowns();
+      renderAccountsList();
+    }
+    if (changes.scheduleSlots) {
+      scheduleSlots = changes.scheduleSlots.newValue || [];
+      scheduledTimes = scheduleSlots.map((s) => s.time);
+      renderTimes();
+    }
+    if (changes.postingStatus) {
+      const st = changes.postingStatus.newValue;
+      if (st && statusLabel) {
+        statusLabel.textContent = st.statusText || '';
+      }
+    }
+  });
+
   window.addEventListener('beforeunload', () => triggerAutoSave(true));
-  window.addEventListener('pagehide', () => triggerAutoSave(true));
-  window.addEventListener('blur', () => triggerAutoSave(true));
   delayInput?.addEventListener('input', () => triggerAutoSave());
+  dashAutoJoinOnPostToggle?.addEventListener('change', () => triggerAutoSave(true));
+
+  // Chuyển đổi giữa 3 biến thể nội dung bài viết
+  function switchVariantTab(tabNum) {
+    if (posts[selectedPostIdx] && postContent) {
+      if (currentVariantTab === 1) posts[selectedPostIdx].content = postContent.value;
+      else if (currentVariantTab === 2) posts[selectedPostIdx].contentVariant2 = postContent.value;
+      else if (currentVariantTab === 3) posts[selectedPostIdx].contentVariant3 = postContent.value;
+    }
+    currentVariantTab = tabNum;
+    [btnVariant1, btnVariant2, btnVariant3].forEach((btn, idx) => {
+      if (!btn) return;
+      btn.className = (idx + 1 === tabNum) ? 'btn btn-primary' : 'btn btn-sub';
+    });
+    const p = posts[selectedPostIdx];
+    if (p && postContent) {
+      if (tabNum === 1) postContent.value = p.content || '';
+      else if (tabNum === 2) postContent.value = p.contentVariant2 || '';
+      else if (tabNum === 3) postContent.value = p.contentVariant3 || '';
+    }
+    updatePreview();
+  }
+
+  btnVariant1?.addEventListener('click', () => switchVariantTab(1));
+  btnVariant2?.addEventListener('click', () => switchVariantTab(2));
+  btnVariant3?.addEventListener('click', () => switchVariantTab(3));
 
   // 1. Quản lý bài viết
   function renderPostDropdown() {
@@ -308,6 +454,10 @@ document.addEventListener('DOMContentLoaded', () => {
     selectedPostIdx = idx;
     const p = posts[idx];
     if (postTitle) postTitle.value = p.title || '';
+    currentVariantTab = 1;
+    [btnVariant1, btnVariant2, btnVariant3].forEach((btn, bIdx) => {
+      if (btn) btn.className = bIdx === 0 ? 'btn btn-primary' : 'btn btn-sub';
+    });
     if (postContent) {
       postContent.value = p.content || '';
     }
@@ -680,28 +830,43 @@ document.addEventListener('DOMContentLoaded', () => {
     showToast(`✓ Đã nạp thêm ${lines.length} link nhóm!`);
   });
 
-  // 3. Giờ đăng & Hẹn giờ
+  // 3. Giờ đăng & Hẹn giờ theo từng khung giờ + Tài khoản Facebook
+  function syncActiveScheduleWithBackground() {
+    if (scheduleToggle && scheduleToggle.checked) {
+      chrome.runtime.sendMessage({
+        action: 'SCHEDULE_AUTO_POST',
+        payload: {
+          times: scheduledTimes,
+          slots: scheduleSlots,
+          delaySec: delayInput ? (parseInt(delayInput.value, 10) || 30) : 30,
+          isSpintaxEnabled: true,
+        },
+      });
+    }
+  }
+
   function updateScheduleStatus() {
     const statusTextEl = document.getElementById('schedStatusText');
     const badgeEl = document.getElementById('scheduleStatusBadge');
     if (!statusTextEl) return;
 
     if (scheduleToggle && scheduleToggle.checked) {
-      if (scheduledTimes && scheduledTimes.length > 0) {
-        statusTextEl.innerHTML = `🟢 <strong>Đã cập nhật hẹn giờ:</strong> ${scheduledTimes.join(', ')} (Đang chạy ngầm)`;
+      if (scheduleSlots && scheduleSlots.length > 0) {
+        const summary = scheduleSlots.map((s) => `${s.time} (${s.accountName || 'Nick đang chọn'})`).join(', ');
+        statusTextEl.textContent = `🟢 Đã cập nhật hẹn giờ: ${summary} (Đang chạy ngầm)`;
         if (badgeEl) {
           badgeEl.style.borderColor = 'rgba(16, 185, 129, 0.4)';
           badgeEl.style.color = '#34d399';
         }
       } else {
-        statusTextEl.innerHTML = `⚠️ <strong>Đã bật hẹn giờ:</strong> Chưa có khung giờ nào, vui lòng bấm + Thêm hoặc chọn Giờ Vàng!`;
+        statusTextEl.textContent = '⚠️ Đã bật hẹn giờ: Chưa có khung giờ nào, vui lòng bấm + Thêm Khung hoặc chọn Giờ Vàng!';
         if (badgeEl) {
           badgeEl.style.borderColor = 'rgba(245, 158, 11, 0.4)';
           badgeEl.style.color = '#fbbf24';
         }
       }
     } else {
-      statusTextEl.innerHTML = `⚪ Trạng thái: Chưa kích hoạt hẹn giờ`;
+      statusTextEl.textContent = '⚪ Trạng thái: Chưa kích hoạt hẹn giờ';
       if (badgeEl) {
         badgeEl.style.borderColor = '#1e293b';
         badgeEl.style.color = '#94a3b8';
@@ -711,23 +876,44 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function renderTimes() {
     if (!timeTagsContainer) return;
-    timeTagsContainer.innerHTML = '';
-    scheduledTimes.forEach((t, i) => {
+    timeTagsContainer.textContent = '';
+
+    if (!Array.isArray(scheduleSlots) || scheduleSlots.length === 0) {
+      if (typeof SharedStorage !== 'undefined' && SharedStorage.normalizeScheduleSlots) {
+        scheduleSlots = SharedStorage.normalizeScheduleSlots([], scheduledTimes);
+      }
+    }
+
+    scheduleSlots.forEach((slot, i) => {
       const tag = document.createElement('div');
       tag.className = 'time-tag';
-      tag.innerHTML = `<span>⏰ ${t}</span><span class="del" data-i="${i}">✕</span>`;
-      timeTagsContainer.appendChild(tag);
-    });
 
-    document.querySelectorAll('.time-tag .del').forEach((el) => {
-      el.addEventListener('click', (e) => {
-        const i = parseInt(e.target.getAttribute('data-i') || '0', 10);
-        scheduledTimes.splice(i, 1);
+      const timeSpan = document.createElement('span');
+      timeSpan.textContent = `⏰ ${slot.time}`;
+
+      const accSpan = document.createElement('span');
+      accSpan.style.cssText = 'color: #a7f3d0; font-size: 10px; font-weight: 600;';
+      accSpan.textContent = `· 👤 ${slot.accountName || 'Tài khoản đang chọn'}${slot.autoSwitchAccount !== false ? ' 🔀' : ''}`;
+
+      const delSpan = document.createElement('span');
+      delSpan.className = 'del';
+      delSpan.setAttribute('data-i', String(i));
+      delSpan.textContent = '✕';
+      delSpan.addEventListener('click', () => {
+        scheduleSlots.splice(i, 1);
+        scheduledTimes = scheduleSlots.map((s) => s.time);
         triggerAutoSave(true);
         renderTimes();
         updateScheduleStatus();
+        syncActiveScheduleWithBackground();
       });
+
+      tag.appendChild(timeSpan);
+      tag.appendChild(accSpan);
+      tag.appendChild(delSpan);
+      timeTagsContainer.appendChild(tag);
     });
+
     updateScheduleStatus();
   }
 
@@ -776,8 +962,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const mStr = schedMinuteInput?.value.trim() || '';
 
     if (hStr !== '' && mStr !== '') {
-      let h = parseInt(hStr, 10);
-      let m = parseInt(mStr, 10);
+      const h = parseInt(hStr, 10);
+      const m = parseInt(mStr, 10);
 
       if (isNaN(h) || h < 0 || h > 23 || isNaN(m) || m < 0 || m > 59) {
         showToast('⚠️ Giờ hợp lệ từ 00 đến 23, Phút từ 00 đến 59!');
@@ -791,23 +977,67 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    if (!scheduledTimes.includes(formattedTime)) {
-      scheduledTimes.push(formattedTime);
-      scheduledTimes.sort();
-      triggerAutoSave(true);
-      renderTimes();
-      updateScheduleStatus();
-      showToast(`✓ Đã thêm khung giờ hẹn đăng: ${formattedTime}`);
+    const chosenAccountId = schedAccountSelect ? schedAccountSelect.value : 'active';
+    const selectedAccOption = schedAccountSelect?.selectedOptions?.[0];
+    const chosenAccountName = chosenAccountId === 'active'
+      ? 'Tài khoản đang chọn'
+      : (selectedAccOption?.getAttribute('data-acc-name') || selectedAccOption?.textContent?.replace(/^👤\s*/, '').split(' (')[0] || 'Tài khoản FB');
+    const chosenPostId = schedPostSelect ? schedPostSelect.value : 'selected';
+    const autoSwitch = schedAutoSwitchToggle ? schedAutoSwitchToggle.checked : true;
+
+    const existingIdx = scheduleSlots.findIndex((s) => s.time === formattedTime);
+    const newSlot = {
+      id: `slot_${formattedTime.replace(':', '_')}`,
+      time: formattedTime,
+      enabled: true,
+      accountId: chosenAccountId,
+      accountName: chosenAccountName,
+      postId: chosenPostId,
+      autoSwitchAccount: autoSwitch,
+      lastRunDate: null,
+    };
+
+    if (existingIdx !== -1) {
+      scheduleSlots[existingIdx] = newSlot;
+      showToast(`✓ Đã cập nhật khung giờ ${formattedTime} (${chosenAccountName})`);
     } else {
-      showToast(`Khung giờ ${formattedTime} đã có trong danh sách!`);
+      scheduleSlots.push(newSlot);
+      scheduleSlots.sort((a, b) => a.time.localeCompare(b.time));
+      showToast(`✓ Đã thêm khung giờ ${formattedTime} (${chosenAccountName})`);
     }
+
+    scheduledTimes = scheduleSlots.map((s) => s.time);
+    triggerAutoSave(true);
+    renderTimes();
+    updateScheduleStatus();
+    syncActiveScheduleWithBackground();
   });
 
   btnGoldenHours?.addEventListener('click', () => {
     scheduledTimes = ['08:30', '11:30', '17:30', '20:00'];
+    const chosenAccountId = schedAccountSelect ? schedAccountSelect.value : 'active';
+    const selectedAccOption = schedAccountSelect?.selectedOptions?.[0];
+    const chosenAccountName = chosenAccountId === 'active'
+      ? 'Tài khoản đang chọn'
+      : (selectedAccOption?.getAttribute('data-acc-name') || 'Tài khoản FB');
+    const chosenPostId = schedPostSelect ? schedPostSelect.value : 'selected';
+    const autoSwitch = schedAutoSwitchToggle ? schedAutoSwitchToggle.checked : true;
+
+    scheduleSlots = scheduledTimes.map((t) => ({
+      id: `slot_${t.replace(':', '_')}`,
+      time: t,
+      enabled: true,
+      accountId: chosenAccountId,
+      accountName: chosenAccountName,
+      postId: chosenPostId,
+      autoSwitchAccount: autoSwitch,
+      lastRunDate: null,
+    }));
+
     triggerAutoSave(true);
     renderTimes();
     updateScheduleStatus();
+    syncActiveScheduleWithBackground();
     showToast('✓ Đã nạp 4 mốc giờ vàng: 08:30, 11:30, 17:30, 20:00!');
   });
 
@@ -830,7 +1060,8 @@ document.addEventListener('DOMContentLoaded', () => {
           action: 'SCHEDULE_AUTO_POST',
           payload: {
             times: scheduledTimes,
-            delaySec: delayInput ? (parseInt(delayInput.value, 10) || 25) : 25,
+            slots: scheduleSlots,
+            delaySec: delayInput ? (parseInt(delayInput.value, 10) || 30) : 30,
             isSpintaxEnabled: true,
           },
         }, (schedRes) => {
@@ -870,12 +1101,14 @@ document.addEventListener('DOMContentLoaded', () => {
       const currentPostObj = posts[selectedPostIdx];
       const postImgs = (currentPostObj?.images && currentPostObj.images.length > 0) ? currentPostObj.images.slice(0, 3) : [];
       const baseContent = currentPostObj?.content || txt;
-      // 3 Biến thể tự động an toàn, giữ nguyên 100% nội dung chính bài đăng
+      // 3 Biến thể nội dung thật do người dùng thiết lập
+      const rawV2 = currentPostObj?.contentVariant2 || '';
+      const rawV3 = currentPostObj?.contentVariant3 || '';
       const postVariants = [
         baseContent,
-        baseContent + '\u200B\u200C',
-        baseContent + '\uFEFF\u200D',
-      ];
+        rawV2,
+        rawV3,
+      ].filter((v) => typeof v === 'string' && v.trim().length > 0);
 
       if (btnStartRun) btnStartRun.style.display = 'none';
       if (btnStopRun) btnStopRun.style.display = 'block';
@@ -883,18 +1116,23 @@ document.addEventListener('DOMContentLoaded', () => {
       if (statusLabel) statusLabel.innerText = 'Đang bắt đầu...';
       if (progressBar) progressBar.style.width = '5%';
 
-      chrome.runtime.sendMessage({
-        action: 'START_BATCH_POSTING',
-        payload: {
-          groups: activeGrps,
-          content: txt,
-          variants: postVariants,
-          images: postImgs,
-          isSpintaxEnabled: true,
-          delaySec: delayInput ? (parseInt(delayInput.value, 10) || 45) : 45,
-          shouldShuffle: true,
-          postTitle: currentPostObj?.title || 'Bài Tuyển Dụng',
-        },
+      chrome.runtime.sendMessage({ action: 'GET_FB_ACCOUNTS' }, (accRes) => {
+        const activeAcc = accRes?.activeAccount || null;
+        chrome.runtime.sendMessage({
+          action: 'START_BATCH_POSTING',
+          payload: {
+            groups: activeGrps,
+            content: txt,
+            variants: postVariants,
+            images: postImgs,
+            isSpintaxEnabled: true,
+            delaySec: delayInput ? (parseInt(delayInput.value, 10) || 30) : 30,
+            shouldShuffle: true,
+            postTitle: currentPostObj?.title || 'Bài Tuyển Dụng',
+            accountId: activeAcc ? activeAcc.id : null,
+            accountName: activeAcc ? activeAcc.name : null,
+          },
+        });
       });
     });
   });
@@ -1045,35 +1283,391 @@ document.addEventListener('DOMContentLoaded', () => {
     showToast(`✓ Đã xuất ${scannedGroupsTemp.length} nhóm tìm được sang Excel!`);
   });
 
-  // 6. Lịch sử đăng bài
-  async function renderHistory() {
-    if (!historyTableBody) return;
-    historyTableBody.innerHTML = '';
-    const res = await chrome.storage.local.get(['postHistory']);
-    const history = res.postHistory || [];
+  // 5.5 Quản lý tài khoản Facebook
+  const btnDetectCurrentAccount = document.getElementById('btnDetectCurrentAccount');
+  const accountsListContainer = document.getElementById('accountsListContainer');
+  const activeAccountNameLabel = document.getElementById('activeAccountNameLabel');
+  const activeAccountCooldownLabel = document.getElementById('activeAccountCooldownLabel');
 
-    if (history.length === 0) {
-      historyTableBody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #64748b; padding: 25px;">Chưa có lịch sử đăng bài nào.</td></tr>';
+  async function renderAccountsList() {
+    if (!accountsListContainer) return;
+    accountsListContainer.innerHTML = '';
+
+    const res = await chrome.storage.local.get(['fbAccounts', 'activeAccountId']);
+    const accounts = Array.isArray(res.fbAccounts) ? res.fbAccounts : [];
+    const activeId = res.activeAccountId;
+
+    const activeAcc = accounts.find((a) => String(a.id) === String(activeId)) || accounts[0] || null;
+    if (activeAccountNameLabel) {
+      activeAccountNameLabel.textContent = activeAcc ? (activeAcc.name || 'Facebook User') : 'Chưa chọn tài khoản';
+    }
+    if (activeAccountCooldownLabel) {
+      if (activeAcc && typeof AccountsManager !== 'undefined') {
+        const cool = AccountsManager.isAccountCoolingDown(activeAcc);
+        if (cool.isCoolingDown) {
+          activeAccountCooldownLabel.textContent = `⏳ Tạm nghỉ giới hạn tần suất đến ${cool.untilFormatted} (${cool.remainingMinutes}p)`;
+          activeAccountCooldownLabel.style.color = '#f59e0b';
+        } else {
+          activeAccountCooldownLabel.textContent = '✓ Trạng thái: Sẵn sàng';
+          activeAccountCooldownLabel.style.color = '#34d399';
+        }
+      } else {
+        activeAccountCooldownLabel.textContent = '✓ Trạng thái: Sẵn sàng';
+        activeAccountCooldownLabel.style.color = '#34d399';
+      }
+    }
+
+    if (accounts.length === 0) {
+      accountsListContainer.innerHTML = `
+        <div style="grid-column: 1 / -1; background: #0f172a; border: 1px dashed #334155; border-radius: 8px; padding: 25px; text-align: center; color: #94a3b8;">
+          <p style="font-size: 13px; font-weight: 600; margin-bottom: 6px; color: #f1f5f9;">Chưa có tài khoản Facebook nào được lưu</p>
+          <p style="font-size: 11.5px; margin-bottom: 12px;">Mở tab Facebook trên trình duyệt này và bấm "Quét &amp; Nhận Diện Nick FB Hiện Tại" để tự động thêm.</p>
+        </div>
+      `;
       return;
     }
 
-    history.forEach((h) => {
+    accounts.forEach((acc) => {
+      const isSelected = activeAcc && String(activeAcc.id) === String(acc.id);
+      const isCooling = typeof AccountsManager !== 'undefined' ? AccountsManager.isAccountCoolingDown(acc) : { isCoolingDown: false };
+
+      const card = document.createElement('div');
+      card.style.background = isSelected ? '#0d1f3d' : '#0f172a';
+      card.style.border = isSelected ? '1px solid #38bdf8' : '1px solid #1e293b';
+      card.style.borderRadius = '10px';
+      card.style.padding = '14px';
+      card.style.display = 'flex';
+      card.style.flexDirection = 'column';
+      card.style.gap = '10px';
+
+      const topRow = document.createElement('div');
+      topRow.style.display = 'flex';
+      topRow.style.alignItems = 'center';
+      topRow.style.gap = '10px';
+
+      const avatarImg = document.createElement('img');
+      avatarImg.src = acc.avatar || 'icon48.png';
+      avatarImg.style.width = '42px';
+      avatarImg.style.height = '42px';
+      avatarImg.style.borderRadius = '50%';
+      avatarImg.style.objectFit = 'cover';
+      avatarImg.style.border = '1px solid #334155';
+      avatarImg.onerror = () => { avatarImg.src = 'icon48.png'; };
+
+      const infoCol = document.createElement('div');
+      infoCol.style.flex = '1';
+      infoCol.style.minWidth = '0';
+
+      const nameEl = document.createElement('div');
+      nameEl.style.fontWeight = '700';
+      nameEl.style.fontSize = '13.5px';
+      nameEl.style.color = '#ffffff';
+      nameEl.style.overflow = 'hidden';
+      nameEl.style.textOverflow = 'ellipsis';
+      nameEl.style.whiteSpace = 'nowrap';
+      nameEl.textContent = acc.name || 'Tài khoản Facebook';
+
+      const uidEl = document.createElement('div');
+      uidEl.style.fontSize = '11px';
+      uidEl.style.color = '#94a3b8';
+      uidEl.textContent = 'UID: ' + (acc.uid || 'Không xác định');
+
+      infoCol.appendChild(nameEl);
+      infoCol.appendChild(uidEl);
+      topRow.appendChild(avatarImg);
+      topRow.appendChild(infoCol);
+      card.appendChild(topRow);
+
+      const statusPill = document.createElement('div');
+      statusPill.style.fontSize = '11px';
+      statusPill.style.padding = '3px 8px';
+      statusPill.style.borderRadius = '6px';
+      statusPill.style.display = 'inline-flex';
+      statusPill.style.alignItems = 'center';
+      statusPill.style.gap = '4px';
+
+      if (isCooling.isCoolingDown) {
+        statusPill.style.background = 'rgba(245, 158, 11, 0.15)';
+        statusPill.style.color = '#fbbf24';
+        statusPill.style.border = '1px solid rgba(245, 158, 11, 0.3)';
+        statusPill.textContent = `⏳ Giới hạn tần suất: Cooldown đến ${isCooling.untilFormatted} (${isCooling.remainingMinutes}p)`;
+      } else if (acc.status === 'checkpoint') {
+        statusPill.style.background = 'rgba(239, 68, 68, 0.15)';
+        statusPill.style.color = '#f87171';
+        statusPill.style.border = '1px solid rgba(239, 68, 68, 0.3)';
+        statusPill.textContent = '⚠️ Cần đăng nhập lại / Checkpoint';
+      } else {
+        statusPill.style.background = 'rgba(16, 185, 129, 0.15)';
+        statusPill.style.color = '#34d399';
+        statusPill.style.border = '1px solid rgba(16, 185, 129, 0.3)';
+        statusPill.textContent = '✓ Hoạt động bình thường';
+      }
+      card.appendChild(statusPill);
+
+      const actionRow = document.createElement('div');
+      actionRow.style.display = 'flex';
+      actionRow.style.justifyContent = 'space-between';
+      actionRow.style.alignItems = 'center';
+      actionRow.style.marginTop = '4px';
+
+      const selectBtn = document.createElement('button');
+      selectBtn.className = isSelected ? 'btn btn-emerald' : 'btn btn-sub';
+      selectBtn.style.fontSize = '11px';
+      selectBtn.style.padding = '4px 10px';
+      selectBtn.textContent = isSelected ? '★ Đang Chọn Đăng' : 'Chọn Nick Này';
+      selectBtn.disabled = isSelected;
+      selectBtn.addEventListener('click', async () => {
+        if (typeof AccountsManager !== 'undefined') {
+          await AccountsManager.setActiveAccount(acc.id);
+          renderAccountsList();
+          showToast(`✓ Đã chọn nick: ${acc.name}`);
+        }
+      });
+
+      const delBtn = document.createElement('button');
+      delBtn.className = 'btn btn-sub';
+      delBtn.style.fontSize = '11px';
+      delBtn.style.padding = '4px 8px';
+      delBtn.style.color = '#ef4444';
+      delBtn.textContent = 'Xóa';
+      delBtn.addEventListener('click', async () => {
+        if (confirm(`Xóa nick "${acc.name}" khỏi danh sách?`)) {
+          if (typeof AccountsManager !== 'undefined') {
+            await AccountsManager.removeAccount(acc.id);
+            renderAccountsList();
+            showToast('Đã xóa tài khoản.');
+          }
+        }
+      });
+
+      actionRow.appendChild(selectBtn);
+      actionRow.appendChild(delBtn);
+      card.appendChild(actionRow);
+
+      accountsListContainer.appendChild(card);
+    });
+  }
+
+  btnDetectCurrentAccount?.addEventListener('click', async () => {
+    btnDetectCurrentAccount.disabled = true;
+    btnDetectCurrentAccount.textContent = '⏳ Đang quét tab Facebook...';
+    try {
+      if (typeof AccountsManager !== 'undefined') {
+        const res = await AccountsManager.detectCurrentAccountFromTab();
+        showToast(res.message || '✓ Đã nhận diện nick Facebook thành công!');
+        renderAccountsList();
+      }
+    } catch (err) {
+      alert(`⚠️ KHÔNG THỂ NHẬN DIỆN NICK:\n\n${err.message}`);
+    } finally {
+      btnDetectCurrentAccount.disabled = false;
+      btnDetectCurrentAccount.textContent = '🔍 Quét & Nhận Diện Nick FB Hiện Tại';
+    }
+  });
+
+  // 6. Lịch sử đăng bài (Hiển thị Tài khoản Facebook đã đăng, lọc theo nick/trạng thái & xuất CSV - Rule 5 dùng textContent)
+  function populateHistoryAccountFilter(historyList, accountsList) {
+    if (!historyFilterAccount) return;
+    const prevValue = historyFilterAccount.value || 'all';
+    historyFilterAccount.textContent = '';
+
+    const optAll = document.createElement('option');
+    optAll.value = 'all';
+    optAll.textContent = '👤 Tất cả tài khoản FB';
+    historyFilterAccount.appendChild(optAll);
+
+    const seenKeys = new Set();
+    const addOption = (val, label) => {
+      const key = String(val || '').trim();
+      if (!key || seenKeys.has(key)) return;
+      seenKeys.add(key);
+      const opt = document.createElement('option');
+      opt.value = key;
+      opt.textContent = label;
+      historyFilterAccount.appendChild(opt);
+    };
+
+    if (Array.isArray(accountsList)) {
+      accountsList.forEach((acc) => {
+        if (!acc) return;
+        const key = acc.id || acc.uid || acc.fbUserId || acc.name || acc.displayName;
+        const name = acc.name || acc.displayName || 'Nick FB';
+        const uid = acc.uid || acc.fbUserId || acc.id || '';
+        addOption(key, uid && uid !== name ? `👤 ${name} (${uid})` : `👤 ${name}`);
+      });
+    }
+
+    if (Array.isArray(historyList)) {
+      historyList.forEach((h) => {
+        if (!h) return;
+        const key = h.accountId || h.accountUid || h.accountName;
+        const name = h.accountName || h.accountId || 'Mặc định';
+        const uid = h.accountUid || (h.accountId && h.accountId !== 'default' ? h.accountId : '');
+        if (key) {
+          addOption(key, uid && uid !== name ? `👤 ${name} (${uid})` : `👤 ${name}`);
+        }
+      });
+    }
+
+    if (Array.from(historyFilterAccount.options).some((o) => o.value === prevValue)) {
+      historyFilterAccount.value = prevValue;
+    } else {
+      historyFilterAccount.value = 'all';
+    }
+  }
+
+  function getFilteredHistoryFromUI(rawHistory) {
+    const filters = {
+      accountId: historyFilterAccount ? historyFilterAccount.value : 'all',
+      status: historyFilterStatus ? historyFilterStatus.value : 'all',
+      type: historyFilterType ? historyFilterType.value : 'all',
+      keyword: historySearchInput ? historySearchInput.value : '',
+    };
+    if (typeof SharedStorage !== 'undefined' && typeof SharedStorage.filterHistoryEntries === 'function') {
+      return SharedStorage.filterHistoryEntries(rawHistory, filters);
+    }
+    return Array.isArray(rawHistory) ? rawHistory : [];
+  }
+
+  async function renderHistory() {
+    if (!historyTableBody) return;
+    historyTableBody.textContent = '';
+    const res = await chrome.storage.local.get(['postHistory', 'fbAccounts']);
+    const history = Array.isArray(res.postHistory) ? res.postHistory : [];
+    const accountsList = Array.isArray(res.fbAccounts) ? res.fbAccounts : [];
+
+    populateHistoryAccountFilter(history, accountsList);
+    const filtered = getFilteredHistoryFromUI(history);
+
+    if (historyStatsSummary) {
+      const okCount = filtered.filter((h) => h && h.status === 'success').length;
+      const failCount = filtered.filter((h) => h && h.status === 'failed').length;
+      const uncertainCount = filtered.filter((h) => h && h.status === 'uncertain').length;
+      const autoJoinCount = filtered.filter((h) => h && h.autoJoined).length;
+      historyStatsSummary.textContent =
+        `Hiển thị: ${filtered.length}/${history.length} | ✅ Thành công: ${okCount} | ❌ Lỗi: ${failCount} | ⚠️ Chưa rõ: ${uncertainCount} | 🤝 Tự vào nhóm: ${autoJoinCount}`;
+    }
+
+    if (filtered.length === 0) {
+      const trEmpty = document.createElement('tr');
+      const tdEmpty = document.createElement('td');
+      tdEmpty.colSpan = 7;
+      tdEmpty.style.textAlign = 'center';
+      tdEmpty.style.color = '#64748b';
+      tdEmpty.style.padding = '25px';
+      tdEmpty.textContent = history.length === 0
+        ? 'Chưa có lịch sử đăng bài nào.'
+        : 'Không tìm thấy bản ghi lịch sử nào khớp với bộ lọc hiện tại.';
+      trEmpty.appendChild(tdEmpty);
+      historyTableBody.appendChild(trEmpty);
+      return;
+    }
+
+    filtered.forEach((h) => {
       const tr = document.createElement('tr');
-      const badgeClass = h.status === 'success' ? 'badge-success' : (h.status === 'stopped' ? 'badge-stopped' : 'badge-failed');
-      const statusText = h.status === 'success' ? 'Thành công' : (h.status === 'stopped' ? 'Đã dừng' : 'Thất bại');
+      const badgeClass = h.status === 'success'
+        ? 'badge-success'
+        : (h.status === 'stopped' || h.status === 'uncertain' ? 'badge-stopped' : 'badge-failed');
+      const statusText = h.status === 'success'
+        ? 'Thành công'
+        : (h.status === 'uncertain' ? 'Chưa rõ' : (h.status === 'stopped' ? 'Đã dừng' : 'Thất bại'));
       const typeLabel = h.type === 'scheduled' ? '⏰ Hẹn giờ' : '⚡ Thủ công';
 
-      tr.innerHTML = `
-        <td style="font-size: 11px; color: #94a3b8;">${h.timeFormatted || new Date(h.timestamp).toLocaleString()}</td>
-        <td><span style="font-size: 11px; color: #38bdf8;">${typeLabel}</span></td>
-        <td style="font-weight: 600;"><a href="${h.groupLink}" target="_blank" style="color: #e2e8f0; text-decoration: none;">${h.groupName} ↗</a></td>
-        <td style="max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${h.postTitle || 'Bài Tuyển Dụng'}</td>
-        <td><span class="${badgeClass}">${statusText}</span></td>
-        <td style="font-size: 11px; color: #94a3b8;">${h.message || ''}</td>
-      `;
+      // 1. Cột Thời gian
+      const tdTime = document.createElement('td');
+      tdTime.style.fontSize = '11px';
+      tdTime.style.color = '#94a3b8';
+      tdTime.textContent = h.timeFormatted || new Date(h.timestamp).toLocaleString();
+      tr.appendChild(tdTime);
+
+      // 2. Cột Loại
+      const tdType = document.createElement('td');
+      const spanType = document.createElement('span');
+      spanType.style.fontSize = '11px';
+      spanType.style.color = '#38bdf8';
+      spanType.textContent = h.slotId ? `${typeLabel} (${h.slotId})` : typeLabel;
+      tdType.appendChild(spanType);
+      tr.appendChild(tdType);
+
+      // 3. Cột Tài Khoản FB (Rule 5: textContent)
+      const tdAccount = document.createElement('td');
+      const divAccName = document.createElement('div');
+      divAccName.style.fontSize = '11.5px';
+      divAccName.style.fontWeight = '600';
+      divAccName.style.color = '#f1f5f9';
+      divAccName.textContent = `👤 ${h.accountName || 'Mặc định'}`;
+      tdAccount.appendChild(divAccName);
+
+      const uidDisplay = h.accountUid || (h.accountId && h.accountId !== 'default' ? h.accountId : '');
+      if (uidDisplay && uidDisplay !== h.accountName) {
+        const divAccUid = document.createElement('div');
+        divAccUid.style.fontSize = '10px';
+        divAccUid.style.color = '#64748b';
+        divAccUid.textContent = `UID: ${uidDisplay}`;
+        tdAccount.appendChild(divAccUid);
+      }
+      tr.appendChild(tdAccount);
+
+      // 4. Cột Nhóm Nhận Bài (Rule 5: textContent + link bắt đầu bằng https://www.facebook.com/groups/)
+      const tdGroup = document.createElement('td');
+      tdGroup.style.fontWeight = '600';
+      if (h.groupLink && String(h.groupLink).startsWith('https://www.facebook.com/groups/')) {
+        const aGroup = document.createElement('a');
+        aGroup.href = h.groupLink;
+        aGroup.target = '_blank';
+        aGroup.rel = 'noopener noreferrer';
+        aGroup.style.color = '#e2e8f0';
+        aGroup.style.textDecoration = 'none';
+        aGroup.textContent = (h.groupName || 'Nhóm Facebook') + ' ↗';
+        tdGroup.appendChild(aGroup);
+      } else {
+        const spanGrp = document.createElement('span');
+        spanGrp.textContent = h.groupName || 'Nhóm Facebook';
+        tdGroup.appendChild(spanGrp);
+      }
+      if (h.autoJoined) {
+        const spanJoinBadge = document.createElement('div');
+        spanJoinBadge.style.fontSize = '10px';
+        spanJoinBadge.style.color = '#34d399';
+        spanJoinBadge.style.fontWeight = '600';
+        spanJoinBadge.style.marginTop = '2px';
+        spanJoinBadge.textContent = '🤝 Đã tự vào nhóm khi đăng';
+        tdGroup.appendChild(spanJoinBadge);
+      }
+      tr.appendChild(tdGroup);
+
+      // 5. Cột Bài Viết
+      const tdPost = document.createElement('td');
+      tdPost.style.maxWidth = '180px';
+      tdPost.style.overflow = 'hidden';
+      tdPost.style.textOverflow = 'ellipsis';
+      tdPost.style.whiteSpace = 'nowrap';
+      tdPost.textContent = h.postTitle || 'Bài Tuyển Dụng';
+      tr.appendChild(tdPost);
+
+      // 6. Cột Trạng Thái
+      const tdStatus = document.createElement('td');
+      const spanStatus = document.createElement('span');
+      spanStatus.className = badgeClass;
+      spanStatus.textContent = statusText;
+      tdStatus.appendChild(spanStatus);
+      tr.appendChild(tdStatus);
+
+      // 7. Cột Chi Tiết (Rule 5: textContent)
+      const tdMessage = document.createElement('td');
+      tdMessage.style.fontSize = '11px';
+      tdMessage.style.color = '#94a3b8';
+      tdMessage.textContent = h.message || '';
+      tr.appendChild(tdMessage);
+
       historyTableBody.appendChild(tr);
     });
   }
+
+  historyFilterAccount?.addEventListener('change', () => renderHistory());
+  historyFilterStatus?.addEventListener('change', () => renderHistory());
+  historyFilterType?.addEventListener('change', () => renderHistory());
+  historySearchInput?.addEventListener('input', () => renderHistory());
 
   btnClearHistory?.addEventListener('click', async () => {
     if (confirm('Bạn có chắc muốn xóa sạch toàn bộ lịch sử đăng bài?')) {
@@ -1083,10 +1677,32 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  btnExportHistoryCsv?.addEventListener('click', async () => {
+    const res = await chrome.storage.local.get(['postHistory']);
+    const history = Array.isArray(res.postHistory) ? res.postHistory : [];
+    const filtered = getFilteredHistoryFromUI(history);
+    if (!filtered.length) {
+      alert('Không có dữ liệu lịch sử nào để xuất CSV!');
+      return;
+    }
+    const csvContent = (typeof SharedStorage !== 'undefined' && typeof SharedStorage.formatHistoryToCsv === 'function')
+      ? SharedStorage.formatHistoryToCsv(filtered)
+      : '\uFEFFSTT,Thời Gian,Tài Khoản,Nhóm,Trạng Thái\n';
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `lich_su_dang_bai_fb_${filtered.length}_muc_${Date.now()}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast(`✓ Đã xuất ${filtered.length} dòng lịch sử ra file Excel (CSV)!`);
+  });
+
   btnExportHistory?.addEventListener('click', async () => {
     const res = await chrome.storage.local.get(['postHistory']);
-    const history = res.postHistory || [];
-    const blob = new Blob([JSON.stringify(history, null, 2)], { type: 'application/json' });
+    const history = Array.isArray(res.postHistory) ? res.postHistory : [];
+    const filtered = getFilteredHistoryFromUI(history);
+    const blob = new Blob([JSON.stringify(filtered, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -1107,6 +1723,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const licClientPhone = document.getElementById('licClientPhone');
   const licKeyDisplay = document.getElementById('licKeyDisplay');
   const licBadgeStatus = document.getElementById('licBadgeStatus');
+  const licBadgeStatusCard = document.getElementById('licBadgeStatusCard');
   const licDaysLeftText = document.getElementById('licDaysLeftText');
   const licExpiresAtText = document.getElementById('licExpiresAtText');
   const licPlanTypeText = document.getElementById('licPlanTypeText');
@@ -1325,11 +1942,17 @@ document.addEventListener('DOMContentLoaded', () => {
         if (licClientPhone) licClientPhone.innerText = clientPhoneVal;
         if (licKeyDisplay) licKeyDisplay.innerText = lic.key;
         if (licDeviceId) licDeviceId.innerText = activeId;
+        const activeBadgeText = isExpiringSoon
+          ? `⚠️ SẮP HẾT HẠN (CÒN ${daysLeft} NGÀY)`
+          : (isTrialPlan ? '🎁 GÓI DÙNG THỬ (20 BÀI ĐĂNG)' : '✓ BẢN QUYỀN HỢP LỆ');
+        const activeBadgeClass = isExpiringSoon ? 'badge-failed' : 'badge-success';
         if (licBadgeStatus) {
-          licBadgeStatus.innerText = isExpiringSoon
-            ? `⚠️ SẮP HẾT HẠN (CÒN ${daysLeft} NGÀY)`
-            : (isTrialPlan ? '🎁 GÓI DÙNG THỬ (20 BÀI ĐĂNG)' : '✓ BẢN QUYỀN HỢP LỆ');
-          licBadgeStatus.className = isExpiringSoon ? 'badge-failed' : 'badge-success';
+          licBadgeStatus.innerText = activeBadgeText;
+          licBadgeStatus.className = activeBadgeClass;
+        }
+        if (licBadgeStatusCard) {
+          licBadgeStatusCard.innerText = activeBadgeText;
+          licBadgeStatusCard.className = activeBadgeClass;
         }
         if (licDaysLeftText) {
           licDaysLeftText.innerText = `${daysLeft} ngày`;
@@ -1396,9 +2019,14 @@ document.addEventListener('DOMContentLoaded', () => {
         if (licKeyDisplay) licKeyDisplay.innerText = lic?.key ? lic.key : 'Chưa có mã';
         if (licDeviceId) licDeviceId.innerText = activeId;
         if (licExpiresAtText) licExpiresAtText.innerText = isRevoked ? 'Đã thu hồi' : (isExp ? 'Đã hết hạn' : 'Cần đặt mua / duyệt gói');
+        const inactiveBadgeText = isRevoked ? '🚫 ĐÃ THU HỒI (NGẮT MÁY)' : isExp ? '🚨 HẾT HẠN' : 'CHƯA KÍCH HOẠT';
         if (licBadgeStatus) {
-          licBadgeStatus.innerText = isRevoked ? '🚫 ĐÃ THU HỒI (NGẮT MÁY)' : isExp ? '🚨 HẾT HẠN' : 'CHƯA KÍCH HOẠT';
+          licBadgeStatus.innerText = inactiveBadgeText;
           licBadgeStatus.className = 'badge-failed';
+        }
+        if (licBadgeStatusCard) {
+          licBadgeStatusCard.innerText = inactiveBadgeText;
+          licBadgeStatusCard.className = 'badge-failed';
         }
         if (licDaysLeftText) {
           licDaysLeftText.innerText = '0 ngày';
@@ -1992,30 +2620,16 @@ window.proceedSendOrder = async function() {
     }
   } catch (e) {}
 
-  // Gửi trực tiếp /api/orders/create tới các server chính (Cloudflare Pages & Cloud Run)
+  // Gửi trực tiếp /api/orders/create duy nhất 1 lần tới API_BASE chính thức
   try {
-    const bases = new Set([
-      'https://gia-long---tuy-n-d-ng.pages.dev',
-      'https://ais-dev-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app',
-      'https://ais-pre-cc3pyed4ifrln4z7zxo36q-299083950282.asia-southeast1.run.app'
-    ]);
-    try {
-      const savedCustom = localStorage.getItem('customApiServerUrl');
-      if (savedCustom && savedCustom.startsWith('http')) bases.add(savedCustom.replace(/\/+$/, ''));
-      if (typeof window !== 'undefined' && window.location && window.location.origin && window.location.origin.startsWith('http')) {
-        bases.add(window.location.origin.replace(/\/+$/, ''));
-      }
-    } catch (e) {}
-
-    bases.forEach((b) => {
-      fetch(`${b}/api/orders/create`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(orderPayload),
-      }).then((res) => {
-        if (res.ok) console.log('[Gia Long FB] ✓ Đã gửi đơn hàng thành công lên máy chủ:', b);
-      }).catch(() => {});
-    });
+    const apiBase = 'https://gia-long---tuy-n-d-ng.pages.dev';
+    fetch(`${apiBase}/api/orders/create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(orderPayload),
+    }).then((res) => {
+      if (res.ok) console.log('[Gia Long FB] ✓ Đã gửi đơn hàng thành công lên máy chủ:', apiBase);
+    }).catch(() => {});
   } catch (e) {}
 
   // Gửi trực tiếp sang Google Drive Sheet Webhook nếu có
