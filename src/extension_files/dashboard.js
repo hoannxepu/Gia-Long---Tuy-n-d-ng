@@ -10,76 +10,104 @@ let currentVariantTab = 1;
 let autoSaveTimer = null;
 let scannedGroupsTemp = [];
 
-// Quản lý Device ID tập trung và cập nhật DOM ngay lập tức (0ms)
+// Quản lý Device ID tập trung: CHỈ lấy từ Service Worker (background.js) qua GET_DEVICE_ID
+// Tuyệt đối không tự sinh UUID cục bộ để tránh lệch mã máy giữa Dashboard và Background
 let cachedDeviceId = '';
+let deviceIdInitPromise = null;
 
-function generateHardwareFingerprint() {
-  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-    return crypto.randomUUID();
-  }
-  return 'dev_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 8);
+function isValidDashDeviceId(val) {
+  if (!val || typeof val !== 'string') return false;
+  const trimmed = val.trim();
+  if (trimmed.length < 6) return false;
+  const lower = trimmed.toLowerCase();
+  return !lower.includes('đang lấy') && !lower.includes('dang lay') && lower !== 'chưa gắn' && lower !== 'chuagan';
 }
 
 function updateDeviceDomElements(id) {
-  if (!id || id === 'Đang lấy...' || String(id).trim() === '') return;
+  if (!isValidDashDeviceId(id)) return;
   cachedDeviceId = String(id).trim();
+  try {
+    localStorage.setItem('autorecruit_device_id', cachedDeviceId);
+  } catch (_) {}
   const elements = [
     document.getElementById('licCurrentDeviceId'),
     document.getElementById('modalDeviceId'),
     document.getElementById('modalActiveDeviceId'),
     document.getElementById('trialDeviceIdNotice'),
-    document.getElementById('successDeviceId')
+    document.getElementById('successDeviceId'),
   ];
   elements.forEach((el) => {
     if (el) {
-      el.innerText = cachedDeviceId;
-      if ('value' in el) el.value = cachedDeviceId;
+      if (el.innerText !== cachedDeviceId) el.innerText = cachedDeviceId;
+      if ('value' in el && el.value !== cachedDeviceId) el.value = cachedDeviceId;
     }
   });
 }
 
-function getOrInitDeviceId() {
-  if (cachedDeviceId && cachedDeviceId !== 'Đang lấy...' && cachedDeviceId.trim() !== '') {
+async function getOrInitDeviceId() {
+  if (isValidDashDeviceId(cachedDeviceId)) {
     return cachedDeviceId;
   }
+  if (deviceIdInitPromise) {
+    return deviceIdInitPromise;
+  }
 
-  // 1. Kiểm tra localStorage (tức thì 0ms đồng bộ)
-  try {
-    const localId = localStorage.getItem('autorecruit_device_id');
-    if (localId && localId !== 'Đang lấy...' && !localId.includes('đang lấy') && localId.trim() !== '') {
-      updateDeviceDomElements(localId);
-      return localId;
-    }
-  } catch (e) {}
+  deviceIdInitPromise = (async () => {
+    let legacyHintId = '';
+    try {
+      const localId = localStorage.getItem('autorecruit_device_id');
+      if (isValidDashDeviceId(localId)) {
+        legacyHintId = localId.trim();
+      }
+    } catch (_) {}
 
-  // 2. Sinh mã máy cố định phần cứng chuẩn xác duy nhất ngay lập tức (0ms)
-  const genId = generateHardwareFingerprint();
-  updateDeviceDomElements(genId);
-  try { localStorage.setItem('autorecruit_device_id', genId); } catch (e) {}
-
-  // Đồng bộ với chrome.storage.local & sync
-  try {
-    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-      chrome.storage.local.get(['autorecruit_device_id'], (stored) => {
-        if (stored && stored.autorecruit_device_id && stored.autorecruit_device_id !== 'Đang lấy...' && !stored.autorecruit_device_id.includes('đang lấy')) {
-          updateDeviceDomElements(stored.autorecruit_device_id);
-          try { localStorage.setItem('autorecruit_device_id', stored.autorecruit_device_id); } catch (e) {}
-        } else {
-          chrome.storage.local.set({ autorecruit_device_id: genId });
-          if (chrome.storage.sync) chrome.storage.sync.set({ autorecruit_device_id: genId });
+    // 1. Hỏi trực tiếp Service Worker (Single Source of Truth) kèm legacyHintId để di trú an toàn
+    if (typeof chrome !== 'undefined' && chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
+      const bgRes = await new Promise((resolve) => {
+        try {
+          chrome.runtime.sendMessage({ action: 'GET_DEVICE_ID', legacyHintId }, (res) => {
+            if (chrome.runtime.lastError || !res) {
+              resolve(null);
+              return;
+            }
+            resolve(res);
+          });
+        } catch (_) {
+          resolve(null);
         }
       });
-    }
-  } catch (e) {}
 
-  return genId;
+      if (bgRes && isValidDashDeviceId(bgRes.deviceId)) {
+        updateDeviceDomElements(bgRes.deviceId);
+        deviceIdInitPromise = null;
+        return cachedDeviceId;
+      }
+    }
+
+    // 2. Dự phòng đọc từ chrome.storage.local (không tự ghi đè)
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      const stored = await chrome.storage.local.get(['autorecruit_device_id']).catch(() => ({}));
+      if (isValidDashDeviceId(stored?.autorecruit_device_id)) {
+        updateDeviceDomElements(stored.autorecruit_device_id);
+        deviceIdInitPromise = null;
+        return cachedDeviceId;
+      }
+    }
+
+    if (legacyHintId) {
+      updateDeviceDomElements(legacyHintId);
+    }
+    deviceIdInitPromise = null;
+    return cachedDeviceId || legacyHintId || '';
+  })();
+
+  return deviceIdInitPromise;
 }
 
-// Khởi tạo mã máy ngay tức khắc khi script nạp để DOM nhận diện ngay
+// Khởi tạo mã máy từ Service Worker
 getOrInitDeviceId();
 
 document.addEventListener('DOMContentLoaded', () => {
-  // Gán lại mã máy cho DOM ngay khi cấu trúc HTML sẵn sàng
   getOrInitDeviceId();
 
   // Navigation Tabs
@@ -377,9 +405,24 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   );
 
-  // Lắng nghe thay đổi từ storage để tự động đồng bộ giao diện
+  // Coalesce (gộp) các lần render danh sách tài khoản & dropdown trong cùng 1 khung hình (requestAnimationFrame)
+  let accountsRenderScheduled = false;
+  function scheduleRenderAccountsAndDropdowns() {
+    if (accountsRenderScheduled) return;
+    accountsRenderScheduled = true;
+    requestAnimationFrame(async () => {
+      accountsRenderScheduled = false;
+      await renderScheduleDropdowns();
+      await renderAccountsList();
+    });
+  }
+
+  // Lắng nghe thay đổi từ storage để tự động đồng bộ giao diện (Single Source of Truth)
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName !== 'local') return;
+    if (changes.autorecruit_device_id && isValidDashDeviceId(changes.autorecruit_device_id.newValue)) {
+      updateDeviceDomElements(changes.autorecruit_device_id.newValue);
+    }
     if (changes.savedGroups && !document.activeElement?.closest('#groupList')) {
       groups = changes.savedGroups.newValue || [];
       renderGroupList();
@@ -391,8 +434,7 @@ document.addEventListener('DOMContentLoaded', () => {
       loadPost(selectedPostIdx, false);
     }
     if (changes.fbAccounts || changes.activeAccountId) {
-      renderScheduleDropdowns();
-      renderAccountsList();
+      scheduleRenderAccountsAndDropdowns();
     }
     if (changes.scheduleSlots) {
       scheduleSlots = changes.scheduleSlots.newValue || [];
@@ -404,6 +446,19 @@ document.addEventListener('DOMContentLoaded', () => {
       if (st && statusLabel) {
         statusLabel.textContent = st.statusText || '';
       }
+    }
+    if (
+      changes.licenseSeq ||
+      changes.licenseState ||
+      changes.licenseStatus ||
+      changes.licenseData ||
+      changes.isRevoked ||
+      changes.isSuspended
+    ) {
+      loadLicenseDetails(false);
+    }
+    if (changes.myOrders) {
+      renderClientOrdersList(changes.myOrders.newValue || []);
     }
   });
 
@@ -1289,20 +1344,44 @@ document.addEventListener('DOMContentLoaded', () => {
   const activeAccountNameLabel = document.getElementById('activeAccountNameLabel');
   const activeAccountCooldownLabel = document.getElementById('activeAccountCooldownLabel');
 
+  let accountsRenderToken = 0;
+  let isScanningFbAccount = false;
+
   async function renderAccountsList() {
     if (!accountsListContainer) return;
-    accountsListContainer.innerHTML = '';
+    const myRenderToken = ++accountsRenderToken;
 
-    const res = await chrome.storage.local.get(['fbAccounts', 'activeAccountId']);
-    const accounts = Array.isArray(res.fbAccounts) ? res.fbAccounts : [];
-    const activeId = res.activeAccountId;
+    // Đọc dữ liệu TRƯỚC khi chạm vào DOM (tuyệt đối không xóa innerHTML trước await!)
+    const res = await chrome.storage.local.get(['fbAccounts', 'activeAccountId', 'scheduleSlots']);
+    if (myRenderToken !== accountsRenderToken) {
+      // Đã có lượt render mới hơn được xếp lịch -> hủy lượt cũ để tránh nhân đôi thẻ DOM
+      return;
+    }
+
+    let accounts = Array.isArray(res.fbAccounts) ? res.fbAccounts : [];
+    let activeId = res.activeAccountId || null;
+
+    if (typeof SharedStorage !== 'undefined' && typeof SharedStorage.dedupeAccounts === 'function') {
+      const deduped = SharedStorage.dedupeAccounts(accounts, activeId, res.scheduleSlots || []);
+      accounts = deduped.accounts;
+      activeId = deduped.activeAccountId;
+    } else {
+      const seenUids = new Set();
+      accounts = accounts.filter((a) => {
+        if (!a || !a.uid) return false;
+        const key = String(a.uid).trim();
+        if (seenUids.has(key)) return false;
+        seenUids.add(key);
+        return true;
+      });
+    }
 
     const activeAcc = accounts.find((a) => String(a.id) === String(activeId)) || accounts[0] || null;
     if (activeAccountNameLabel) {
       activeAccountNameLabel.textContent = activeAcc ? (activeAcc.name || 'Facebook User') : 'Chưa chọn tài khoản';
     }
     if (activeAccountCooldownLabel) {
-      if (activeAcc && typeof AccountsManager !== 'undefined') {
+      if (activeAcc && typeof AccountsManager !== 'undefined' && typeof AccountsManager.isAccountCoolingDown === 'function') {
         const cool = AccountsManager.isAccountCoolingDown(activeAcc);
         if (cool.isCoolingDown) {
           activeAccountCooldownLabel.textContent = `⏳ Tạm nghỉ giới hạn tần suất đến ${cool.untilFormatted} (${cool.remainingMinutes}p)`;
@@ -1317,21 +1396,35 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
 
+    const fragment = document.createDocumentFragment();
+
     if (accounts.length === 0) {
-      accountsListContainer.innerHTML = `
-        <div style="grid-column: 1 / -1; background: #0f172a; border: 1px dashed #334155; border-radius: 8px; padding: 25px; text-align: center; color: #94a3b8;">
-          <p style="font-size: 13px; font-weight: 600; margin-bottom: 6px; color: #f1f5f9;">Chưa có tài khoản Facebook nào được lưu</p>
-          <p style="font-size: 11.5px; margin-bottom: 12px;">Mở tab Facebook trên trình duyệt này và bấm "Quét &amp; Nhận Diện Nick FB Hiện Tại" để tự động thêm.</p>
-        </div>
+      const emptyBox = document.createElement('div');
+      emptyBox.style.gridColumn = '1 / -1';
+      emptyBox.style.background = '#0f172a';
+      emptyBox.style.border = '1px dashed #334155';
+      emptyBox.style.borderRadius = '8px';
+      emptyBox.style.padding = '25px';
+      emptyBox.style.textAlign = 'center';
+      emptyBox.style.color = '#94a3b8';
+      emptyBox.innerHTML = `
+        <p style="font-size: 13px; font-weight: 600; margin-bottom: 6px; color: #f1f5f9;">Chưa có tài khoản Facebook nào được lưu</p>
+        <p style="font-size: 11.5px; margin-bottom: 12px;">Mở tab Facebook trên trình duyệt này và bấm "Quét &amp; Nhận Diện Nick FB Hiện Tại" để tự động thêm.</p>
       `;
+      fragment.appendChild(emptyBox);
+      accountsListContainer.replaceChildren(fragment);
       return;
     }
 
     accounts.forEach((acc) => {
       const isSelected = activeAcc && String(activeAcc.id) === String(acc.id);
-      const isCooling = typeof AccountsManager !== 'undefined' ? AccountsManager.isAccountCoolingDown(acc) : { isCoolingDown: false };
+      const isCooling =
+        typeof AccountsManager !== 'undefined' && typeof AccountsManager.isAccountCoolingDown === 'function'
+          ? AccountsManager.isAccountCoolingDown(acc)
+          : { isCoolingDown: false };
 
       const card = document.createElement('div');
+      card.dataset.accountUid = String(acc.uid || '');
       card.style.background = isSelected ? '#0d1f3d' : '#0f172a';
       card.style.border = isSelected ? '1px solid #38bdf8' : '1px solid #1e293b';
       card.style.borderRadius = '10px';
@@ -1352,7 +1445,9 @@ document.addEventListener('DOMContentLoaded', () => {
       avatarImg.style.borderRadius = '50%';
       avatarImg.style.objectFit = 'cover';
       avatarImg.style.border = '1px solid #334155';
-      avatarImg.onerror = () => { avatarImg.src = 'icon48.png'; };
+      avatarImg.onerror = () => {
+        avatarImg.src = 'icon48.png';
+      };
 
       const infoCol = document.createElement('div');
       infoCol.style.flex = '1';
@@ -1419,7 +1514,7 @@ document.addEventListener('DOMContentLoaded', () => {
       selectBtn.addEventListener('click', async () => {
         if (typeof AccountsManager !== 'undefined') {
           await AccountsManager.setActiveAccount(acc.id);
-          renderAccountsList();
+          scheduleRenderAccountsAndDropdowns();
           showToast(`✓ Đã chọn nick: ${acc.name}`);
         }
       });
@@ -1434,7 +1529,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (confirm(`Xóa nick "${acc.name}" khỏi danh sách?`)) {
           if (typeof AccountsManager !== 'undefined') {
             await AccountsManager.removeAccount(acc.id);
-            renderAccountsList();
+            scheduleRenderAccountsAndDropdowns();
             showToast('Đã xóa tài khoản.');
           }
         }
@@ -1444,22 +1539,39 @@ document.addEventListener('DOMContentLoaded', () => {
       actionRow.appendChild(delBtn);
       card.appendChild(actionRow);
 
-      accountsListContainer.appendChild(card);
+      fragment.appendChild(card);
     });
+
+    // Cập nhật DOM nguyên tử trong 1 thao tác duy nhất
+    accountsListContainer.replaceChildren(fragment);
   }
 
   btnDetectCurrentAccount?.addEventListener('click', async () => {
+    if (isScanningFbAccount) return;
+    isScanningFbAccount = true;
     btnDetectCurrentAccount.disabled = true;
     btnDetectCurrentAccount.textContent = '⏳ Đang quét tab Facebook...';
     try {
-      if (typeof AccountsManager !== 'undefined') {
-        const res = await AccountsManager.detectCurrentAccountFromTab();
-        showToast(res.message || '✓ Đã nhận diện nick Facebook thành công!');
-        renderAccountsList();
+      const res = await new Promise((resolve) => {
+        chrome.runtime.sendMessage({ action: 'DETECT_CURRENT_FB_ACCOUNT_FROM_TAB' }, (r) => {
+          if (chrome.runtime.lastError || !r) {
+            resolve({ success: false, error: chrome.runtime.lastError?.message || 'Không nhận được phản hồi từ Background' });
+            return;
+          }
+          resolve(r);
+        });
+      });
+
+      if (res && res.success && res.account) {
+        showToast(`✓ Đã nhận diện nick: ${res.account.name} (UID: ${res.account.uid})`);
+        scheduleRenderAccountsAndDropdowns();
+      } else {
+        alert(`⚠️ KHÔNG THỂ NHẬN DIỆN NICK:\n\n${res?.error || 'Vui lòng mở tab facebook.com đã đăng nhập rồi thử lại.'}`);
       }
     } catch (err) {
       alert(`⚠️ KHÔNG THỂ NHẬN DIỆN NICK:\n\n${err.message}`);
     } finally {
+      isScanningFbAccount = false;
       btnDetectCurrentAccount.disabled = false;
       btnDetectCurrentAccount.textContent = '🔍 Quét & Nhận Diện Nick FB Hiện Tại';
     }
@@ -1867,23 +1979,70 @@ document.addEventListener('DOMContentLoaded', () => {
     window.scrollToPricingTable();
   });
 
-  async function loadLicenseDetails(forceRemote = true) {
+  let lastRenderedLicenseSeq = 0;
+  let lastRenderedLicenseFingerprint = '';
+  let hasRenderedInitialLicense = false;
+
+  async function loadLicenseDetails(forceRemote = false) {
+    // Trong lúc chưa có kết quả lần đầu, hiển thị trạng thái "Đang kiểm tra..." thay vì "Chưa kích hoạt"
+    if (!hasRenderedInitialLicense && licenseHeaderTitle && !lastRenderedLicenseFingerprint) {
+      licenseHeaderTitle.innerText = '⏳ Đang kiểm tra bản quyền...';
+    }
+
     const activeId = await getOrInitDeviceId();
-    updateDeviceDomElements(activeId);
+    if (activeId) updateDeviceDomElements(activeId);
 
-    chrome.runtime.sendMessage({ action: 'GET_DEVICE_ID' }, (devRes) => {
-      if (devRes?.deviceId && devRes.deviceId !== 'Đang lấy...') {
-        updateDeviceDomElements(devRes.deviceId);
+    let legacyHintId = '';
+    try {
+      legacyHintId = localStorage.getItem('autorecruit_device_id') || '';
+    } catch (_) {}
+
+    chrome.runtime.sendMessage({ action: 'CHECK_LICENSE', forceRemote, legacyHintId }, (res) => {
+      if (chrome.runtime.lastError || !res) return;
+
+      // Chống render lệch thứ tự: bỏ qua mọi kết quả có sequence cũ hơn kết quả đã render
+      const incomingSeq = Number(res.seq) || 0;
+      if (incomingSeq > 0 && incomingSeq < lastRenderedLicenseSeq) {
+        return;
       }
-    });
+      if (incomingSeq > lastRenderedLicenseSeq) {
+        lastRenderedLicenseSeq = incomingSeq;
+      }
 
-    chrome.runtime.sendMessage({ action: 'CHECK_LICENSE', forceRemote }, (res) => {
-      if (!res) return;
+      // Nếu mất mạng tạm thời (UNKNOWN_OFFLINE) và giao diện đã có trạng thái trước đó -> giữ nguyên trạng thái cũ
+      if (res.state === 'UNKNOWN_OFFLINE' && hasRenderedInitialLicense) {
+        return;
+      }
+
+      const resolvedDeviceId = res.deviceId || activeId || cachedDeviceId || '---';
+      if (isValidDashDeviceId(resolvedDeviceId)) {
+        updateDeviceDomElements(resolvedDeviceId);
+      }
+
+      const lic = res.license || {};
+      const stateFingerprint = [
+        res.state || '',
+        Boolean(res.isValid),
+        Boolean(res.isRevoked),
+        Boolean(res.isSuspended),
+        Boolean(res.isExpired),
+        lic.key || '',
+        lic.expiresAt || '',
+        lic.daysLeft || '',
+        lic.clientName || '',
+        resolvedDeviceId,
+      ].join('|');
+
+      // Chỉ cập nhật DOM khi trạng thái bản quyền thật sự thay đổi
+      if (hasRenderedInitialLicense && stateFingerprint === lastRenderedLicenseFingerprint) {
+        return;
+      }
+      lastRenderedLicenseFingerprint = stateFingerprint;
+      hasRenderedInitialLicense = true;
 
       const expiryAlertCard = document.getElementById('licenseExpiryAlertCard');
       const expiryAlertBadge = document.getElementById('expiryAlertBadge');
       const expiryAlertDesc = document.getElementById('expiryAlertDesc');
-      const lic = res.license || {};
 
       function parseExpDate(expStr) {
         if (!expStr) return 0;
@@ -1913,7 +2072,6 @@ document.addEventListener('DOMContentLoaded', () => {
           : (typeof lic.daysLeft === 'number' ? lic.daysLeft : parseInt(lic.daysLeft || '0', 10));
         const isExpiringSoon = daysLeft <= 3 && daysLeft >= 0;
 
-        // Cập nhật Header Pill
         if (licenseHeaderPill) {
           licenseHeaderPill.style.background = isExpiringSoon
             ? 'rgba(234, 88, 12, 0.35)'
@@ -1937,11 +2095,10 @@ document.addEventListener('DOMContentLoaded', () => {
           btnHeaderLicenseAction.className = isExpiringSoon ? 'btn btn-amber' : (isTrialPlan ? 'btn btn-sub' : 'btn btn-emerald');
         }
 
-        // Cập nhật Trang License
         if (licClientName) licClientName.innerText = lic.clientName || (isTrialPlan ? 'Khách Hàng Dùng Thử' : 'Khách Hàng VIP');
         if (licClientPhone) licClientPhone.innerText = clientPhoneVal;
-        if (licKeyDisplay) licKeyDisplay.innerText = lic.key;
-        if (licDeviceId) licDeviceId.innerText = activeId;
+        if (licKeyDisplay) licKeyDisplay.innerText = lic.key || 'VIP-MACHINE';
+        if (licDeviceId) licDeviceId.innerText = resolvedDeviceId;
         const activeBadgeText = isExpiringSoon
           ? `⚠️ SẮP HẾT HẠN (CÒN ${daysLeft} NGÀY)`
           : (isTrialPlan ? '🎁 GÓI DÙNG THỬ (20 BÀI ĐĂNG)' : '✓ BẢN QUYỀN HỢP LỆ');
@@ -1973,7 +2130,6 @@ document.addEventListener('DOMContentLoaded', () => {
           licDevicesCount.innerText = `${lic.activeDevicesCount || 1} / ${lic.maxDevices || 1} máy tính`;
         }
 
-        // 3. KHỐI NHẮC KHÁCH MUA GÓI MỚI KHI CÁCH NGÀY HẾT HẠN <= 3 NGÀY (ẢNH 2)
         if (expiryAlertCard) {
           if (isExpiringSoon) {
             expiryAlertCard.style.display = 'block';
@@ -1990,36 +2146,65 @@ document.addEventListener('DOMContentLoaded', () => {
           }
         }
       } else {
-        // Chưa kích hoạt, hết hạn hoặc bị thu hồi (Ngắt máy)
         if (expiryAlertCard) expiryAlertCard.style.display = 'none';
 
-        const isRevoked = Boolean(res.isRevoked || lic?.isRevoked);
-        const isExp = Boolean(res.isExpired || lic?.isExpired);
+        const isRevoked = Boolean(res.isRevoked || lic?.isRevoked || res.state === 'REVOKED');
+        const isSuspended = Boolean(res.isSuspended || lic?.isSuspended || res.state === 'SUSPENDED');
+        const isExp = Boolean(res.isExpired || lic?.isExpired || res.state === 'EXPIRED');
+        const isPendingOrder = res.status === 'pending';
 
         if (licenseHeaderPill) {
-          licenseHeaderPill.style.background = isRevoked || isExp ? 'rgba(136, 19, 55, 0.4)' : 'rgba(120, 53, 15, 0.25)';
-          licenseHeaderPill.style.borderColor = isRevoked || isExp ? 'rgba(244, 63, 94, 0.5)' : 'rgba(245, 158, 11, 0.4)';
+          licenseHeaderPill.style.background = isRevoked || isSuspended || isExp ? 'rgba(136, 19, 55, 0.4)' : 'rgba(120, 53, 15, 0.25)';
+          licenseHeaderPill.style.borderColor = isRevoked || isSuspended || isExp ? 'rgba(244, 63, 94, 0.5)' : 'rgba(245, 158, 11, 0.4)';
         }
         if (licenseHeaderTitle) {
           licenseHeaderTitle.innerText = isRevoked
             ? '🚫 Bản Quyền Đã Thu Hồi (Bị Khóa)'
-            : isExp
-            ? '🚨 Bản Quyền Đã Hết Hạn'
-            : 'Chưa Kích Hoạt Bản Quyền';
-          licenseHeaderTitle.style.color = isRevoked || isExp ? '#fda4af' : '#fbbf24';
+            : isSuspended
+              ? '⏸️ Bản Quyền Đang Tạm Khóa'
+              : isExp
+                ? '🚨 Bản Quyền Đã Hết Hạn'
+                : isPendingOrder
+                  ? '⏳ Đang Chờ Quản Trị Viên Duyệt Gói'
+                  : 'Chưa Kích Hoạt Bản Quyền';
+          licenseHeaderTitle.style.color = isRevoked || isSuspended || isExp ? '#fda4af' : '#fbbf24';
         }
-        if (licenseHeaderIcon) licenseHeaderIcon.innerText = isRevoked ? '🚫' : isExp ? '🚨' : '⚠️';
+        if (licenseHeaderIcon) licenseHeaderIcon.innerText = isRevoked ? '🚫' : isExp ? '🚨' : isPendingOrder ? '⏳' : '⚠️';
         if (btnHeaderLicenseAction) {
           btnHeaderLicenseAction.innerText = isRevoked ? 'Bị Khóa' : isExp ? 'Gia Hạn' : 'Kích Hoạt';
           btnHeaderLicenseAction.className = isRevoked ? 'btn btn-danger' : 'btn btn-amber';
         }
 
-        if (licClientName) licClientName.innerText = lic?.clientName ? `${lic.clientName} (${isRevoked ? 'Đã Thu Hồi' : 'Hết Hạn'})` : (isRevoked ? 'Bản Quyền Bị Thu Hồi' : 'Chưa Kích Hoạt');
+        if (licClientName) {
+          licClientName.innerText = lic?.clientName
+            ? `${lic.clientName} (${isRevoked ? 'Đã Thu Hồi' : 'Hết Hạn'})`
+            : isRevoked
+              ? 'Bản Quyền Bị Thu Hồi'
+              : isPendingOrder
+                ? 'Đang Chờ Phê Duyệt'
+                : 'Chưa Kích Hoạt';
+        }
         if (licClientPhone) licClientPhone.innerText = clientPhoneVal !== 'Chưa cập nhật' ? clientPhoneVal : '---';
         if (licKeyDisplay) licKeyDisplay.innerText = lic?.key ? lic.key : 'Chưa có mã';
-        if (licDeviceId) licDeviceId.innerText = activeId;
-        if (licExpiresAtText) licExpiresAtText.innerText = isRevoked ? 'Đã thu hồi' : (isExp ? 'Đã hết hạn' : 'Cần đặt mua / duyệt gói');
-        const inactiveBadgeText = isRevoked ? '🚫 ĐÃ THU HỒI (NGẮT MÁY)' : isExp ? '🚨 HẾT HẠN' : 'CHƯA KÍCH HOẠT';
+        if (licDeviceId) licDeviceId.innerText = resolvedDeviceId;
+        if (licExpiresAtText) {
+          licExpiresAtText.innerText = isRevoked
+            ? 'Đã thu hồi'
+            : isExp
+              ? 'Đã hết hạn'
+              : isPendingOrder
+                ? 'Đang chờ duyệt đơn'
+                : 'Cần đặt mua / duyệt gói';
+        }
+        const inactiveBadgeText = isRevoked
+          ? '🚫 ĐÃ THU HỒI (NGẮT MÁY)'
+          : isSuspended
+            ? '⏸️ TẠM KHÓA'
+            : isExp
+              ? '🚨 HẾT HẠN'
+              : isPendingOrder
+                ? '⏳ CHỜ PHÊ DUYỆT'
+                : 'CHƯA KÍCH HOẠT';
         if (licBadgeStatus) {
           licBadgeStatus.innerText = inactiveBadgeText;
           licBadgeStatus.className = 'badge-failed';
@@ -2039,140 +2224,133 @@ document.addEventListener('DOMContentLoaded', () => {
 
   btnRefreshLicenseStatus?.addEventListener('click', () => {
     loadLicenseDetails(true);
-    chrome.runtime.sendMessage({ action: 'SYNC_ADMIN_STATUS' }, () => {
-      loadLicenseDetails(true);
-    });
+    loadAndRenderClientOrders(true);
     showToast('🔄 Đang kiểm tra và đồng bộ lại bản quyền với máy chủ...');
   });
 
   // ==========================================
-  // LỊCH SỬ ĐƠN ĐẶT MUA & ĐỒNG BỘ HAI CHIỀU VỚI QUẢN TRỊ (ẨN & TỰ ĐỘNG KÍCH HOẠT)
+  // LỊCH SỬ ĐƠN ĐẶT MUA & ĐỒNG BỘ VỚI QUẢN TRỊ
   // ==========================================
   const clientOrdersHistoryList = document.getElementById('clientOrdersHistoryList');
 
-  async function loadAndRenderClientOrders(forceRemote = false) {
+  function renderClientOrdersList(orders = []) {
     if (!clientOrdersHistoryList) return;
-    if (forceRemote && !clientOrdersHistoryList.children.length) {
-      clientOrdersHistoryList.innerHTML = '<div style="color: #38bdf8; text-align: center; padding: 10px;">⏳ Đang đồng bộ với máy chủ Quản trị viên...</div>';
+    if (!Array.isArray(orders) || orders.length === 0) {
+      clientOrdersHistoryList.innerHTML =
+        '<div style="color: #64748b; text-align: center; padding: 10px;">Chưa có đơn đặt mua nào. Chọn một trong các gói bên dưới để gửi yêu cầu duyệt tự động!</div>';
+      return;
     }
 
-    chrome.runtime.sendMessage({ action: 'SYNC_ADMIN_STATUS' }, (res) => {
-      const orders = res?.orders || [];
-      if (!orders || orders.length === 0) {
-        clientOrdersHistoryList.innerHTML = '<div style="color: #64748b; text-align: center; padding: 10px;">Chưa có đơn đặt mua nào. Chọn một trong các gói bên dưới để gửi yêu cầu duyệt tự động!</div>';
-        return;
-      }
+    let html = '';
+    const approvedOrders = orders.filter((o) => o && o.status === 'approved');
 
-      let html = '';
-      const approvedOrders = orders.filter((o) => o.status === 'approved');
-
-      // Banner thông báo cộng dồn tất cả các gói đã mua thành công
-      if (approvedOrders.length > 1) {
-        let totalDays = 0;
-        approvedOrders.forEach((ao) => {
-          const p = (ao.pkgName || '').toLowerCase();
-          if (p.includes('3 tháng') || p.includes('90 ngày') || p.includes('100 ngày')) totalDays += 100;
-          else if (p.includes('6 tháng') || p.includes('180 ngày') || p.includes('195 ngày')) totalDays += 195;
-          else if (p.includes('1 năm') || p.includes('12 tháng') || p.includes('360 ngày') || p.includes('390 ngày')) totalDays += 390;
-          else if (p.includes('dùng thử') || p.includes('1 ngày')) totalDays += 1;
-          else totalDays += 30;
-        });
-
-        html += `
-          <div style="background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(6, 78, 59, 0.35)); border: 1.5px solid rgba(16, 185, 129, 0.6); border-radius: 10px; padding: 10px 14px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 12px rgba(16,185,129,0.15);">
-            <div style="display: flex; align-items: center; gap: 9px;">
-              <span style="font-size: 20px;">💎</span>
-              <div>
-                <div style="color: #34d399; font-weight: 800; font-size: 12.5px;">✓ ĐÃ CỘNG DỒN TẤT CẢ ${approvedOrders.length} GÓI MUA THÀNH CÔNG</div>
-                <div style="color: #cbd5e1; font-size: 11px; margin-top: 1px;">Toàn bộ ${approvedOrders.length} gói mua đã được hợp nhất thành một bản quyền VIP duy nhất cho máy này.</div>
-              </div>
-            </div>
-            <div style="text-align: right;">
-              <span style="background: #10b981; color: #042f2e; font-weight: 900; padding: 3px 10px; border-radius: 999px; font-size: 11px; letter-spacing: 0.3px;">TỔNG ${totalDays} NGÀY</span>
-            </div>
-          </div>
-        `;
-      }
-
-      orders.forEach((o) => {
-        const isApproved = o.status === 'approved';
-        const isPending = o.status === 'pending';
-        const statusBadge = isApproved
-          ? '<span style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); padding: 2px 7px; border-radius: 999px; font-weight: bold; font-size: 10px;">✅ Đã Phê Duyệt</span>'
-          : '<span style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); padding: 2px 7px; border-radius: 999px; font-weight: bold; font-size: 10px;">⏳ Chờ Quản Trị Duyệt</span>';
-
-        const shortId = (o.id || '').slice(-8).toUpperCase();
-        const dateStr = o.createdAt ? new Date(o.createdAt).toLocaleString('vi-VN') : '';
-
-        // Tự động kích hoạt ngầm trực tuyến nếu đơn đã duyệt mà máy chưa nhận
-        if (isApproved && o.generatedKey) {
-          chrome.storage.local.get(['licenseKey', 'licenseData'], (st) => {
-            if (!st.licenseKey || !st.licenseData?.isValid || st.licenseKey !== o.generatedKey) {
-              chrome.runtime.sendMessage({ action: 'ACTIVATE_LICENSE', key: o.generatedKey }, (actRes) => {
-                if (actRes?.success) {
-                  loadLicenseDetails(false);
-                }
-              });
-            }
-          });
-        }
-
-        let keyActionHtml = '';
-        if (isApproved) {
-          keyActionHtml = `
-            <div style="margin-top: 5px; padding: 5px 8px; background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 6px; display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: #34d399;">
-              <span>⚡ Gói này đã được cộng dồn vào thời hạn bản quyền VIP của máy!</span>
-              <span style="font-weight: 800;">✓ Hoạt Động</span>
-            </div>
-          `;
-        } else if (isPending) {
-          keyActionHtml = `
-            <div style="margin-top: 4px; color: #94a3b8; font-size: 10px;">
-              💡 <em>Đang chờ Quản trị viên duyệt (khoảng 1-3 phút). Tiện ích sẽ tự động nhận bản quyền ngay khi được duyệt!</em>
-            </div>
-          `;
-        }
-
-        const isTrial = (o.price === '0đ' || String(o.pkgName).includes('Dùng Thử'));
-        const pkgIcon = isTrial ? '🎁' : '💎';
-
-        html += `
-          <div style="background: #0f172a; border: 1px solid ${isApproved ? 'rgba(16, 185, 129, 0.4)' : '#1e293b'}; border-radius: 9px; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.3);">
-            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
-              <div style="display: flex; align-items: center; gap: 8px;">
-                <span style="font-size: 14px;">${pkgIcon}</span>
-                <div>
-                  <div style="display: flex; align-items: center; gap: 6px;">
-                    <strong style="color: #ffffff; font-size: 12px;">${o.pkgName || 'Gói Bản Quyền'}</strong>
-                    <span style="color: #34d399; font-weight: 800; font-size: 12px;">${o.price || '0đ'}</span>
-                  </div>
-                  <div style="font-size: 10.5px; color: #94a3b8; display: flex; align-items: center; gap: 6px; margin-top: 1px;">
-                    <span>Mã đơn: <code style="color: #38bdf8; font-family: monospace;">#${shortId}</code></span>
-                    ${o.deviceId ? `<span>• Máy: <code style="color: #cbd5e1; font-family: monospace;">${o.deviceId}</code></span>` : ''}
-                  </div>
-                </div>
-              </div>
-              <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 2px;">
-                ${statusBadge}
-                <span style="color: #64748b; font-size: 10px; margin-top: 2px;">${dateStr}</span>
-              </div>
-            </div>
-            ${keyActionHtml}
-          </div>
-        `;
+    if (approvedOrders.length > 1) {
+      let totalDays = 0;
+      approvedOrders.forEach((ao) => {
+        const p = (ao.pkgName || '').toLowerCase();
+        if (p.includes('3 tháng') || p.includes('90 ngày') || p.includes('100 ngày')) totalDays += 100;
+        else if (p.includes('6 tháng') || p.includes('180 ngày') || p.includes('195 ngày')) totalDays += 195;
+        else if (p.includes('1 năm') || p.includes('12 tháng') || p.includes('360 ngày') || p.includes('390 ngày')) totalDays += 390;
+        else if (p.includes('dùng thử') || p.includes('1 ngày')) totalDays += 1;
+        else totalDays += 30;
       });
 
-      clientOrdersHistoryList.innerHTML = html;
+      html += `
+        <div style="background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(6, 78, 59, 0.35)); border: 1.5px solid rgba(16, 185, 129, 0.6); border-radius: 10px; padding: 10px 14px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 12px rgba(16,185,129,0.15);">
+          <div style="display: flex; align-items: center; gap: 9px;">
+            <span style="font-size: 20px;">💎</span>
+            <div>
+              <div style="color: #34d399; font-weight: 800; font-size: 12.5px;">✓ ĐÃ CỘNG DỒN TẤT CẢ ${approvedOrders.length} GÓI MUA THÀNH CÔNG</div>
+              <div style="color: #cbd5e1; font-size: 11px; margin-top: 1px;">Toàn bộ ${approvedOrders.length} gói mua đã được hợp nhất thành một bản quyền VIP duy nhất cho máy này.</div>
+            </div>
+          </div>
+          <div style="text-align: right;">
+            <span style="background: #10b981; color: #042f2e; font-weight: 900; padding: 3px 10px; border-radius: 999px; font-size: 11px; letter-spacing: 0.3px;">TỔNG ${totalDays} NGÀY</span>
+          </div>
+        </div>
+      `;
+    }
+
+    orders.forEach((o) => {
+      if (!o) return;
+      const isApproved = o.status === 'approved';
+      const isPending = o.status === 'pending';
+      const statusBadge = isApproved
+        ? '<span style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); padding: 2px 7px; border-radius: 999px; font-weight: bold; font-size: 10px;">✅ Đã Phê Duyệt</span>'
+        : '<span style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); padding: 2px 7px; border-radius: 999px; font-weight: bold; font-size: 10px;">⏳ Chờ Quản Trị Duyệt</span>';
+
+      const shortId = (o.id || '').slice(-8).toUpperCase();
+      const dateStr = o.createdAt ? new Date(o.createdAt).toLocaleString('vi-VN') : '';
+
+      let keyActionHtml = '';
+      if (isApproved) {
+        keyActionHtml = `
+          <div style="margin-top: 5px; padding: 5px 8px; background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 6px; display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: #34d399;">
+            <span>⚡ Gói này đã được cộng dồn vào thời hạn bản quyền VIP của máy!</span>
+            <span style="font-weight: 800;">✓ Hoạt Động</span>
+          </div>
+        `;
+      } else if (isPending) {
+        keyActionHtml = `
+          <div style="margin-top: 4px; color: #94a3b8; font-size: 10px;">
+            💡 <em>Đang chờ Quản trị viên duyệt (khoảng 1-3 phút). Tiện ích sẽ tự động nhận bản quyền ngay khi được duyệt!</em>
+          </div>
+        `;
+      }
+
+      const isTrial = o.price === '0đ' || String(o.pkgName).includes('Dùng Thử');
+      const pkgIcon = isTrial ? '🎁' : '💎';
+
+      html += `
+        <div style="background: #0f172a; border: 1px solid ${isApproved ? 'rgba(16, 185, 129, 0.4)' : '#1e293b'}; border-radius: 9px; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.3);">
+          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 14px;">${pkgIcon}</span>
+              <div>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <strong style="color: #ffffff; font-size: 12px;">${o.pkgName || 'Gói Bản Quyền'}</strong>
+                  <span style="color: #34d399; font-weight: 800; font-size: 12px;">${o.price || '0đ'}</span>
+                </div>
+                <div style="font-size: 10.5px; color: #94a3b8; display: flex; align-items: center; gap: 6px; margin-top: 1px;">
+                  <span>Mã đơn: <code style="color: #38bdf8; font-family: monospace;">#${shortId}</code></span>
+                  ${o.deviceId ? `<span>• Máy: <code style="color: #cbd5e1; font-family: monospace;">${o.deviceId}</code></span>` : ''}
+                </div>
+              </div>
+            </div>
+            <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 2px;">
+              ${statusBadge}
+              <span style="color: #64748b; font-size: 10px; margin-top: 2px;">${dateStr}</span>
+            </div>
+          </div>
+          ${keyActionHtml}
+        </div>
+      `;
+    });
+
+    clientOrdersHistoryList.innerHTML = html;
+  }
+
+  async function loadAndRenderClientOrders(forceRemote = false) {
+    if (!clientOrdersHistoryList) return;
+    if (!forceRemote) {
+      const localOrders = await chrome.storage.local.get(['myOrders']).catch(() => ({}));
+      if (Array.isArray(localOrders.myOrders) && localOrders.myOrders.length > 0) {
+        renderClientOrdersList(localOrders.myOrders);
+      }
+    }
+    chrome.runtime.sendMessage({ action: 'SYNC_ADMIN_STATUS' }, (res) => {
+      if (chrome.runtime.lastError || !res) return;
+      renderClientOrdersList(res.orders || []);
     });
   }
 
-  // Cơ chế đồng bộ ẩn: Tự động chạy định kỳ 3 giây để cập nhật tức thì hai chiều giữa Quản trị và Extension
+  // Kiểm tra nền định kỳ 60 giây khi tab Dashboard đang hiển thị (mọi thay đổi tức thì đã có chrome.storage.onChanged)
   setInterval(() => {
-    loadLicenseDetails(false);
-    loadAndRenderClientOrders(false);
-  }, 3000);
+    if (!document.hidden) {
+      loadLicenseDetails(false);
+    }
+  }, 60000);
 
-  // Tự động tải danh sách đơn hàng của khách
   loadAndRenderClientOrders(false);
 
   // Cấu hình máy chủ bản quyền tùy chỉnh
@@ -2205,7 +2383,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Tải trạng thái bản quyền ngay khi mở trang
-  loadLicenseDetails();
+  loadLicenseDetails(false);
 
   // MODAL HƯỚNG DẪN SỬ DỤNG & LƯU Ý AN TOÀN
   const modalUserGuide = document.getElementById('modalUserGuide');
@@ -2342,9 +2520,17 @@ window.updateOrderTransferMemoAndQr = function(immediateQr = false) {
     } catch (e) {}
   }
   if (!devId) {
-    devId = 'dev_' + Math.random().toString(36).substring(2, 9) + '_' + Date.now().toString(36);
+    devId = 'AFB-PC';
+    // Yêu cầu bất đồng bộ lấy ID chuẩn từ Service Worker, sau đó cập nhật lại QR
+    getOrInitDeviceId().then((resolvedId) => {
+      if (resolvedId && resolvedId !== 'AFB-PC') {
+        updateDeviceDomElements(resolvedId);
+        window.updateOrderTransferMemoAndQr(true);
+      }
+    }).catch(() => {});
+  } else {
+    updateDeviceDomElements(devId);
   }
-  updateDeviceDomElements(devId);
 
   const customerName = nameInput ? nameInput.value.trim() : '';
   const customerPhone = phoneInput ? phoneInput.value.trim() : '';
@@ -2532,7 +2718,7 @@ window.submitOrderOnline = async function() {
   }
 };
 
-// Hàm thực thi hoàn tất quá trình mua và gửi lệnh mua lên Server
+// Hàm thực thi hoàn tất quá trình mua và gửi lệnh mua qua Service Worker (Single Source of Truth)
 let isSubmittingOrder = false;
 window.proceedSendOrder = async function() {
   if (isSubmittingOrder) return;
@@ -2561,7 +2747,6 @@ window.proceedSendOrder = async function() {
   const isTrial = (pkg.price === '0đ' || String(pkg.name).includes('Dùng Thử') || String(pkg.name).toLowerCase().includes('trial'));
   const memo = generateTransferMemo(customerName, phone, pkg.name, devId);
 
-  // Lưu thông tin SĐT và Tên để lần sau tự điền và tự động nhận diện bản quyền
   try {
     if (phone) {
       localStorage.setItem('gialong_last_phone', phone);
@@ -2603,36 +2788,17 @@ window.proceedSendOrder = async function() {
     if (successBody) successBody.style.display = 'flex';
   };
 
-  // Hiển thị UI thành công NGAY LẬP TỨC (0ms) để khách hàng không phải chờ đợi load
-  let uiShown = false;
-  const triggerSuccessOnce = (data) => {
-    if (uiShown) return;
-    uiShown = true;
-    showSuccessUI(data || orderPayload);
-  };
+  showSuccessUI(orderPayload);
 
-  triggerSuccessOnce(orderPayload);
-
-  // Gửi qua Background Service Worker (1 lần duy nhất)
+  // Chỉ ủy quyền 1 lần duy nhất cho Background Service Worker:
+  // Background sẽ tự lưu myOrders, gửi /api/orders/create và kích hoạt fast-polling 3s/lần an toàn (tối đa 5 phút)
   try {
     if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
       chrome.runtime.sendMessage({ action: 'CREATE_ORDER', payload: orderPayload });
     }
   } catch (e) {}
 
-  // Gửi trực tiếp /api/orders/create duy nhất 1 lần tới API_BASE chính thức
-  try {
-    const apiBase = 'https://gia-long---tuy-n-d-ng.pages.dev';
-    fetch(`${apiBase}/api/orders/create`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(orderPayload),
-    }).then((res) => {
-      if (res.ok) console.log('[Gia Long FB] ✓ Đã gửi đơn hàng thành công lên máy chủ:', apiBase);
-    }).catch(() => {});
-  } catch (e) {}
-
-  // Gửi trực tiếp sang Google Drive Sheet Webhook nếu có
+  // Gửi trực tiếp sang Google Drive Sheet Webhook nếu có cấu hình
   try {
     if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
       chrome.storage.local.get(['googleDriveSheetWebhookUrl'], (res) => {
@@ -2661,49 +2827,6 @@ window.proceedSendOrder = async function() {
       });
     }
   } catch (e) {}
-
-  // 3. Khởi động kiểm tra nhanh phía Dashboard (3s/lần trong 5 phút)
-  let dashFastPollCount = 0;
-  const dashFastPollInterval = setInterval(async () => {
-    dashFastPollCount += 3;
-    if (dashFastPollCount >= 300) {
-      clearInterval(dashFastPollInterval);
-      return;
-    }
-    for (const base of candidateUrls) {
-      try {
-        const resp = await fetch(`${base}/api/check?machine_id=${encodeURIComponent(devId)}`, { cache: 'no-store' });
-        if (!resp.ok) continue;
-        const res = await resp.json();
-        if (res && res.success && res.status === 'active') {
-          clearInterval(dashFastPollInterval);
-          if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-            await chrome.storage.local.set({
-              signedToken: res.token,
-              licenseStatus: 'active',
-              expiresAt: res.expires_at,
-              lastCheckedAt: Date.now(),
-              cachedPkgName: res.pkg_name,
-              isVip: true,
-              licenseKey: res.token || 'GLFB-VIP-ACTIVE',
-              isRevoked: false,
-            });
-          }
-          const successNotice = document.getElementById('orderSuccessBody');
-          if (successNotice) {
-            successNotice.innerHTML = `
-              <div style="text-align: center; padding: 20px; background: #064e3b; border: 1px solid #10b981; border-radius: 12px; color: #fff;">
-                <h3 style="font-size: 18px; font-weight: bold; margin-bottom: 8px;">🎉 QUẢN TRỊ VIÊN ĐÃ PHÊ DUYỆT!</h3>
-                <p style="font-size: 14px; color: #a7f3d0; margin-bottom: 12px;">Bản quyền VIP của bạn đã được kích hoạt thành công (Hạn đến: ${new Date(res.expires_at).toLocaleDateString('vi-VN')}).</p>
-                <button onclick="window.location.reload()" style="background: #10b981; color: #000; font-weight: bold; padding: 8px 18px; border: none; border-radius: 8px; cursor: pointer;">Sử Dụng Ngay</button>
-              </div>
-            `;
-          }
-          break;
-        }
-      } catch (e) {}
-    }
-  }, 3000);
 
   setTimeout(() => {
     isSubmittingOrder = false;
@@ -2812,16 +2935,27 @@ document.addEventListener('DOMContentLoaded', () => {
   updateDashboardRealtimeClock();
   setInterval(updateDashboardRealtimeClock, 1000);
 
-
-
-  // Lắng nghe tín hiệu ngắt máy từ Background
+  // Lắng nghe tín hiệu từ Background Service Worker
   try {
     if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
       chrome.runtime.onMessage.addListener((msg) => {
         if (msg.action === 'FORCE_REVOKE_STOP' || msg.action === 'VIP_REVOKED') {
           console.warn('[Dashboard] Nhận lệnh ngắt máy khẩn cấp:', msg);
-          loadLicenseDetails(true);
+          loadLicenseDetails(false);
           switchTab('license');
+        } else if (msg.action === 'VIP_ACTIVATED_FAST') {
+          loadLicenseDetails(false);
+          const successNotice = document.getElementById('orderSuccessBody');
+          if (successNotice && successNotice.style.display !== 'none') {
+            const expStr = msg.expiresAt ? new Date(msg.expiresAt).toLocaleDateString('vi-VN') : 'Đang hoạt động';
+            successNotice.innerHTML = `
+              <div style="text-align: center; padding: 20px; background: #064e3b; border: 1px solid #10b981; border-radius: 12px; color: #fff;">
+                <h3 style="font-size: 18px; font-weight: bold; margin-bottom: 8px;">🎉 QUẢN TRỊ VIÊN ĐÃ PHÊ DUYỆT!</h3>
+                <p style="font-size: 14px; color: #a7f3d0; margin-bottom: 12px;">Bản quyền VIP của bạn đã được kích hoạt thành công (Hạn đến: ${expStr}).</p>
+                <button onclick="window.closeOrderModal()" style="background: #10b981; color: #000; font-weight: bold; padding: 8px 18px; border: none; border-radius: 8px; cursor: pointer;">Sử Dụng Ngay</button>
+              </div>
+            `;
+          }
         }
       });
     }

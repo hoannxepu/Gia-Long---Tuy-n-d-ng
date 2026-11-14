@@ -1,5 +1,7 @@
-// background.js - Điều phối Đăng Bài Facebook & Hẹn Giờ Chuẩn 100% Manifest V3
-// Hỗ trợ: Dừng tức thì, Hẹn giờ chuẩn Alarms, Lịch sử đăng bài, Dò tìm & Tham gia nhóm, Giữ kết nối Web App
+// background.js - Điều phối Đăng Bài Facebook & Hẹn Giờ Chuẩn 100% Manifest V3 (v1.0.5)
+// Kiến trúc Single Source of Truth cho Bản Quyền (License State Machine) & Quản Lý Tài Khoản FB
+
+self.__GLFB_IS_BACKGROUND_WORKER__ = true;
 
 try {
   importScripts('storage.js');
@@ -62,46 +64,154 @@ async function addHistoryEntry(entry) {
     };
     const updated = [newEntry, ...history].slice(0, 1000);
     await chrome.storage.local.set({ postHistory: updated });
-    console.log('[AutoRecruit Background] Đã ghi lịch sử:', newEntry.status, newEntry.groupName);
   } catch (err) {
     console.warn('[AutoRecruit Background] Lỗi ghi lịch sử:', err);
   }
 }
 
-// ==========================================
-// HỆ THỐNG QUẢN LÝ BẢN QUYỀN (LICENSE MANAGER)
-// Hỗ trợ cả Cá Nhân (1 máy) & Doanh Nghiệp (Team N máy)
-// ==========================================
+// ============================================================================
+// HỆ THỐNG ĐỊNH DANH THIẾT BỊ DUY NHẤT (CANONICAL DEVICE ID WITH PROMISE MUTEX)
+// & MÁY TRẠNG THÁI BẢN QUYỀN (SINGLE SOURCE OF TRUTH LICENSE STATE MACHINE)
+// ============================================================================
 const PRODUCTION_API_BASE = 'https://gia-long---tuy-n-d-ng.pages.dev';
 
-async function getOrCreateDeviceId() {
-  try {
-    const data = await chrome.storage.local.get(['autorecruit_device_id']);
-    if (data.autorecruit_device_id && data.autorecruit_device_id !== 'Đang lấy...' && !data.autorecruit_device_id.includes('đang lấy') && String(data.autorecruit_device_id).trim() !== '') {
-      return data.autorecruit_device_id;
-    }
+const LICENSE_STATES = {
+  ACTIVE: 'ACTIVE',
+  EXPIRED: 'EXPIRED',
+  REVOKED: 'REVOKED',
+  SUSPENDED: 'SUSPENDED',
+  UNREGISTERED: 'UNREGISTERED',
+  UNKNOWN_OFFLINE: 'UNKNOWN_OFFLINE',
+};
 
-    try {
-      if (chrome.storage && chrome.storage.sync) {
-        const syncData = await chrome.storage.sync.get(['autorecruit_device_id']);
-        if (syncData.autorecruit_device_id && syncData.autorecruit_device_id !== 'Đang lấy...' && !syncData.autorecruit_device_id.includes('đang lấy') && String(syncData.autorecruit_device_id).trim() !== '') {
-          await chrome.storage.local.set({ autorecruit_device_id: syncData.autorecruit_device_id });
-          return syncData.autorecruit_device_id;
-        }
-      }
-    } catch (e) {}
+const LICENSE_CACHE_TTL_MS = 60 * 1000; // 60 giây khi UI (Popup/Dashboard) mở
+const UNREGISTERED_DOWNGRADE_STREAK_THRESHOLD = 3; // Cần >= 3 phản hồi unregistered liên tiếp mới hạ cấp máy đang ACTIVE
+const OFFLINE_GRACE_PERIOD_MS = 48 * 60 * 60 * 1000; // 48 giờ giữ trạng thái ACTIVE khi lỗi mạng/server 5xx
 
-    const newId = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : ('dev_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 9));
-    await chrome.storage.local.set({ autorecruit_device_id: newId });
-    try {
-      if (chrome.storage && chrome.storage.sync) {
-        await chrome.storage.sync.set({ autorecruit_device_id: newId });
-      }
-    } catch (e) {}
-    return newId;
-  } catch (e) {
-    return (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : 'dev_pc_' + Date.now().toString(36);
+let cachedDeviceId = null;
+let inFlightDeviceIdPromise = null;
+let inFlightLicenseCheckPromise = null;
+let licenseSeqCounter = 0;
+let consecutiveNetworkFailures = 0;
+let fastPollTimer = null;
+let fastPollEndTime = 0;
+
+function isValidDeviceId(val) {
+  if (!val || typeof val !== 'string') return false;
+  const trimmed = val.trim();
+  if (trimmed.length < 6) return false;
+  const lower = trimmed.toLowerCase();
+  if (lower.includes('đang lấy') || lower.includes('dang lay') || lower === 'chưa gắn' || lower === 'chuagan') {
+    return false;
   }
+  return true;
+}
+
+function isRealHumanLicenseKey(key) {
+  if (!key || typeof key !== 'string') return false;
+  const clean = key.trim();
+  if (!clean || clean === 'GLFB-VIP-ACTIVE') return false;
+  if (
+    clean.startsWith('GLFB_ED1_') ||
+    clean.startsWith('GLFB_ED25519_') ||
+    clean.startsWith('GLFB_SIG_')
+  ) {
+    return false;
+  }
+  return clean.toUpperCase().startsWith('GLFB-');
+}
+
+/**
+ * Hàm lấy/khởi tạo Mã Máy duy nhất trong toàn bộ Extension.
+ * An toàn tuyệt đối khi gọi đồng thời (50+ callers cùng lúc nhận đúng 1 Promise & 1 ID).
+ * Hỗ trợ bảo toàn legacyHintId từ localStorage cũ của Dashboard để khách đang có bản quyền không bị mất.
+ */
+async function getOrCreateDeviceId(legacyHintId = '') {
+  const cleanHint = isValidDeviceId(legacyHintId) ? String(legacyHintId).trim() : '';
+
+  if (cachedDeviceId && isValidDeviceId(cachedDeviceId)) {
+    if (cleanHint && cleanHint.toLowerCase() !== cachedDeviceId.toLowerCase()) {
+      try {
+        const st = await chrome.storage.local.get(['legacyDeviceIds']);
+        const list = Array.isArray(st.legacyDeviceIds) ? st.legacyDeviceIds : [];
+        if (!list.some((id) => String(id).toLowerCase() === cleanHint.toLowerCase())) {
+          await chrome.storage.local.set({ legacyDeviceIds: [...list, cleanHint] });
+        }
+      } catch (_) {}
+    }
+    return cachedDeviceId;
+  }
+
+  if (inFlightDeviceIdPromise) {
+    return inFlightDeviceIdPromise;
+  }
+
+  inFlightDeviceIdPromise = (async () => {
+    try {
+      const localData = await chrome.storage.local.get(['autorecruit_device_id', 'legacyDeviceIds']);
+      let syncId = '';
+      try {
+        if (chrome.storage && chrome.storage.sync) {
+          const syncData = await chrome.storage.sync.get(['autorecruit_device_id']);
+          if (isValidDeviceId(syncData?.autorecruit_device_id)) {
+            syncId = String(syncData.autorecruit_device_id).trim();
+          }
+        }
+      } catch (_) {}
+
+      const localId = isValidDeviceId(localData?.autorecruit_device_id)
+        ? String(localData.autorecruit_device_id).trim()
+        : '';
+
+      const legacySet = new Set(
+        Array.isArray(localData?.legacyDeviceIds)
+          ? localData.legacyDeviceIds.filter(isValidDeviceId).map((s) => String(s).trim())
+          : []
+      );
+      if (syncId) legacySet.add(syncId);
+      if (cleanHint) legacySet.add(cleanHint);
+      if (localId) legacySet.add(localId);
+
+      // Thứ tự ưu tiên: local -> sync -> legacyHint -> sinh UUID mới
+      let chosenId = localId || syncId || cleanHint;
+      if (!chosenId) {
+        chosenId =
+          typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+            ? crypto.randomUUID()
+            : 'dev_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 10);
+      }
+
+      cachedDeviceId = chosenId;
+      const otherLegacyIds = Array.from(legacySet).filter(
+        (id) => id.toLowerCase() !== chosenId.toLowerCase()
+      );
+
+      await chrome.storage.local.set({
+        autorecruit_device_id: chosenId,
+        legacyDeviceIds: otherLegacyIds,
+      });
+
+      try {
+        if (chrome.storage && chrome.storage.sync) {
+          await chrome.storage.sync.set({ autorecruit_device_id: chosenId });
+        }
+      } catch (_) {}
+
+      return chosenId;
+    } catch (e) {
+      if (!cachedDeviceId) {
+        cachedDeviceId =
+          typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+            ? crypto.randomUUID()
+            : 'dev_pc_' + Date.now().toString(36);
+      }
+      return cachedDeviceId;
+    } finally {
+      inFlightDeviceIdPromise = null;
+    }
+  })();
+
+  return inFlightDeviceIdPromise;
 }
 
 async function getApiBaseUrl() {
@@ -115,245 +225,692 @@ async function getApiBaseUrl() {
 }
 
 function getCandidateServerUrls(primaryBase = null) {
+  const urls = [];
   if (primaryBase && primaryBase.startsWith('http')) {
-    return [primaryBase.trim().replace(/\/+$/, '')];
+    urls.push(primaryBase.trim().replace(/\/+$/, ''));
   }
-  return [PRODUCTION_API_BASE];
+  if (!urls.includes(PRODUCTION_API_BASE)) {
+    urls.push(PRODUCTION_API_BASE);
+  }
+  return urls;
 }
 
 async function getAllServerCandidates(primaryBase = null) {
   return getCandidateServerUrls(primaryBase);
 }
 
-// ========================================================
-// HỆ THỐNG KIỂM TRA NHANH & LƯU CACHE THÔNG MINH CHO EXTENSION
-// Cơ chế: Khi mua gói -> kiểm tra 3s/lần trong 3-5 phút
-// Khi dùng hàng ngày -> đọc từ bộ nhớ máy (chrome.storage),
-// ngầm kiểm tra lại 60 phút/lần -> 100% MIỄN PHÍ KỂ CẢ HÀNG NGHÌN MÁY!
-// ========================================================
-let fastPollInterval = null;
-let fastPollSecondsElapsed = 0;
+/**
+ * Ghi trạng thái license chuẩn hóa kèm số thứ tự tăng đơn điệu (licenseSeq) và timestamp (licenseUpdatedAt).
+ * Mọi cập nhật trạng thái bản quyền đều đi qua hàm này để chống race condition và render lệch thứ tự.
+ */
+async function commitLicenseState(patch = {}) {
+  const runCommit = async () => {
+    const cur = await chrome.storage.local.get(['licenseSeq', 'licenseState', 'licenseStatus']);
+    const nextSeq = Math.max(licenseSeqCounter + 1, (Number(cur.licenseSeq) || 0) + 1);
+    licenseSeqCounter = nextSeq;
+    const now = Date.now();
+    const toWrite = {
+      ...patch,
+      licenseSeq: nextSeq,
+      licenseUpdatedAt: now,
+    };
+    await chrome.storage.local.set(toWrite);
+    return { nextSeq, updatedAt: now };
+  };
 
-function startFastLicensePolling(machineId, maxSeconds = 300) {
-  if (fastPollInterval) {
-    clearInterval(fastPollInterval);
-    fastPollInterval = null;
+  if (typeof SharedStorage !== 'undefined' && SharedStorage.enqueueKeyTask) {
+    return SharedStorage.enqueueKeyTask('licenseState', runCommit);
   }
-  fastPollSecondsElapsed = 0;
-  console.log(`[Fast Polling D1] 🚀 Bắt đầu chế độ kiểm tra siêu tốc (2 giây/lần) cho máy: ${machineId}...`);
+  return runCommit();
+}
 
-  fastPollInterval = setInterval(async () => {
-    fastPollSecondsElapsed += 2;
-    if (fastPollSecondsElapsed >= maxSeconds) {
-      console.log('[Fast Polling D1] Đã kết thúc chu kỳ kiểm tra nhanh (5 phút). Chuyển sang chế độ chạy nền.');
-      clearInterval(fastPollInterval);
-      fastPollInterval = null;
+/**
+ * Thực thi dừng khẩn cấp toàn bộ tiến trình khi có xác nhận REVOKED hoặc SUSPENDED thật sự từ máy chủ.
+ */
+async function enforceHardRevokeOrSuspend({ isRevoked, isSuspended, message }) {
+  const nextState = isRevoked ? LICENSE_STATES.REVOKED : LICENSE_STATES.SUSPENDED;
+  const nextStatus = isRevoked ? 'revoked' : 'suspended';
+
+  await commitLicenseState({
+    licenseState: nextState,
+    licenseStatus: nextStatus,
+    isRevoked: Boolean(isRevoked),
+    isSuspended: Boolean(isSuspended),
+    isVip: false,
+    isRunning: false,
+    isScheduleActive: false,
+    autoScheduleEnabled: false,
+    scheduledJobs: [],
+    unregisteredStreak: 0,
+    postJobState: 'REVOKED_STOPPED',
+    lastCheckedAt: Date.now(),
+  });
+
+  if (isRevoked) {
+    await chrome.storage.local.remove(['signedToken', 'licenseKey', 'licenseData', 'currentLicense', 'licenseInfo']);
+  }
+
+  try {
+    if (typeof FbRunner !== 'undefined' && typeof FbRunner.stopBatchPosting === 'function') {
+      await Promise.resolve(FbRunner.stopBatchPosting()).catch(() => {});
+    }
+  } catch (_) {}
+  try {
+    if (typeof AlarmsManager !== 'undefined' && typeof AlarmsManager.stopKeepAlive === 'function') {
+      await Promise.resolve(AlarmsManager.stopKeepAlive()).catch(() => {});
+    }
+  } catch (_) {}
+  try {
+    if (typeof chrome !== 'undefined' && chrome.alarms && typeof chrome.alarms.clearAll === 'function') {
+      chrome.alarms.clearAll(() => {});
+    }
+  } catch (_) {}
+
+  shouldStop = true;
+  isRunning = false;
+  try { stopKeepAlive(); } catch (_) {}
+  if (activeTabId) {
+    try {
+      Promise.resolve(chrome.tabs.remove(activeTabId)).catch(() => {});
+    } catch (_) {}
+    activeTabId = null;
+  }
+
+  try {
+    if (chrome.tabs && typeof chrome.tabs.query === 'function') {
+      Promise.resolve(chrome.tabs.query({})).then((tabs) => {
+        if (!Array.isArray(tabs)) return;
+        tabs.forEach((tab) => {
+          if (tab && tab.id) {
+            try {
+              Promise.resolve(chrome.tabs.sendMessage(tab.id, {
+                action: 'FORCE_REVOKE_STOP',
+                message: message || '🚨 Bản quyền của máy tính này đã bị Quản trị viên thu hồi hoặc tạm khóa!',
+              })).catch(() => {});
+            } catch (_) {}
+          }
+        });
+      }).catch(() => {});
+    }
+  } catch (_) {}
+}
+
+/**
+ * Khởi động kiểm tra nhanh (Fast Poll 3s/lần trong tối đa 5 phút) CHỈ ngay sau khi khách gửi đơn mua gói.
+ * Chỉ chạy duy nhất tại Service Worker (background.js), tuyệt đối không chạy trùng từ Dashboard.
+ */
+function startFastLicensePolling(machineId, maxSeconds = 300) {
+  if (fastPollTimer) {
+    clearInterval(fastPollTimer);
+    fastPollTimer = null;
+  }
+  fastPollEndTime = Date.now() + maxSeconds * 1000;
+  chrome.storage.local.set({ fastPollUntil: fastPollEndTime }).catch(() => {});
+
+  try {
+    if (chrome.alarms) {
+      chrome.alarms.create('glfb_fast_order_poll', { periodInMinutes: 0.5 });
+    }
+  } catch (_) {}
+
+  fastPollTimer = setInterval(async () => {
+    if (Date.now() >= fastPollEndTime) {
+      clearInterval(fastPollTimer);
+      fastPollTimer = null;
+      try {
+        chrome.alarms?.clear('glfb_fast_order_poll');
+      } catch (_) {}
       return;
     }
 
     try {
-      const primaryBase = await getApiBaseUrl();
-      const serverCandidates = getCandidateServerUrls(primaryBase);
-      for (const base of serverCandidates) {
+      const res = await checkLicenseStatus(true, { reason: 'fast_poll_order' });
+      if (res && res.isValid && res.state === LICENSE_STATES.ACTIVE) {
+        clearInterval(fastPollTimer);
+        fastPollTimer = null;
+        fastPollEndTime = 0;
+        chrome.storage.local.remove(['fastPollUntil']).catch(() => {});
         try {
-          const resp = await fetch(`${base}/api/check?machine_id=${encodeURIComponent(machineId)}`, {
-            cache: 'no-store',
-          });
-          if (!resp.ok) continue;
-          const data = await resp.json();
-          if (data && data.success && data.status === 'active') {
-            console.log('[Fast Polling D1] 🎉 QUẢN TRỊ VIÊN ĐÃ PHÊ DUYỆT BẢN QUYỀN VIP!', data);
-            clearInterval(fastPollInterval);
-            fastPollInterval = null;
+          chrome.alarms?.clear('glfb_fast_order_poll');
+        } catch (_) {}
 
-            const cacheData = {
-              signedToken: data.token,
-              licenseStatus: 'active',
-              expiresAt: data.expires_at,
-              lastCheckedAt: Date.now(),
-              cachedPkgName: data.pkg_name,
-              isVip: true,
-              licenseKey: data.token || data.license_key || 'GLFB-VIP-ACTIVE',
-              isRevoked: false,
-              licenseData: {
-                key: data.token || data.license_key || 'GLFB-VIP-ACTIVE',
-                expiresAt: data.expires_at,
-                clientName: data.client_name || 'Khách Đặt Mua',
-                notes: data.pkg_name || 'Bản quyền VIP Gia Long',
-                daysLeft: data.days_left || 30,
-                lastVerifiedAt: Date.now(),
-              },
-            };
-
-            await chrome.storage.local.set(cacheData);
-
-            // Bắn tin báo tới tất cả tabs & dashboard để cập nhật giao diện ngay
-            try {
-              if (chrome.tabs && chrome.tabs.query) {
-                chrome.tabs.query({}).then((tabs) => {
-                  tabs.forEach((tab) => {
-                    if (tab.id) {
-                      chrome.tabs.sendMessage(tab.id, {
-                        action: 'VIP_ACTIVATED_FAST',
-                        data: cacheData,
-                      }).catch(() => {});
-                    }
-                  });
-                }).catch(() => {});
-              }
-            } catch (e) {}
-
-            return;
+        try {
+          if (chrome.tabs && chrome.tabs.query) {
+            chrome.tabs.query({}).then((tabs) => {
+              tabs.forEach((tab) => {
+                if (tab.id) {
+                  chrome.tabs.sendMessage(tab.id, {
+                    action: 'VIP_ACTIVATED_FAST',
+                    data: res,
+                  }).catch(() => {});
+                }
+              });
+            }).catch(() => {});
           }
-        } catch (err) {}
+        } catch (_) {}
       }
-    } catch (e) {}
-  }, 2000);
+    } catch (_) {}
+  }, 3000);
 }
 
-// Kiểm tra ngầm và đồng bộ tức thì với máy chủ sau mỗi 10-15 giây mà không làm gián đoạn người dùng
-let isCheckingBackground = false;
-async function checkServerBackground(machineId, token) {
-  if (isCheckingBackground) return null;
-  isCheckingBackground = true;
-  try {
-    const primaryBase = await getApiBaseUrl();
-    const serverCandidates = getCandidateServerUrls(primaryBase);
-    for (const base of serverCandidates) {
-      try {
-        const resp = await fetch(`${base}/api/check?machine_id=${encodeURIComponent(machineId)}`, {
-          cache: 'no-store',
-          signal: AbortSignal.timeout(2500),
-        });
-        if (!resp.ok) continue;
-        const data = await resp.json();
-        const isExplicitRevoked = Boolean(
-          data.status === 'revoked' || 
-          data.isRevoked === true || 
-          data.action === 'FORCE_REVOKE'
-        );
-        const isSuspended = Boolean(data.status === 'suspended' || data.isSuspended === true);
+/**
+ * Gọi máy chủ /api/check?machine_id=... cho một mã máy cụ thể.
+ * Phân biệt rõ:
+ *  - Lỗi mạng / timeout / HTTP 5xx / HTTP 429 / JSON lỗi -> { outcome: 'NETWORK_ERROR' }
+ *  - Kết quả xác định từ server -> { outcome: 'AUTHORITATIVE', data, baseUrl }
+ */
+async function queryServerCheckByMachineId(machineId, serverCandidates) {
+  let sawNetworkOr5xxError = false;
 
-        if (isExplicitRevoked || isSuspended) {
-          console.warn('[Cache Sync] 🚨 Bản quyền đã bị thu hồi hoặc ngắt máy!');
-          await chrome.storage.local.set({
-            isRevoked: isExplicitRevoked,
-            isSuspended,
-            isVip: false,
-            isRunning: false,
-            isScheduleActive: false,
-            autoScheduleEnabled: false,
-            scheduledJobs: [],
-            postJobState: 'REVOKED_STOPPED',
-          });
-          await chrome.storage.local.remove(['signedToken', 'licenseKey', 'licenseData', 'isVip', 'currentLicense', 'licenseInfo']);
-          if (typeof FbRunner !== 'undefined' && typeof FbRunner.stopBatchPosting === 'function') {
-            await FbRunner.stopBatchPosting();
-          }
-          if (typeof AlarmsManager !== 'undefined' && typeof AlarmsManager.stopKeepAlive === 'function') {
-            await AlarmsManager.stopKeepAlive();
-          }
-          chrome.alarms.clearAll(() => {});
-          shouldStop = true;
-          isRunning = false;
-          stopKeepAlive();
-          if (activeTabId) {
-            chrome.tabs.remove(activeTabId).catch(() => {});
-            activeTabId = null;
-          }
+  for (const baseUrl of serverCandidates) {
+    try {
+      const resp = await fetch(`${baseUrl}/api/check?machine_id=${encodeURIComponent(machineId)}`, {
+        method: 'GET',
+        cache: 'no-store',
+        headers: { Accept: 'application/json', 'Cache-Control': 'no-cache' },
+        signal: AbortSignal.timeout(7000),
+      });
 
-          // Bắn tín hiệu ngắt máy tới toàn bộ Tabs & Dashboard
-          try {
-            if (chrome.tabs && chrome.tabs.query) {
-              chrome.tabs.query({}).then((tabs) => {
-                tabs.forEach((tab) => {
-                  if (tab.id) {
-                    chrome.tabs.sendMessage(tab.id, {
-                      action: 'FORCE_REVOKE_STOP',
-                      message: data.message || '🚨 Bản quyền của máy tính này đã bị Quản trị viên thu hồi và ngắt kết nối!',
-                    }).catch(() => {});
-                  }
-                });
-              }).catch(() => {});
-            }
-          } catch (e) {}
+      if (resp.status >= 500 || resp.status === 429 || resp.status === 408) {
+        sawNetworkOr5xxError = true;
+        continue;
+      }
+      if (!resp.ok) {
+        sawNetworkOr5xxError = true;
+        continue;
+      }
 
+      const text = await resp.text();
+      if (!text || (!text.trim().startsWith('{') && !text.trim().startsWith('['))) {
+        sawNetworkOr5xxError = true;
+        continue;
+      }
+
+      const data = JSON.parse(text);
+      if (!data || typeof data !== 'object' || data.status === 'error') {
+        sawNetworkOr5xxError = true;
+        continue;
+      }
+
+      return { outcome: 'AUTHORITATIVE', data, baseUrl };
+    } catch (err) {
+      sawNetworkOr5xxError = true;
+    }
+  }
+
+  return { outcome: 'NETWORK_ERROR', sawNetworkOr5xxError };
+}
+
+/**
+ * Hàm tương thích ngược cho các nơi gọi checkServerBackground:
+ * Điều hướng 100% về checkLicenseStatus(true) để đảm bảo chỉ có 1 nguồn sự thật duy nhất.
+ */
+async function checkServerBackground() {
+  return checkLicenseStatus(true, { reason: 'background_sync' });
+}
+
+/**
+ * KIỂM TRA BẢN QUYỀN TRUNG TÂM (SINGLE SOURCE OF TRUTH)
+ * - Deduplicate in-flight requests: mọi caller gọi đồng thời đều nhận chung 1 Promise (không bao giờ trả null).
+ * - Máy trạng thái rõ ràng: ACTIVE | EXPIRED | REVOKED | SUSPENDED | UNREGISTERED | UNKNOWN_OFFLINE.
+ * - Chống flapping: máy đang ACTIVE cần >= 3 lần UNREGISTERED xác định liên tiếp mới hạ cấp.
+ * - Lỗi mạng / timeout / HTTP 5xx / 429 -> giữ nguyên trạng thái cũ (Grace Period), không xóa dữ liệu.
+ */
+async function checkLicenseStatus(forceRemote = false, options = {}) {
+  // Nếu đang có 1 request kiểm tra bản quyền đang bay, dùng chung Promise đó cho mọi caller!
+  if (inFlightLicenseCheckPromise) {
+    return inFlightLicenseCheckPromise;
+  }
+
+  inFlightLicenseCheckPromise = (async () => {
+    try {
+      const data = await chrome.storage.local.get([
+        'licenseKey',
+        'licenseData',
+        'gialong_customer_phone',
+        'signedToken',
+        'licenseState',
+        'licenseStatus',
+        'expiresAt',
+        'lastCheckedAt',
+        'isVip',
+        'isRevoked',
+        'isSuspended',
+        'cachedPkgName',
+        'unregisteredStreak',
+        'licenseSeq',
+        'licenseUpdatedAt',
+        'legacyDeviceIds',
+      ]);
+
+      const deviceId = await getOrCreateDeviceId(options.legacyHintId || '');
+      const now = Date.now();
+      const currentSeq = Number(data.licenseSeq) || 1;
+      const currentUpdatedAt = Number(data.licenseUpdatedAt) || now;
+
+      // Xác định xem máy hiện tại có đang ở trạng thái ACTIVE hợp lệ trong local storage không
+      const storedExpStr = data.expiresAt || data.licenseData?.expiresAt || '';
+      const storedExpMs = storedExpStr ? new Date(storedExpStr).getTime() : 0;
+      const hasValidFutureExpiry = storedExpMs > now;
+      const wasActiveLocally =
+        !data.isRevoked &&
+        !data.isSuspended &&
+        hasValidFutureExpiry &&
+        Boolean(data.isVip || data.licenseStatus === 'active' || data.licenseState === LICENSE_STATES.ACTIVE);
+
+      // 1. Kiểm tra chữ ký Ed25519 của signedToken (nếu là token định dạng Ed25519)
+      const token = data.signedToken || '';
+      if (
+        token &&
+        (token.startsWith('GLFB_ED25519_') || token.startsWith('GLFB_ED1_')) &&
+        typeof self !== 'undefined' &&
+        typeof self.verifyEd25519LicenseToken === 'function'
+      ) {
+        const verifyRes = await self.verifyEd25519LicenseToken(token, deviceId, data.lastCheckedAt || now);
+        if (!verifyRes.valid) {
+          // CHỈ xóa token khi chữ ký giả mạo thật sự hoặc sai mã máy; lỗi hết hạn offline 48h thì giữ nguyên để check online
+          if (
+            verifyRes.isTampered ||
+            verifyRes.errorCode === 'SIGNATURE_MISMATCH' ||
+            verifyRes.errorCode === 'MALFORMED_TOKEN' ||
+            verifyRes.errorCode === 'MACHINE_ID_MISMATCH'
+          ) {
+            console.warn('[Security] Chữ ký Ed25519 bị giả mạo hoặc không khớp mã máy:', verifyRes.errorCode);
+            await chrome.storage.local.remove(['signedToken']);
+          }
+        }
+      }
+
+      // 2. Nếu không ép buộc gọi server (forceRemote === false) và cache còn trong TTL (60s): trả ngay từ cache
+      const lastChecked = Number(data.lastCheckedAt) || 0;
+      if (!forceRemote && lastChecked > 0 && now - lastChecked < LICENSE_CACHE_TTL_MS) {
+        if (data.isRevoked) {
           return {
             isValid: false,
             isActivated: false,
-            isRevoked: isExplicitRevoked,
-            isSuspended,
-            message: data.message || '🚨 Bản quyền đã bị Quản trị viên thu hồi và ngắt máy!',
+            isRevoked: true,
+            state: LICENSE_STATES.REVOKED,
+            status: 'revoked',
+            seq: currentSeq,
+            updatedAt: currentUpdatedAt,
+            deviceId,
+            message: '🚨 Thiết bị đã bị Quản trị viên thu hồi bản quyền và ngắt máy!',
             license: null,
           };
         }
-
-        // Nếu máy chưa kích hoạt (máy mới hoặc đang chờ duyệt đơn), KHÔNG BAO GIỜ khóa máy
-        if (!data.success || data.status !== 'active') {
-          await chrome.storage.local.set({
-            isRevoked: false,
-            isSuspended: false,
-            isVip: false,
-            licenseStatus: data.status || 'unregistered',
-          });
+        if (data.isSuspended) {
           return {
             isValid: false,
             isActivated: false,
-            isRevoked: false,
-            isSuspended: false,
-            status: data.status || 'unregistered',
-            message: data.message || 'Thiết bị chưa kích hoạt bản quyền.',
+            isSuspended: true,
+            state: LICENSE_STATES.SUSPENDED,
+            status: 'suspended',
+            seq: currentSeq,
+            updatedAt: currentUpdatedAt,
+            deviceId,
+            message: '⏸️ Bản quyền đang bị Quản trị viên tạm khóa!',
             license: null,
           };
         }
-        if (data.success && data.status === 'active') {
-          const expMs = new Date(data.expires_at).getTime();
-          const daysLeft = !isNaN(expMs) && expMs > Date.now()
-            ? Math.max(1, Math.ceil((expMs - Date.now()) / (24 * 60 * 60 * 1000)))
-            : (data.days_left || 0);
-
-          const freshLic = {
-            key: data.license_key || data.token || token || 'GLFB-VIP-ACTIVE',
-            expiresAt: data.expires_at,
-            clientName: data.client_name || 'Khách Kích Hoạt',
-            notes: data.pkg_name || 'Bản quyền VIP Gia Long',
+        if (wasActiveLocally) {
+          const daysLeft = Math.max(1, Math.ceil((storedExpMs - now) / (24 * 60 * 60 * 1000)));
+          const licObj = {
+            ...(data.licenseData || {}),
+            key: isRealHumanLicenseKey(data.licenseKey) ? data.licenseKey : (data.licenseData?.key || 'VIP-MACHINE'),
+            expiresAt: storedExpStr,
+            notes: data.cachedPkgName || data.licenseData?.notes || 'Bản quyền VIP Gia Long',
             daysLeft,
-            lastVerifiedAt: Date.now(),
+            isExpired: false,
           };
-          await chrome.storage.local.set({
-            lastCheckedAt: Date.now(),
-            expiresAt: data.expires_at,
-            signedToken: data.token || token,
-            licenseKey: data.license_key || data.token || token,
-            cachedPkgName: data.pkg_name,
-            isVip: true,
-            licenseStatus: 'active',
-            isRevoked: false,
-            isSuspended: false,
-            licenseData: freshLic,
-          });
           return {
             isValid: true,
             isActivated: true,
+            state: LICENSE_STATES.ACTIVE,
+            status: 'active',
+            seq: currentSeq,
+            updatedAt: currentUpdatedAt,
+            deviceId,
             message: `✓ Bản quyền VIP đang hoạt động (Còn ${daysLeft} ngày)`,
-            license: freshLic,
+            license: licObj,
           };
         }
-      } catch (e) {}
+      }
+
+      // 3. Truy vấn máy chủ qua endpoint chuẩn duy nhất: /api/check?machine_id=...
+      const primaryBase = await getApiBaseUrl();
+      const serverCandidates = getCandidateServerUrls(primaryBase);
+      let serverCheck = await queryServerCheckByMachineId(deviceId, serverCandidates);
+      let effectiveDeviceId = deviceId;
+
+      // Nếu mã máy chính trả về unregistered nhưng máy có legacyDeviceIds (do bản cũ từng sinh ID khác trên Dashboard),
+      // tự động kiểm tra các legacyDeviceIds; nếu 1 ID cũ đang có bản quyền ACTIVE trên server -> tự động di trú về ID đó!
+      if (
+        serverCheck.outcome === 'AUTHORITATIVE' &&
+        serverCheck.data?.status === 'unregistered' &&
+        Array.isArray(data.legacyDeviceIds) &&
+        data.legacyDeviceIds.length > 0
+      ) {
+        for (const legId of data.legacyDeviceIds) {
+          if (!isValidDeviceId(legId) || legId.toLowerCase() === deviceId.toLowerCase()) continue;
+          const legCheck = await queryServerCheckByMachineId(legId, serverCandidates);
+          if (legCheck.outcome === 'AUTHORITATIVE' && legCheck.data?.status === 'active') {
+            console.log(`[License Migration] 🔄 Phát hiện bản quyền ACTIVE trên mã máy cũ (${legId}) -> Tự động khôi phục mã máy!`);
+            effectiveDeviceId = legId;
+            cachedDeviceId = legId;
+            serverCheck = legCheck;
+            await chrome.storage.local.set({ autorecruit_device_id: legId });
+            try {
+              chrome.storage?.sync?.set({ autorecruit_device_id: legId });
+            } catch (_) {}
+            break;
+          }
+        }
+      }
+
+      // Nếu có mã bản quyền thật (GLFB-...) được nhập thủ công mà /api/check chưa ánh xạ thiết bị,
+      // kiểm tra phụ qua /api/license/verify (TUYỆT ĐỐI không gửi signedToken hay 'GLFB-VIP-ACTIVE' vào đây!)
+      if (
+        serverCheck.outcome === 'AUTHORITATIVE' &&
+        serverCheck.data?.status === 'unregistered' &&
+        isRealHumanLicenseKey(data.licenseKey)
+      ) {
+        for (const baseUrl of serverCandidates) {
+          try {
+            const vResp = await fetch(`${baseUrl}/api/license/verify`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' },
+              body: JSON.stringify({ key: data.licenseKey.trim(), deviceId: effectiveDeviceId }),
+              signal: AbortSignal.timeout(7000),
+            });
+            if (vResp.ok) {
+              const vData = await vResp.json();
+              if (vData && vData.valid && vData.license) {
+                serverCheck = {
+                  outcome: 'AUTHORITATIVE',
+                  baseUrl,
+                  data: {
+                    success: true,
+                    status: 'active',
+                    machine_id: effectiveDeviceId,
+                    plan: vData.license.planType || 'individual',
+                    expires_at: vData.license.expiresAt,
+                    days_left: vData.license.daysLeft || 30,
+                    pkg_name: vData.license.notes || 'Bản quyền VIP Gia Long',
+                    client_name: vData.license.clientName || 'Khách Kích Hoạt',
+                    license_key: vData.license.key || data.licenseKey.trim(),
+                    message: vData.message || '✓ Bản quyền VIP hợp lệ!',
+                  },
+                };
+                break;
+              } else if (vData && vData.isRevoked === true && vData.statusCode !== 'NOT_FOUND') {
+                serverCheck = {
+                  outcome: 'AUTHORITATIVE',
+                  baseUrl,
+                  data: {
+                    success: false,
+                    status: 'revoked',
+                    isRevoked: true,
+                    action: 'FORCE_REVOKE',
+                    message: vData.message || '🚨 Bản quyền đã bị Quản trị viên thu hồi!',
+                  },
+                };
+                break;
+              }
+            }
+          } catch (_) {}
+        }
+      }
+
+      // 4. XỬ LÝ KHI LỖI MẠNG / TIMEOUT / SERVER 5XX (GRACE PERIOD - KHÔNG BAO GIỜ XÓA HAY HẠ CẤP)
+      if (serverCheck.outcome === 'NETWORK_ERROR') {
+        consecutiveNetworkFailures = Math.min(10, consecutiveNetworkFailures + 1);
+        if (wasActiveLocally && now - lastChecked < OFFLINE_GRACE_PERIOD_MS) {
+          const daysLeft = Math.max(1, Math.ceil((storedExpMs - now) / (24 * 60 * 60 * 1000)));
+          const licObj = {
+            ...(data.licenseData || {}),
+            expiresAt: storedExpStr,
+            daysLeft,
+            isExpired: false,
+          };
+          return {
+            isValid: true,
+            isActivated: true,
+            offlineGrace: true,
+            state: LICENSE_STATES.ACTIVE,
+            status: 'active',
+            seq: currentSeq,
+            updatedAt: currentUpdatedAt,
+            deviceId: effectiveDeviceId,
+            message: `✓ Bản quyền VIP đang hoạt động (Chế độ bảo vệ ngoại tuyến - Còn ${daysLeft} ngày)`,
+            license: licObj,
+          };
+        }
+
+        return {
+          isValid: false,
+          isActivated: Boolean(wasActiveLocally),
+          state: LICENSE_STATES.UNKNOWN_OFFLINE,
+          status: 'offline',
+          seq: currentSeq,
+          updatedAt: currentUpdatedAt,
+          deviceId: effectiveDeviceId,
+          message: 'Không thể kết nối máy chủ xác thực bản quyền (Đang giữ trạng thái an toàn).',
+          license: data.licenseData || null,
+        };
+      }
+
+      // Đã nhận phản hồi xác định từ máy chủ -> reset bộ đếm lỗi mạng
+      consecutiveNetworkFailures = 0;
+      const srv = serverCheck.data;
+
+      // 5A. TRẠNG THÁI XÁC ĐỊNH: ACTIVE
+      if (srv.success && srv.status === 'active') {
+        const expStr = srv.expires_at || storedExpStr || new Date(now + 30 * 86400000).toISOString();
+        const expMs = new Date(expStr).getTime();
+        const daysLeft = !isNaN(expMs) && expMs > now
+          ? Math.max(1, Math.ceil((expMs - now) / (24 * 60 * 60 * 1000)))
+          : (Number(srv.days_left) || 30);
+
+        const realKey = isRealHumanLicenseKey(srv.license_key)
+          ? srv.license_key
+          : isRealHumanLicenseKey(srv.key)
+            ? srv.key
+            : isRealHumanLicenseKey(data.licenseKey)
+              ? data.licenseKey
+              : '';
+
+        const freshLic = {
+          ...(data.licenseData || {}),
+          ...(srv.license || {}),
+          key: realKey || srv.key || 'VIP-MACHINE',
+          clientName: srv.client_name || srv.license?.clientName || data.licenseData?.clientName || 'Khách Hàng VIP',
+          planType: srv.plan || srv.license?.planType || data.licenseData?.planType || 'individual',
+          expiresAt: expStr,
+          notes: srv.pkg_name || srv.license?.notes || data.cachedPkgName || 'Bản quyền VIP Gia Long',
+          daysLeft,
+          isExpired: false,
+          isRevoked: false,
+          isSuspended: false,
+          lastVerifiedAt: now,
+        };
+
+        const patch = {
+          licenseState: LICENSE_STATES.ACTIVE,
+          licenseStatus: 'active',
+          isVip: true,
+          isRevoked: false,
+          isSuspended: false,
+          unregisteredStreak: 0,
+          lastCheckedAt: now,
+          expiresAt: expStr,
+          cachedPkgName: freshLic.notes,
+          licenseData: freshLic,
+        };
+        if (srv.token) {
+          patch.signedToken = srv.token;
+        }
+        if (realKey) {
+          patch.licenseKey = realKey;
+        }
+
+        const { nextSeq, updatedAt } = await commitLicenseState(patch);
+        return {
+          isValid: true,
+          isActivated: true,
+          state: LICENSE_STATES.ACTIVE,
+          status: 'active',
+          seq: nextSeq,
+          updatedAt,
+          deviceId: effectiveDeviceId,
+          message: srv.message || `✓ Bản quyền VIP đang hoạt động (Còn ${daysLeft} ngày)`,
+          license: freshLic,
+        };
+      }
+
+      // 5B. TRẠNG THÁI XÁC ĐỊNH: REVOKED HOẶC SUSPENDED (Chỉ khi server có cờ rõ ràng)
+      const isExplicitRevoked = Boolean(
+        srv.status === 'revoked' || srv.isRevoked === true || srv.action === 'FORCE_REVOKE'
+      );
+      const isExplicitSuspended = Boolean(srv.status === 'suspended' || srv.isSuspended === true);
+
+      if (isExplicitRevoked || isExplicitSuspended) {
+        await enforceHardRevokeOrSuspend({
+          isRevoked: isExplicitRevoked,
+          isSuspended: isExplicitSuspended,
+          message: srv.message,
+        });
+        const stAfter = await chrome.storage.local.get(['licenseSeq', 'licenseUpdatedAt']);
+        return {
+          isValid: false,
+          isActivated: false,
+          isRevoked: isExplicitRevoked,
+          isSuspended: isExplicitSuspended,
+          state: isExplicitRevoked ? LICENSE_STATES.REVOKED : LICENSE_STATES.SUSPENDED,
+          status: isExplicitRevoked ? 'revoked' : 'suspended',
+          seq: stAfter.licenseSeq || currentSeq + 1,
+          updatedAt: stAfter.licenseUpdatedAt || now,
+          deviceId: effectiveDeviceId,
+          message: srv.message || '🚨 Bản quyền của thiết bị đã bị Quản trị viên thu hồi hoặc tạm khóa!',
+          license: null,
+        };
+      }
+
+      // 5C. TRẠNG THÁI XÁC ĐỊNH: EXPIRED
+      if (srv.status === 'expired' || srv.isExpired === true) {
+        const expStr = srv.expires_at || storedExpStr;
+        const expiredLic = {
+          ...(data.licenseData || {}),
+          expiresAt: expStr,
+          daysLeft: 0,
+          isExpired: true,
+          lastVerifiedAt: now,
+        };
+        const { nextSeq, updatedAt } = await commitLicenseState({
+          licenseState: LICENSE_STATES.EXPIRED,
+          licenseStatus: 'expired',
+          isVip: false,
+          isRevoked: false,
+          isSuspended: false,
+          unregisteredStreak: 0,
+          lastCheckedAt: now,
+          expiresAt: expStr,
+          licenseData: expiredLic,
+        });
+        return {
+          isValid: false,
+          isActivated: true,
+          isExpired: true,
+          state: LICENSE_STATES.EXPIRED,
+          status: 'expired',
+          seq: nextSeq,
+          updatedAt,
+          deviceId: effectiveDeviceId,
+          message: srv.message || 'Bản quyền của máy đã hết hạn sử dụng. Vui lòng gia hạn thêm!',
+          license: expiredLic,
+        };
+      }
+
+      // 5D. TRẠNG THÁI PENDING HOẶC UNREGISTERED (ÁP DỤNG CHỐNG FLAPPING CHO MÁY ĐANG ACTIVE)
+      const nextStreak = (Number(data.unregisteredStreak) || 0) + 1;
+
+      if (wasActiveLocally && nextStreak < UNREGISTERED_DOWNGRADE_STREAK_THRESHOLD) {
+        console.warn(
+          `[License Anti-Flapping] Máy đang ACTIVE nhận phản hồi '${srv.status}' lần ${nextStreak}/${UNREGISTERED_DOWNGRADE_STREAK_THRESHOLD} -> Giữ nguyên ACTIVE!`
+        );
+        const daysLeft = Math.max(1, Math.ceil((storedExpMs - now) / (24 * 60 * 60 * 1000)));
+        const licObj = {
+          ...(data.licenseData || {}),
+          expiresAt: storedExpStr,
+          daysLeft,
+          isExpired: false,
+        };
+        await chrome.storage.local.set({
+          unregisteredStreak: nextStreak,
+          lastCheckedAt: now,
+        });
+        return {
+          isValid: true,
+          isActivated: true,
+          state: LICENSE_STATES.ACTIVE,
+          status: 'active',
+          seq: currentSeq,
+          updatedAt: currentUpdatedAt,
+          deviceId: effectiveDeviceId,
+          message: `✓ Bản quyền VIP đang hoạt động (Còn ${daysLeft} ngày)`,
+          license: licObj,
+        };
+      }
+
+      // Đã đủ N >= 3 lần liên tiếp unregistered (hoặc máy chưa từng kích hoạt)
+      const finalStatus = srv.status === 'pending' ? 'pending' : 'unregistered';
+      const { nextSeq, updatedAt } = await commitLicenseState({
+        licenseState: LICENSE_STATES.UNREGISTERED,
+        licenseStatus: finalStatus,
+        isVip: false,
+        isRevoked: false,
+        isSuspended: false,
+        unregisteredStreak: nextStreak,
+        lastCheckedAt: now,
+      });
+
+      return {
+        isValid: false,
+        isActivated: false,
+         isRevoked: false,
+        isSuspended: false,
+        state: LICENSE_STATES.UNREGISTERED,
+        status: finalStatus,
+         pkgName: srv.pkg_name || '',
+        seq: nextSeq,
+        updatedAt,
+        deviceId: effectiveDeviceId,
+        message:
+          srv.message ||
+          (finalStatus === 'pending'
+            ? 'Đơn đăng ký đang chờ Quản trị viên phê duyệt.'
+            : 'Thiết bị chưa kích hoạt bản quyền. Vui lòng chọn gói đặt mua hoặc nhập mã kích hoạt!'),
+        license: null,
+      };
+    } catch (err) {
+      return {
+        isValid: false,
+        state: LICENSE_STATES.UNKNOWN_OFFLINE,
+        status: 'offline',
+        message: err.message || 'Lỗi kiểm tra bản quyền',
+        license: null,
+      };
+    } finally {
+      inFlightLicenseCheckPromise = null;
     }
-  } finally {
-    isCheckingBackground = false;
-  }
-  return null;
+  })();
+
+  return inFlightLicenseCheckPromise;
 }
 
-// Xử lý gửi đơn đặt mua gói bản quyền tự động lên Server
-// Ưu tiên phản hồi tức thì (< 200ms) qua Cloudflare Pages Edge API sản xuất
-async function handleCreateOrder(payload) {
-  // Đảm bảo tuyệt đối mã máy luôn hợp lệ, không bao giờ gửi chuỗi 'Đang lấy...'
-  if (!payload.deviceId || payload.deviceId === 'Đang lấy...' || payload.deviceId.trim() === '') {
-    payload.deviceId = await getOrCreateDeviceId();
-  }
+// Xử lý gửi đơn đặt mua gói bản quyền tự động lên Server (Chỉ gọi từ Background)
+async function handleCreateOrder(payload = {}) {
+  const canonicalDeviceId = await getOrCreateDeviceId(payload.deviceId || '');
+  payload.deviceId = canonicalDeviceId;
   if (!payload.id) {
     payload.id = 'ord_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
   }
@@ -361,37 +918,29 @@ async function handleCreateOrder(payload) {
   const primaryBase = await getApiBaseUrl();
   const candidates = await getAllServerCandidates(primaryBase);
 
-  // Hàm gửi đơn tới một endpoint với timeout an toàn hơn (6 giây)
   async function postOrderTo(url) {
     if (!url || !url.startsWith('http')) return null;
     const base = url.replace(/\/+$/, '');
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 6000);
     try {
       const resp = await fetch(`${base}/api/orders/create`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
-        signal: controller.signal,
+        signal: AbortSignal.timeout(7000),
       });
-      clearTimeout(timeoutId);
       if (resp.ok) {
         const text = await resp.text();
         if (text && (text.trim().startsWith('{') || text.trim().startsWith('['))) {
           const data = JSON.parse(text);
           if (data && data.success) {
-            console.log('[Gia Long - FB Background] ✓ Đã gửi đơn thành công lên:', base);
             return { base, order: data.order, message: data.message };
           }
         }
       }
-    } catch (err) {
-      clearTimeout(timeoutId);
-    }
+    } catch (_) {}
     return null;
   }
 
-  // Gửi song song đến TẤT CẢ các máy chủ khả dụng (Pages.dev, Cloud Run, Localhost)
   const allUrls = [primaryBase, ...candidates].filter((u, i, arr) => u && arr.indexOf(u) === i);
   let orderResult = null;
   const results = await Promise.allSettled(allUrls.map((u) => postOrderTo(u)));
@@ -401,29 +950,13 @@ async function handleCreateOrder(payload) {
     }
   }
 
-  // Bắn tín hiệu đơn mới tức thì tới tất cả các Tab Quản Trị đang mở
-  try {
-    if (chrome.tabs && chrome.tabs.query) {
-      chrome.tabs.query({}).then((tabs) => {
-        tabs.forEach((tab) => {
-          if (tab.id) {
-            chrome.tabs.sendMessage(tab.id, {
-              action: 'DISPATCH_NEW_ORDER_TO_WEBAPP',
-              order: payload,
-            }).catch(() => {});
-          }
-        });
-      }).catch(() => {});
-    }
-  } catch (e) {}
-
-  // ĐỒNG THỜI: Đẩy trực tiếp 2 kênh sang Webhook Google Drive / Google Sheet nếu có
+  // Đẩy đồng thời sang Webhook Google Drive / Google Sheet nếu có
   try {
     const st = await chrome.storage.local.get(['googleDriveSheetWebhookUrl']);
     let gdriveUrl = st.googleDriveSheetWebhookUrl;
     if (!gdriveUrl) {
       try {
-        const sResp = await fetch(`${primaryBase}/api/settings`, { signal: AbortSignal.timeout(2000) });
+        const sResp = await fetch(`${primaryBase}/api/settings`, { signal: AbortSignal.timeout(2500) });
         if (sResp.ok) {
           const sData = await sResp.json();
           if (sData?.settings?.googleDriveSheetWebhookUrl) {
@@ -431,7 +964,7 @@ async function handleCreateOrder(payload) {
             await chrome.storage.local.set({ googleDriveSheetWebhookUrl: gdriveUrl });
           }
         }
-      } catch (e) {}
+      } catch (_) {}
     }
     if (gdriveUrl && gdriveUrl.startsWith('http')) {
       fetch(gdriveUrl, {
@@ -447,15 +980,14 @@ async function handleCreateOrder(payload) {
           phone: payload.phone || '',
           pkgName: payload.pkgName || '',
           price: payload.price || '',
-          deviceId: payload.deviceId || '',
+          deviceId: canonicalDeviceId,
           status: 'pending',
           note: payload.note || '',
           source: 'Gia Long FB Extension (Trực Tiếp Khách Hàng)',
         }),
       }).catch(() => {});
-      console.log('[Gia Long - FB Background] ✓ Đã gửi đơn đồng thời sang Google Drive Webhook:', gdriveUrl);
     }
-  } catch (e) {}
+  } catch (_) {}
 
   const createdOrder = orderResult?.order || {
     id: payload.id,
@@ -463,316 +995,59 @@ async function handleCreateOrder(payload) {
     price: payload.price || '1.000.000đ',
     clientName: payload.clientName || 'Khách Đặt Mua',
     phone: payload.phone || '',
-    deviceId: payload.deviceId,
+    deviceId: canonicalDeviceId,
     createdAt: new Date().toISOString(),
     status: 'pending',
     note: payload.note || '',
   };
 
-  // Đồng bộ chạy ngầm sang các Tab Web Quản Trị đang mở (không chặn response UI)
-  setTimeout(() => {
-    try {
-      if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.query) {
-        chrome.tabs.query({}).then((openTabs) => {
-          for (const tab of openTabs) {
-            if (tab.id && tab.url && tab.url.startsWith('http')) {
-              chrome.tabs.sendMessage(tab.id, {
-                action: 'DISPATCH_NEW_ORDER_TO_WEBAPP',
-                order: createdOrder,
-              }).catch(() => {});
-            }
-          }
-        }).catch(() => {});
-      }
-    } catch (e) {}
-  }, 10);
-
-  // Khởi động Fast Polling ngay khi gửi đơn thành công (3s/lần trong 5 phút)
-  startFastLicensePolling(payload.deviceId, 300);
-
-  return { 
-    success: true, 
-    order: createdOrder, 
-    message: '✓ Đã gửi yêu cầu đề xuất mua bản quyền tới Quản trị viên thành công!' 
-  };
-}
-
-async function checkLicenseStatus(forceRemote = false) {
+  // Lưu đơn vào myOrders trong chrome.storage.local để UI cập nhật ngay qua storage.onChanged
   try {
-    const data = await chrome.storage.local.get([
-      'licenseKey', 
-      'licenseData', 
-      'gialong_customer_phone',
-      'signedToken',
-      'licenseStatus',
-      'expiresAt',
-      'lastCheckedAt',
-      'isRevoked',
-      'cachedPkgName'
-    ]);
-    const deviceId = await getOrCreateDeviceId();
-    const phone = data.gialong_customer_phone || '';
-    const now = Date.now();
+    const existingOrdersData = await chrome.storage.local.get(['myOrders']);
+    const existingList = Array.isArray(existingOrdersData.myOrders) ? existingOrdersData.myOrders : [];
+    const dedupedOrders = [createdOrder, ...existingList.filter((o) => o && o.id !== createdOrder.id)].slice(0, 50);
+    await chrome.storage.local.set({
+      myOrders: dedupedOrders,
+      gialong_customer_phone: payload.phone || '',
+      gialong_customer_name: payload.clientName || '',
+      lastOrdersSync: Date.now(),
+    });
+  } catch (_) {}
 
-    // 0. Nếu máy đã bị đánh dấu thu hồi: Ngắt ngay
-    if (data.isRevoked) {
-      return {
-        isValid: false,
-        isActivated: false,
-        isRevoked: true,
-        message: '🚨 Thiết bị đã bị Quản trị viên thu hồi bản quyền và ngắt máy!',
-        license: null,
-      };
-    }
-
-    // 1. CHẾ ĐỘ LƯU CACHE THÔNG MINH (DÙNG HÀNG NGÀY - 100% MIỄN PHÍ REQUEST)
-    // Đọc token đã ký từ bộ nhớ máy (chrome.storage.local).
-    // Nếu token còn hạn, cho chạy ngay lập tức. Sau mỗi 60 phút mới kiểm tra lại ngầm.
-    const token = data.signedToken;
-    const expiresAt = data.expiresAt;
-    const lastChecked = data.lastCheckedAt || 0;
-
-    if (token && data.licenseStatus === 'active' && expiresAt) {
-      // Xác minh chữ ký Ed25519 trước khi tin tưởng cache (chống sửa tay trong DevTools / storage)
-      if (typeof self !== 'undefined' && typeof self.verifyEd25519LicenseToken === 'function') {
-        const verifyRes = await self.verifyEd25519LicenseToken(token, deviceId, lastChecked);
-        if (!verifyRes.valid) {
-          console.warn('[Security] Chữ ký Token Ed25519 không hợp lệ hoặc đã bị sửa đổi:', verifyRes.error);
-          await chrome.storage.local.remove(['signedToken', 'licenseKey', 'licenseData', 'isVip', 'currentLicense', 'licenseInfo']);
-          return {
-            isValid: false,
-            isActivated: false,
-            message: verifyRes.error || 'Chữ ký bản quyền không hợp lệ (Dữ liệu đã bị sửa đổi)!',
-            license: null,
-          };
-        }
-      }
-
-      const expMs = new Date(expiresAt).getTime();
-      const isExpired = !isNaN(expMs) && expMs < now;
-
-      if (!isExpired) {
-        const daysLeft = Math.max(1, Math.ceil((expMs - now) / (24 * 60 * 60 * 1000)));
-        const licObj = data.licenseData || {
-          key: token,
-          expiresAt,
-          notes: data.cachedPkgName || 'Bản quyền VIP Gia Long',
-          daysLeft,
-          lastVerifiedAt: now,
-        };
-
-        // Nếu yêu cầu forceRemote hoặc cache đã quá 5 giây: Xác thực ngay với Server để cập nhật tức thì
-        if (forceRemote || (now - lastChecked >= 5 * 1000)) {
-          const freshServerStatus = await checkServerBackground(deviceId, token);
-          if (freshServerStatus) {
-            return freshServerStatus;
+  // Bắn tín hiệu đơn mới tới các Tab Web Quản Trị đang mở
+  try {
+    if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.query) {
+      chrome.tabs.query({}).then((openTabs) => {
+        for (const tab of openTabs) {
+          if (tab.id && tab.url && tab.url.startsWith('http')) {
+            chrome.tabs.sendMessage(tab.id, {
+              action: 'DISPATCH_NEW_ORDER_TO_WEBAPP',
+              order: createdOrder,
+            }).catch(() => {});
           }
         }
-
-        return {
-          isValid: true,
-          isActivated: true,
-          message: `✓ Bản quyền VIP đang hoạt động (Còn ${daysLeft} ngày)`,
-          license: { ...licObj, daysLeft, isExpired: false },
-        };
-      }
+      }).catch(() => {});
     }
+  } catch (_) {}
 
-    const key = data.licenseKey;
+  // Khởi động Fast Polling tại Service Worker (3s/lần trong tối đa 5 phút)
+  startFastLicensePolling(canonicalDeviceId, 300);
 
-    if (!key) {
-      // Thử gọi /api/check theo mã máy
-      const primaryBase = await getApiBaseUrl();
-      const serverCandidates = getCandidateServerUrls(primaryBase);
-      for (const baseUrl of serverCandidates) {
-        try {
-          const resp = await fetch(`${baseUrl}/api/check?machine_id=${encodeURIComponent(deviceId)}`, {
-            cache: 'no-store',
-            signal: AbortSignal.timeout(2500),
-          });
-          if (!resp.ok) continue;
-          const checkRes = await resp.json();
-          if (checkRes && (checkRes.status === 'revoked' || checkRes.isRevoked || checkRes.status === 'suspended' || checkRes.isSuspended)) {
-            await chrome.storage.local.set({
-              isRevoked: Boolean(checkRes.status === 'revoked' || checkRes.isRevoked),
-              isSuspended: Boolean(checkRes.status === 'suspended' || checkRes.isSuspended),
-            });
-            await chrome.storage.local.remove(['signedToken', 'licenseKey', 'licenseData', 'isVip', 'currentLicense', 'licenseInfo']);
-            chrome.alarms.clearAll(() => {});
-            return {
-              isValid: false,
-              isActivated: false,
-              isRevoked: Boolean(checkRes.status === 'revoked' || checkRes.isRevoked),
-              isSuspended: Boolean(checkRes.status === 'suspended' || checkRes.isSuspended),
-              message: checkRes.message || '🚨 Bản quyền đã bị Quản trị viên thu hồi hoặc tạm khóa!',
-              license: null,
-            };
-          }
-          if (checkRes && checkRes.success && checkRes.status === 'active') {
-            const cacheData = {
-              signedToken: checkRes.token,
-              licenseStatus: 'active',
-              expiresAt: checkRes.expires_at,
-              lastCheckedAt: Date.now(),
-              cachedPkgName: checkRes.pkg_name,
-              isVip: true,
-              licenseKey: checkRes.token || 'GLFB-VIP-ACTIVE',
-              isRevoked: false,
-              isSuspended: false,
-              licenseData: {
-                key: checkRes.token || 'GLFB-VIP-ACTIVE',
-                expiresAt: checkRes.expires_at,
-                clientName: checkRes.client_name || 'Khách Kích Hoạt',
-                notes: checkRes.pkg_name,
-                daysLeft: checkRes.days_left || 30,
-                lastVerifiedAt: Date.now(),
-              },
-            };
-            await chrome.storage.local.set(cacheData);
-            return {
-              isValid: true,
-              isActivated: true,
-              message: '✓ Bản quyền VIP đã được Quản trị viên phê duyệt tự động theo thiết bị!',
-              license: cacheData.licenseData,
-            };
-          }
-        } catch (e) {}
-      }
-
-      return {
-        isValid: false,
-        isActivated: false,
-        message: 'Chưa kích hoạt bản quyền. Vui lòng chọn gói đặt mua để Quản trị viên duyệt tự động!',
-        license: null,
-      };
-    }
-
-    const cached = data.licenseData;
-
-    // 1. Dùng Cache an toàn ngắn (10 giây) để đảm bảo đồng bộ tức thì khi Quản trị viên Duyệt hoặc Thu Hồi
-    if (!forceRemote && cached && cached.lastVerifiedAt && (now - cached.lastVerifiedAt < 10 * 1000)) {
-      const expMs = new Date(cached.expiresAt).getTime();
-      const isExpired = expMs < now;
-      const daysLeft = Math.max(0, Math.ceil((expMs - now) / (24 * 60 * 60 * 1000)));
-
-      if (!isExpired && !cached.isSuspended && !cached.isRevoked) {
-        return {
-          isValid: true,
-          isActivated: true,
-          message: 'Bản quyền VIP đang hoạt động',
-          license: { ...cached, daysLeft, isExpired: false },
-        };
-      }
-    }
-
-    // 2. Xác thực với Máy Chủ (Server) - Thử lần lượt các máy chủ khả dụng
-    const primaryBase = await getApiBaseUrl();
-    const serverCandidates = getCandidateServerUrls(primaryBase);
-    let networkError = null;
-
-    for (const baseUrl of serverCandidates) {
-      try {
-        const resp = await fetch(`${baseUrl}/api/license/verify`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ key, deviceId }),
-        });
-        const text = await resp.text();
-        if (!text || (!text.trim().startsWith('{') && !text.trim().startsWith('['))) continue;
-        const result = JSON.parse(text);
-
-        // Ghi nhớ máy chủ phản hồi tốt
-        chrome.storage.local.set({ customApiServerUrl: baseUrl });
-
-        const isRevoked = Boolean(result.isRevoked || result.license?.isRevoked);
-        const isSuspended = Boolean(result.license?.isSuspended);
-        const isForceRevoke = Boolean(result.action === 'FORCE_REVOKE' || isRevoked || result.isDeleted);
-
-        if (result.valid && result.license && !isRevoked && !isSuspended) {
-          const lic = {
-            ...result.license,
-            key,
-            lastVerifiedAt: now,
-          };
-          await chrome.storage.local.set({ licenseData: lic });
-          return {
-            isValid: true,
-            isActivated: true,
-            message: result.message || 'Bản quyền hợp lệ!',
-            license: lic,
-          };
-        } else {
-          // Khi bị xóa, thu hồi hoặc không hợp lệ: LẬP TỨC XÓA SẠCH KEY, NGẮT MỌI ALARMS & DỪNG TIẾN TRÌNH
-          if (isForceRevoke || !result.valid) {
-            await chrome.storage.local.remove(['licenseKey', 'licenseData', 'isVip', 'currentLicense', 'licenseInfo']);
-          } else {
-            const lic = {
-              ...(cached || {}),
-              key,
-              isExpired: result.isExpired || false,
-              isSuspended,
-              isRevoked,
-              revokeReason: result.license?.revokeReason || result.message,
-              lastVerifiedAt: now,
-            };
-            await chrome.storage.local.set({ licenseData: lic });
-          }
-
-          // Ngắt ngay toàn bộ hẹn giờ Alarms và dừng mọi tiến trình đang chạy
-          chrome.alarms.clearAll(() => {});
-          await chrome.storage.local.set({
-            isScheduleActive: false,
-            isRunning: false,
-            autoScheduleEnabled: false,
-            scheduledJobs: [],
-            postJobState: 'REVOKED_STOPPED',
-          });
-          shouldStop = true;
-          isRunning = false;
-          stopKeepAlive();
-
-          return {
-            isValid: false,
-            isActivated: false,
-            isExpired: result.isExpired || false,
-            isRevoked: true,
-            isSuspended,
-            message: result.message || '🚨 BẢN QUYỀN ĐÃ BỊ THU HỒI / XÓA KHỎI HỆ THỐNG: Mọi tiến trình đã bị chấm dứt ngay lập tức!',
-            license: null,
-          };
-        }
-      } catch (err) {
-        networkError = err;
-      }
-    }
-
-    // 3. Cơ chế Offline Grace Period: Cho phép tiếp tục dùng trong 24 giờ nếu rớt mạng (Tuyệt đối không áp dụng nếu bị Thu hồi hoặc Tạm khóa)
-    if (cached && (now - (cached.lastVerifiedAt || 0) < 24 * 60 * 60 * 1000)) {
-      const expMs = new Date(cached.expiresAt).getTime();
-      if (expMs > now && !cached.isSuspended && !cached.isRevoked) {
-        console.warn('[AutoRecruit License] Rớt mạng tạm thời, duy trì bản quyền trong 24h grace period.');
-        return {
-          isValid: true,
-          isActivated: true,
-          message: 'Bản quyền hợp lệ (Chế độ Ngoại Tuyến)',
-          license: cached,
-        };
-      }
-    }
-    return {
-      isValid: false,
-      isActivated: true,
-      message: 'Không thể kết nối máy chủ xác thực bản quyền!',
-      license: cached || null,
-    };
-  } catch (err) {
-    return { isValid: false, message: err.message };
-  }
+  return {
+    success: true,
+    order: createdOrder,
+    deviceId: canonicalDeviceId,
+    message: '✓ Đã gửi yêu cầu đề xuất mua bản quyền tới Quản trị viên thành công!',
+  };
 }
 
 async function activateLicenseKey(rawKey) {
   if (!rawKey) return { success: false, message: 'Vui lòng nhập mã bản quyền!' };
-  const key = rawKey.trim().toUpperCase();
+  const key = String(rawKey).trim().toUpperCase();
+  if (!isRealHumanLicenseKey(key)) {
+    return checkLicenseStatus(true, { reason: 'activate_non_human_key' });
+  }
+
   const deviceId = await getOrCreateDeviceId();
   const primaryBase = await getApiBaseUrl();
   const serverCandidates = getCandidateServerUrls(primaryBase);
@@ -782,12 +1057,13 @@ async function activateLicenseKey(rawKey) {
     try {
       const resp = await fetch(`${baseUrl}/api/license/activate`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' },
         body: JSON.stringify({
           key,
           deviceId,
           deviceName: `Browser (${deviceId.slice(-4)})`,
         }),
+        signal: AbortSignal.timeout(7000),
       });
       const text = await resp.text();
       if (!text || (!text.trim().startsWith('{') && !text.trim().startsWith('['))) continue;
@@ -803,30 +1079,49 @@ async function activateLicenseKey(rawKey) {
           ...result.license,
           key,
           daysLeft,
+          isExpired: false,
+          isRevoked: false,
+          isSuspended: false,
           lastVerifiedAt: Date.now(),
         };
-        await chrome.storage.local.set({
+
+        const { nextSeq, updatedAt } = await commitLicenseState({
           licenseKey: key,
           licenseData: lic,
           customApiServerUrl: baseUrl,
           expiresAt: result.license.expiresAt,
-          signedToken: key,
+          signedToken: result.token || result.license.signedToken || '',
+          licenseState: LICENSE_STATES.ACTIVE,
           licenseStatus: 'active',
           isVip: true,
           isRevoked: false,
           isSuspended: false,
+          unregisteredStreak: 0,
           lastCheckedAt: Date.now(),
-          cachedPkgName: result.license.notes || (result.license.planType === 'team' ? 'Gói Doanh Nghiệp' : (result.license.planType === 'trial' ? 'Gói Dùng Thử 1N' : 'Gói VIP Cá Nhân')),
+          cachedPkgName:
+            result.license.notes ||
+            (result.license.planType === 'team'
+              ? 'Gói Doanh Nghiệp'
+              : result.license.planType === 'trial'
+                ? 'Gói Dùng Thử 1N'
+                : 'Gói VIP Cá Nhân'),
         });
 
-        // Nếu kích hoạt gói chính thức, xóa bỏ giới hạn bài đăng dùng thử; nếu là gói dùng thử thì reset về 0
         if (result.license.planType === 'trial') {
           await chrome.storage.local.set({ trialPostsCount: 0 });
         } else {
           await chrome.storage.local.remove(['trialPostsCount']);
         }
 
-        return { success: true, message: result.message, license: lic };
+        return {
+          success: true,
+          isValid: true,
+          state: LICENSE_STATES.ACTIVE,
+          seq: nextSeq,
+          updatedAt,
+          message: result.message,
+          license: lic,
+        };
       } else {
         return { success: false, message: result.message || 'Kích hoạt mã không thành công!' };
       }
@@ -838,12 +1133,22 @@ async function activateLicenseKey(rawKey) {
 }
 
 async function deactivateLicenseKey() {
-  await chrome.storage.local.remove(['licenseKey', 'licenseData']);
+  await commitLicenseState({
+    licenseState: LICENSE_STATES.UNREGISTERED,
+    licenseStatus: 'unregistered',
+    isVip: false,
+    unregisteredStreak: 0,
+  });
+  await chrome.storage.local.remove(['licenseKey', 'licenseData', 'signedToken']);
   return { success: true, message: 'Đã hủy kích hoạt bản quyền trên máy này.' };
 }
 
 if (typeof self !== 'undefined') {
+  self.LICENSE_STATES = LICENSE_STATES;
+  self.getOrCreateDeviceId = getOrCreateDeviceId;
   self.checkLicenseStatus = checkLicenseStatus;
+  self.activateLicenseKey = activateLicenseKey;
+  self.handleCreateOrder = handleCreateOrder;
 }
 
 // ==========================================
@@ -913,9 +1218,25 @@ async function handleSetSchedule(config = {}) {
   };
 }
 
-// BỘ LẮNG NGHE ALARMS: ĐIỀU PHỐI QUA ALARMS MANAGER (HỖ TRỢ TỰ CHUYỂN TÀI KHOẢN FB & ĐỦ 3 BIẾN THỂ)
+// BỘ LẮNG NGHE ALARMS: ĐIỀU PHỐI QUA ALARMS MANAGER & FAST ORDER POLL
 chrome.alarms.onAlarm.addListener(async (alarm) => {
-  console.log('[AutoRecruit Background] ⏰ ALARM KÍCH HOẠT:', alarm.name);
+  if (!alarm || !alarm.name) return;
+  if (alarm.name === 'glfb_fast_order_poll') {
+    try {
+      const st = await chrome.storage.local.get(['fastPollUntil']);
+      if (st.fastPollUntil && Date.now() < st.fastPollUntil) {
+        const res = await checkLicenseStatus(true, { reason: 'fast_poll_alarm' });
+        if (res && res.isValid && res.state === LICENSE_STATES.ACTIVE) {
+          await chrome.storage.local.remove(['fastPollUntil']);
+          chrome.alarms.clear('glfb_fast_order_poll');
+        }
+      } else {
+        await chrome.storage.local.remove(['fastPollUntil']);
+        chrome.alarms.clear('glfb_fast_order_poll');
+      }
+    } catch (_) {}
+    return;
+  }
   if (typeof AlarmsManager !== 'undefined') {
     await AlarmsManager.handleAlarmTrigger(alarm);
   }
@@ -926,7 +1247,6 @@ async function restoreScheduleOnBoot() {
   try {
     const licCheck = await checkLicenseStatus(false);
     if (!licCheck.isValid) {
-      console.log('[AutoRecruit Background] Bản quyền chưa kích hoạt -> Không khôi phục hẹn giờ.');
       if (typeof AlarmsManager !== 'undefined') {
         await AlarmsManager.syncScheduleAlarms([], false);
       }
@@ -950,7 +1270,6 @@ async function restoreScheduleOnBoot() {
         delaySec: data.delaySec || 30,
         isSpintaxEnabled: data.enableSpintax !== false,
       });
-      console.log('[AutoRecruit Background] ✓ Đã tự động nạp lại các khung giờ hẹn đăng:', slots.length || times.length);
     }
   } catch (err) {
     console.warn('[AutoRecruit Background] Lỗi khôi phục hẹn giờ:', err);
@@ -958,25 +1277,27 @@ async function restoreScheduleOnBoot() {
 }
 
 chrome.runtime.onStartup.addListener(async () => {
-  console.log('[AutoRecruit Background] Chrome vừa khởi động -> Khởi tạo dữ liệu & khôi phục trạng thái...');
   if (typeof SharedStorage !== 'undefined') await SharedStorage.runStorageMigrations();
+  await getOrCreateDeviceId();
   if (typeof AlarmsManager !== 'undefined') await AlarmsManager.initAlarms();
   if (typeof FbRunner !== 'undefined') await FbRunner.checkAndRecoverRunState();
   restoreScheduleOnBoot();
 });
 
 chrome.runtime.onInstalled.addListener(async () => {
-  console.log('[AutoRecruit Background] Extension vừa nạp/cập nhật -> Chạy migration & nạp alarms...');
   if (typeof SharedStorage !== 'undefined') await SharedStorage.runStorageMigrations();
+  await getOrCreateDeviceId();
   if (typeof AlarmsManager !== 'undefined') await AlarmsManager.initAlarms();
   if (typeof FbRunner !== 'undefined') await FbRunner.checkAndRecoverRunState();
   restoreScheduleOnBoot();
 });
 
 // ==========================================
-// 2. LẮNG NGHE THÔNG ĐIỆP
+// 2. LẮNG NGHE THÔNG ĐIỆP (MESSAGE ROUTER TRUNG TÂM)
 // ==========================================
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (!request || typeof request !== 'object') return false;
+
   // 1. BẮT ĐẦU ĐĂNG BÀI BỀN VỮNG
   if (request.action === 'START_BATCH_POSTING') {
     const payload = request.payload || request;
@@ -995,8 +1316,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true;
     }
 
-    // KIỂM TRA BẢN QUYỀN TRƯỚC KHI THỰC HIỆN ĐĂNG BÀI
-    checkLicenseStatus().then(async (licCheck) => {
+    checkLicenseStatus(false).then(async (licCheck) => {
       if (!licCheck.isValid) {
         const errorText = `🚨 BẢN QUYỀN CHƯA KÍCH HOẠT HOẶC ĐÃ HẾT HẠN: ${licCheck.message}`;
         if (typeof FbRunner !== 'undefined') {
@@ -1013,7 +1333,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return;
       }
 
-      // KIỂM TRA HẠN MỨC GÓI DÙNG THỬ 1 NGÀY (TỐI ĐA 20 BÀI ĐĂNG)
       if (licCheck.license?.planType === 'trial') {
         const trialData = await chrome.storage.local.get(['trialPostsCount']);
         const trialPostsCount = trialData.trialPostsCount || 0;
@@ -1052,7 +1371,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           sendResponse({ success: false, message: 'FbRunner chưa được nạp' });
         }
       } catch (err) {
-        console.error('[AutoRecruit Background] Lỗi khởi chạy tiến trình:', err);
         sendResponse({ success: false, message: err.message || 'Lỗi khởi chạy tiến trình' });
       }
     });
@@ -1062,7 +1380,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   // 2. DỪNG TIẾN TRÌNH LẬP TỨC
   if (request.action === 'STOP_BATCH_POSTING') {
-    console.log('[AutoRecruit Background] Nhận lệnh DỪNG TIẾN TRÌNH!');
     if (typeof FbRunner !== 'undefined') {
       FbRunner.stopBatchPosting()
         .then((res) => sendResponse(res))
@@ -1083,12 +1400,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
-  // 2.2 QUẢN LÝ TÀI KHOẢN FACEBOOK
+  // 2.2 QUẢN LÝ TÀI KHOẢN FACEBOOK (SINGLE WRITER TRONG SERVICE WORKER)
   if (request.action === 'GET_FB_ACCOUNTS') {
     if (typeof AccountsManager !== 'undefined') {
       Promise.all([
         AccountsManager.getAccounts(),
-        AccountsManager.getActiveAccount(),
+        AccountsManager.getAccountById(),
       ]).then(([accounts, active]) => {
         sendResponse({ success: true, accounts, activeAccount: active });
       }).catch((err) => sendResponse({ success: false, error: err.message }));
@@ -1098,10 +1415,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
-  if (request.action === 'SET_ACTIVE_FB_ACCOUNT') {
+  if (request.action === 'SET_ACTIVE_FB_ACCOUNT' || request.action === 'ACCOUNTS_SET_ACTIVE') {
     if (typeof AccountsManager !== 'undefined') {
       AccountsManager.setActiveAccount(request.accountId)
-        .then((res) => sendResponse(res))
+        .then((account) => sendResponse({ success: true, account }))
+        .catch((err) => sendResponse({ success: false, error: err.message }));
+    } else {
+      sendResponse({ success: false, error: 'AccountsManager chưa sẵn sàng' });
+    }
+    return true;
+  }
+
+  if (request.action === 'ACCOUNTS_UPSERT') {
+    if (typeof AccountsManager !== 'undefined') {
+      AccountsManager.upsertAccount(request.accountInput, request.options || {})
+        .then((account) => sendResponse({ success: true, account }))
         .catch((err) => sendResponse({ success: false, error: err.message }));
     } else {
       sendResponse({ success: false, error: 'AccountsManager chưa sẵn sàng' });
@@ -1120,10 +1448,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
-  if (request.action === 'REMOVE_FB_ACCOUNT') {
+  if (request.action === 'REMOVE_FB_ACCOUNT' || request.action === 'ACCOUNTS_REMOVE') {
     if (typeof AccountsManager !== 'undefined') {
       AccountsManager.removeAccount(request.accountId)
-        .then((res) => sendResponse(res))
+        .then((accounts) => sendResponse({ success: true, accounts }))
         .catch((err) => sendResponse({ success: false, error: err.message }));
     } else {
       sendResponse({ success: false, error: 'AccountsManager chưa sẵn sàng' });
@@ -1171,7 +1499,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         lastSyncedFromUrl: cleanUrl,
         known_server_urls: list,
       });
-      console.log('[Gia Long - FB] ✓ Đã nhận và kết nối với máy chủ Web App:', cleanUrl);
     });
     sendResponse({ success: true, url: cleanUrl });
     return true;
@@ -1179,19 +1506,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   // 5. Đồng bộ thời gian thực từ Web App (pages.dev)
   if (request.action === 'REALTIME_WEBAPP_SYNC' || request.action === 'SYNC_FROM_WEBAPP_PAGE') {
-    // Kiểm tra sender an toàn: chỉ nhận từ runtime nội bộ và domain production chính thức
     const senderUrl = sender?.url || '';
     const isAllowedSender = (!sender?.id || sender.id === chrome.runtime.id) &&
       (!senderUrl || senderUrl.startsWith('https://gia-long---tuy-n-d-ng.pages.dev'));
     if (!isAllowedSender) {
-      console.warn('[Background Security] Từ chối REALTIME_WEBAPP_SYNC từ nguồn lạ:', senderUrl);
       sendResponse({ success: false, error: 'Nguồn gửi không được phép!' });
       return true;
     }
 
-    // Không được ghi đè bài viết / nhóm khi đang có tiến trình chạy bài
     if (activeTabId !== null || isRunning) {
-      console.warn('[Background Security] Đang trong tiến trình đăng bài, hoãn đồng bộ bài viết/nhóm để tránh xung đột!');
       sendResponse({ success: false, message: 'Đang chạy đăng bài, tạm thời không ghi đè!' });
       return true;
     }
@@ -1217,7 +1540,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         toSet.googleDriveSheetWebhookUrl = gdriveUrl.trim();
       }
       chrome.storage.local.set(toSet);
-      console.log('[AutoRecruit Background] ✓ Đã nhận dữ liệu đồng bộ an toàn từ Web App');
     }
     sendResponse({ success: true });
     return true;
@@ -1239,11 +1561,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
-  // 8. KIỂM TRA BẢN QUYỀN (LICENSE VERIFY)
+  // 8. KIỂM TRA BẢN QUYỀN (LICENSE VERIFY - SINGLE SOURCE OF TRUTH)
   if (request.action === 'CHECK_LICENSE') {
-    checkLicenseStatus(request.forceRemote || false)
+    checkLicenseStatus(Boolean(request.forceRemote), {
+      legacyHintId: request.legacyHintId || '',
+      reason: request.reason || 'ui_check',
+    })
       .then((res) => sendResponse(res))
-      .catch((err) => sendResponse({ isValid: false, message: err.message }));
+      .catch((err) => sendResponse({ isValid: false, state: LICENSE_STATES.UNKNOWN_OFFLINE, message: err.message }));
     return true;
   }
 
@@ -1263,9 +1588,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
-  // 11. LẤY MÃ ĐỊNH DANH THIẾT BỊ (DEVICE ID)
+  // 11. LẤY MÃ ĐỊNH DANH THIẾT BỊ DUY NHẤT (CANONICAL DEVICE ID)
   if (request.action === 'GET_DEVICE_ID') {
-    getOrCreateDeviceId()
+    getOrCreateDeviceId(request.legacyHintId || '')
       .then((deviceId) => sendResponse({ success: true, deviceId }))
       .catch((err) => sendResponse({ success: false, error: err.message }));
     return true;
@@ -1281,31 +1606,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   // 13. NGẮT MÁY KHẨN CẤP TỪ WEB APP / ADMIN (FORCE REVOKE)
   if (request.action === 'FORCE_REVOKE_DEVICE') {
-    chrome.storage.local.set({
+    enforceHardRevokeOrSuspend({
       isRevoked: true,
-      isVip: false,
-      isRunning: false,
-      isScheduleActive: false,
-      autoScheduleEnabled: false,
-      scheduledJobs: [],
-      postJobState: 'REVOKED_STOPPED',
+      isSuspended: false,
+      message: '🚨 Quản trị viên đã thu hồi bản quyền và ngắt kết nối thiết bị này!',
     }).then(() => {
-      chrome.storage.local.remove(['signedToken', 'licenseKey', 'licenseData', 'isVip', 'currentLicense', 'licenseInfo']);
-      chrome.alarms.clearAll(() => {});
-      shouldStop = true;
-      isRunning = false;
-      stopKeepAlive();
-      if (activeTabId) {
-        chrome.tabs.remove(activeTabId).catch(() => {});
-        activeTabId = null;
-      }
       sendResponse({ success: true, message: 'Đã ngắt máy lập tức!' });
     });
     return true;
   }
 });
 
-// Tra cứu danh sách đơn hàng của máy khách và tự động kích hoạt key nếu đã được Admin duyệt
+// Tra cứu danh sách đơn hàng của máy khách và tự động đồng bộ trạng thái bản quyền
 async function fetchMyOrdersAndSync() {
   const deviceId = await getOrCreateDeviceId();
   const primaryBase = await getApiBaseUrl();
@@ -1313,64 +1625,66 @@ async function fetchMyOrdersAndSync() {
 
   for (const baseUrl of serverCandidates) {
     try {
-      const resp = await fetch(`${baseUrl}/api/orders/my-orders?deviceId=${encodeURIComponent(deviceId)}`);
+      const resp = await fetch(`${baseUrl}/api/orders/my-orders?deviceId=${encodeURIComponent(deviceId)}`, {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(7000),
+      });
+      if (!resp.ok) continue;
       const text = await resp.text();
       if (!text || (!text.trim().startsWith('{') && !text.trim().startsWith('['))) continue;
       const data = JSON.parse(text);
       if (data && data.success && Array.isArray(data.orders)) {
         await chrome.storage.local.set({ myOrders: data.orders, lastOrdersSync: Date.now() });
 
-        // 🚨 NẾU THIẾT BỊ BỊ THU HỒI / NGẮT MÁY VÀ KHÔNG CÓ BẢN QUYỀN MỚI
         const hasActiveOrderOrLicense = Boolean(
-          data.activeLicense || 
+          data.activeLicense ||
           data.orders.some((o) => o.status === 'approved' && o.generatedKey)
         );
         if (data.isRevoked && !hasActiveOrderOrLicense) {
-          console.warn('[AutoRecruit Background] 🚨 Đơn hàng của máy này đã bị thu hồi / ngắt kết nối!');
-          await chrome.storage.local.set({
+          await enforceHardRevokeOrSuspend({
             isRevoked: true,
-            isVip: false,
-            isRunning: false,
-            isScheduleActive: false,
-            autoScheduleEnabled: false,
-            scheduledJobs: [],
-            postJobState: 'REVOKED_STOPPED',
+            isSuspended: false,
+            message: data.message || '🚨 Bản quyền của máy này đã bị thu hồi!',
           });
-          await chrome.storage.local.remove(['signedToken', 'licenseKey', 'licenseData', 'isVip', 'currentLicense', 'licenseInfo']);
-          chrome.alarms.clearAll(() => {});
-          shouldStop = true;
-          isRunning = false;
-          stopKeepAlive();
-          if (activeTabId) {
-            chrome.tabs.remove(activeTabId).catch(() => {});
-            activeTabId = null;
-          }
           return { success: false, isRevoked: true, message: 'Bản quyền đã bị thu hồi' };
         }
 
-        // Tự động kích hoạt mã nếu có đơn được phê duyệt
-        const approvedOrder = data.orders.find((o) => o.status === 'approved' && o.generatedKey);
+        // Tự động nạp mã thật nếu có đơn được phê duyệt kèm mã GLFB-...
+        const approvedOrder = data.orders.find((o) => o.status === 'approved' && isRealHumanLicenseKey(o.generatedKey));
         if (approvedOrder && approvedOrder.generatedKey) {
           const currentData = await chrome.storage.local.get(['licenseKey', 'isRevoked']);
-          if (!currentData.isRevoked && (!currentData.licenseKey || currentData.licenseKey !== approvedOrder.generatedKey)) {
-            console.log('[AutoRecruit Background] Phát hiện đơn đã được duyệt, tự động nạp key:', approvedOrder.generatedKey);
+          if (!currentData.isRevoked && currentData.licenseKey !== approvedOrder.generatedKey) {
             await activateLicenseKey(approvedOrder.generatedKey);
           }
         }
 
-        const licRes = await checkLicenseStatus(true);
+        const licRes = await checkLicenseStatus(true, { reason: 'orders_sync' });
         return {
           success: true,
           orders: data.orders,
           totalPending: data.totalPending || 0,
           license: licRes.license,
           isValid: licRes.isValid,
+          state: licRes.state,
+          seq: licRes.seq,
           message: '✓ Đã đồng bộ trạng thái đơn hàng & bản quyền từ máy chủ Quản trị thành công!',
         };
       }
-    } catch (e) {}
+    } catch (_) {}
   }
-  return { success: false, message: 'Không thể kết nối đến máy chủ Quản trị!' };
+
+  // Khi lỗi mạng, trả lại dữ liệu myOrders đã lưu trong máy mà không hạ cấp bản quyền
+  const fallback = await chrome.storage.local.get(['myOrders']);
+  const licRes = await checkLicenseStatus(false, { reason: 'orders_sync_offline' });
+  return {
+    success: Array.isArray(fallback.myOrders),
+    orders: fallback.myOrders || [],
+    license: licRes.license,
+    isValid: licRes.isValid,
+    state: licRes.state,
+    seq: licRes.seq,
+    message: 'Đang dùng dữ liệu bộ nhớ đệm (Mạng chập chờn).',
+  };
 }
 
 // Chuyển URL ảnh thành DataURL trực tiếp trong Background Service Worker (Không dùng FileReader)

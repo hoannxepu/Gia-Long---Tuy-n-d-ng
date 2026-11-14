@@ -44,25 +44,39 @@
 
   /**
    * Xác minh chữ ký Ed25519 của token bản quyền
-   * @param {string} tokenString - Token bắt đầu bằng GLFB_ED25519_
+   * @param {string} tokenString - Token bắt đầu bằng GLFB_ED25519_ hoặc GLFB_ED1_
    * @param {string} currentMachineId - Mã máy hiện tại để kiểm tra
    * @param {number|string} lastOnlineCheckMs - Thời điểm kiểm tra online gần nhất
-   * @returns {Promise<{ valid: boolean, payload?: object, error?: string, needsOnlineCheck?: boolean }>}
+   * @returns {Promise<{ valid: boolean, payload?: object, error?: string, errorCode?: string, isTampered?: boolean, needsOnlineCheck?: boolean }>}
    */
   async function verifyEd25519LicenseToken(tokenString, currentMachineId, lastOnlineCheckMs = Date.now()) {
     try {
       if (!tokenString || typeof tokenString !== 'string') {
-        return { valid: false, error: 'Thiếu chuỗi token' };
+        return { valid: false, errorCode: 'MISSING_TOKEN', isTampered: false, error: 'Thiếu chuỗi token' };
       }
 
-      if (!tokenString.startsWith('GLFB_ED25519_')) {
-        return { valid: false, error: 'Định dạng token không đúng chuẩn chữ ký Ed25519' };
+      let raw = '';
+      if (tokenString.startsWith('GLFB_ED25519_')) {
+        raw = tokenString.slice('GLFB_ED25519_'.length);
+      } else if (tokenString.startsWith('GLFB_ED1_')) {
+        raw = tokenString.slice('GLFB_ED1_'.length);
+      } else {
+        return {
+          valid: false,
+          errorCode: 'UNSUPPORTED_FORMAT',
+          isTampered: false,
+          error: 'Định dạng token không phải chuẩn chữ ký Ed25519',
+        };
       }
 
-      const raw = tokenString.slice('GLFB_ED25519_'.length);
       const parts = raw.split('.');
-      if (parts.length !== 2) {
-        return { valid: false, error: 'Cấu trúc token bị thay đổi hoặc sai lệch' };
+      if (parts.length !== 2 || !parts[0] || !parts[1]) {
+        return {
+          valid: false,
+          errorCode: 'MALFORMED_TOKEN',
+          isTampered: true,
+          error: 'Cấu trúc token bị thay đổi hoặc sai lệch',
+        };
       }
 
       const [payloadB64, signatureB64] = parts;
@@ -78,36 +92,65 @@
       );
 
       if (!isSignatureValid) {
-        return { valid: false, error: 'Chữ ký token không hợp lệ (Dữ liệu đã bị sửa đổi trong DevTools/Storage)' };
+        return {
+          valid: false,
+          errorCode: 'SIGNATURE_MISMATCH',
+          isTampered: true,
+          error: 'Chữ ký token không hợp lệ (Dữ liệu đã bị sửa đổi)',
+        };
       }
 
       const payloadJson = new TextDecoder().decode(base64UrlToUint8Array(payloadB64));
       const payload = JSON.parse(payloadJson);
 
+      const cleanCurrentMachine = String(currentMachineId || '').trim().toLowerCase();
+      const cleanTokenMachine = String(payload.machineId || payload.machine_id || '').trim().toLowerCase();
+      if (cleanCurrentMachine && cleanTokenMachine && cleanTokenMachine !== cleanCurrentMachine) {
+        return {
+          valid: false,
+          payload,
+          errorCode: 'MACHINE_ID_MISMATCH',
+          isTampered: true,
+          error: 'Mã máy của token không khớp với thiết bị này',
+        };
+      }
+
       const now = Date.now();
-      if (payload.exp && payload.exp < now) {
-        return { valid: false, payload, error: 'Bản quyền đã hết hạn' };
+      const expMs = typeof payload.exp === 'number' ? payload.exp : new Date(payload.exp || payload.expiresAt || 0).getTime();
+      if (expMs && !isNaN(expMs) && expMs < now) {
+        return {
+          valid: false,
+          payload,
+          errorCode: 'TOKEN_EXPIRED',
+          isTampered: false,
+          error: 'Bản quyền đã hết hạn',
+        };
       }
 
-      if (currentMachineId && payload.machineId && payload.machineId !== currentMachineId) {
-        return { valid: false, payload, error: 'Mã máy của token không khớp với thiết bị này' };
-      }
-
-      // Giới hạn thời gian cho phép offline tối đa 48 giờ
-      const lastCheck = typeof lastOnlineCheckMs === 'number' ? lastOnlineCheckMs : new Date(lastOnlineCheckMs || 0).getTime();
+      // Giới hạn thời gian cho phép offline tối đa 48 giờ (không xóa token, chỉ yêu cầu check online lại)
+      const lastCheck = typeof lastOnlineCheckMs === 'number'
+        ? lastOnlineCheckMs
+        : new Date(lastOnlineCheckMs || 0).getTime();
       const offlineElapsed = now - lastCheck;
       if (lastCheck > 0 && offlineElapsed > MAX_OFFLINE_MS) {
         return {
           valid: false,
           payload,
+          errorCode: 'OFFLINE_WINDOW_EXCEEDED',
+          isTampered: false,
           needsOnlineCheck: true,
-          error: `Đã vượt quá thời gian cho phép offline (${MAX_OFFLINE_HOURS} giờ). Cần kết nối mạng để xác thực lại bản quyền.`
+          error: `Đã vượt quá thời gian cho phép offline (${MAX_OFFLINE_HOURS} giờ). Cần kết nối mạng để xác thực lại bản quyền.`,
         };
       }
 
-      return { valid: true, payload };
+      return { valid: true, payload, errorCode: 'OK', isTampered: false };
     } catch (err) {
-      return { valid: false, error: err.message || 'Lỗi giải mã token' };
+      return {
+        valid: false,
+        errorCode: 'DECODE_ERROR',
+        isTampered: false,
+        error: err.message || 'Lỗi giải mã token',
+      };
     }
   }
 

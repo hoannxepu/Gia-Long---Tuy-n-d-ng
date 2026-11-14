@@ -913,9 +913,14 @@
   }
 
   /**
-   * Nhận diện tài khoản Facebook hiện tại đang đăng nhập trên trình duyệt
+   * Nhận diện tài khoản Facebook hiện tại đang đăng nhập trên trình duyệt.
+   * Quy tắc định danh:
+   *  - Ưu tiên tuyệt đối numeric UID từ cookie c_user (hoặc cookieUidHint truyền từ chrome.cookies API).
+   *  - Dự phòng numeric UID từ inline script ("USER_ID" / "ACCOUNT_ID").
+   *  - Các thẻ <a> trên trang chỉ dùng để lấy tên hiển thị (name) và ảnh đại diện (avatar),
+   *    TUYỆT ĐỐI không ghi đè uid đã có và không bao giờ gán vanity username làm uid.
    */
-  function detectCurrentFacebookAccount() {
+  function detectCurrentFacebookAccount(cookieUidHint = '') {
     const currentUrl = typeof window !== 'undefined' && window.location ? window.location.href : '';
     if (currentUrl.includes('/login') || (typeof document !== 'undefined' && document.querySelector('form[action*="/login"]'))) {
       return { success: false, error: 'Chưa đăng nhập Facebook trên trình duyệt này' };
@@ -928,16 +933,51 @@
     let name = '';
     let avatar = '';
 
+    // 0. Ưu tiên cookieUidHint từ chrome.cookies API (Service Worker truyền xuống)
+    if (cookieUidHint && /^\d{4,25}$/.test(String(cookieUidHint).trim())) {
+      uid = String(cookieUidHint).trim();
+    }
+
     // 1. Đọc cookie c_user nếu có trên document.cookie
-    if (typeof document !== 'undefined' && typeof document.cookie === 'string') {
-      const cUserMatch = document.cookie.match(/(?:^|;\s*)c_user=([0-9]+)/);
+    if (!uid && typeof document !== 'undefined' && typeof document.cookie === 'string') {
+      const cUserMatch = document.cookie.match(/(?:^|;\s*)c_user=([0-9]{4,25})/);
       if (cUserMatch && cUserMatch[1]) {
         uid = cUserMatch[1];
       }
     }
 
+    // 2. Đọc USER_ID / ACCOUNT_ID chuẩn và NAME từ script nội tuyến của Facebook
+    const scripts = Array.from(document.querySelectorAll('script:not([src])'));
+    for (const s of scripts) {
+      const raw = s.textContent || '';
+      if (!raw) continue;
+      if (!uid) {
+        const idMatch =
+          raw.match(/"USER_ID"\s*:\s*"([0-9]{4,25})"/) ||
+          raw.match(/"ACCOUNT_ID"\s*:\s*"([0-9]{4,25})"/) ||
+          raw.match(/"actorID"\s*:\s*"([0-9]{4,25})"/);
+        if (idMatch && idMatch[1] && idMatch[1] !== '0') {
+          uid = idMatch[1];
+        }
+      }
+      if (!name) {
+        const nameMatch = raw.match(/"NAME"\s*:\s*"([^"]+)"/);
+        if (nameMatch && nameMatch[1]) {
+          try {
+            name = JSON.parse(`"${nameMatch[1]}"`);
+          } catch (e) {
+            name = nameMatch[1];
+          }
+        }
+      }
+      if (uid && name) break;
+    }
+
+    // 3. Quét thanh điều hướng / liên kết trang cá nhân CHỈ để bổ sung name, avatar (và numeric id nếu thuộc thanh điều hướng)
     const profileLinks = Array.from(
-      document.querySelectorAll('a[href*="/me"], a[href*="profile.php"], a[aria-label*="Trang cá nhân" i], a[aria-label*="Profile" i], a[role="link"]')
+      document.querySelectorAll(
+        'div[role="navigation"] a[href*="/me"], div[role="navigation"] a[href*="profile.php"], div[role="banner"] a[href*="profile.php"], a[aria-label*="Trang cá nhân" i], a[aria-label*="Profile" i], div[role="navigation"] a[role="link"]'
+      )
     );
     for (const a of profileLinks) {
       if (!isVisible(a)) continue;
@@ -945,60 +985,34 @@
       const label = a.getAttribute?.('aria-label') || '';
       const text = a.textContent || '';
 
-      if (href.includes('profile.php?id=')) {
-        const m = href.match(/id=([0-9]+)/);
-        if (m) uid = m[1];
-      } else if (href.includes('facebook.com/') && !href.includes('/groups') && !href.includes('/watch') && !href.includes('/messages')) {
-        const parts = href.replace(/^https?:\/\/(www\.|m\.)?facebook\.com\//, '').split(/[/?#]/);
-        if (parts[0] && parts[0] !== 'home.php' && parts[0] !== 'me') {
-          if (!uid) uid = parts[0];
-        }
+      // Chỉ lấy numeric id từ profile.php?id=... khi CHƯA có uid (tuyệt đối không lấy vanity username)
+      if (!uid && href.includes('profile.php?id=')) {
+        const m = href.match(/id=([0-9]{4,25})/);
+        if (m && m[1]) uid = m[1];
       }
 
-      if (label && (label.toLowerCase().includes('trang cá nhân') || label.toLowerCase().includes('profile'))) {
+      if (!name && label && (label.toLowerCase().includes('trang cá nhân') || label.toLowerCase().includes('profile'))) {
         const cleanedName = label.replace(/^(trang cá nhân của|profile of|trang cá nhân|profile)\s*:?\s*/i, '').trim();
         if (cleanedName && cleanedName.length > 1 && cleanedName.length < 50) {
           name = cleanedName;
         }
-      } else if (text && text.trim().length > 1 && text.trim().length < 40 && !name) {
-        if (!['trang chủ', 'video', 'bảng feed', 'thông báo', 'menu'].includes(text.trim().toLowerCase())) {
+      } else if (!name && text && text.trim().length > 1 && text.trim().length < 40) {
+        if (!['trang chủ', 'video', 'bảng feed', 'thông báo', 'menu', 'nhóm', 'bạn bè'].includes(text.trim().toLowerCase())) {
           name = text.trim();
         }
       }
 
-      const img = a.querySelector?.('img, image');
-      if (img) {
-        const imgSrc = img.getAttribute?.('xlink:href') || img.src || '';
-        if (imgSrc.startsWith('http') || imgSrc.startsWith('data:')) {
-          avatar = imgSrc;
-        }
-      }
-
-      if (uid && name) break;
-    }
-
-    // 2. Dự phòng đọc thông tin từ script nội tuyến của Facebook nếu thanh điều hướng ẩn tên
-    if (!uid || !name) {
-      const scripts = Array.from(document.querySelectorAll('script:not([src])'));
-      for (const s of scripts) {
-        const raw = s.textContent || '';
-        if (!raw) continue;
-        if (!uid) {
-          const idMatch = raw.match(/"USER_ID"\s*:\s*"([0-9]+)"/) || raw.match(/"id"\s*:\s*"([0-9]{6,})"/);
-          if (idMatch && idMatch[1] && idMatch[1] !== '0') uid = idMatch[1];
-        }
-        if (!name) {
-          const nameMatch = raw.match(/"NAME"\s*:\s*"([^"]+)"/) || raw.match(/"name"\s*:\s*"([^"]+)"/);
-          if (nameMatch && nameMatch[1]) {
-            try {
-              name = JSON.parse(`"${nameMatch[1]}"`);
-            } catch (e) {
-              name = nameMatch[1];
-            }
+      if (!avatar) {
+        const img = a.querySelector?.('img, image');
+        if (img) {
+          const imgSrc = img.getAttribute?.('xlink:href') || img.src || '';
+          if (imgSrc.startsWith('http') || imgSrc.startsWith('data:')) {
+            avatar = imgSrc;
           }
         }
-        if (uid && name) break;
       }
+
+      if (uid && name && avatar) break;
     }
 
     if (!avatar) {
@@ -1016,15 +1030,20 @@
       }
     }
 
-    if (!name && !uid) {
-      return { success: false, error: 'Không thể nhận diện tài khoản Facebook. Vui lòng mở trang chủ Facebook rồi thử lại.' };
+    // Chuẩn hóa uid chỉ giữ chữ số
+    const numericUid = String(uid || '').replace(/\D/g, '');
+    if (!numericUid || numericUid.length < 4) {
+      return {
+        success: false,
+        error: 'Không xác định được UID số của tài khoản Facebook. Vui lòng mở trang chủ facebook.com đã đăng nhập rồi thử lại.',
+      };
     }
 
     return {
       success: true,
       account: {
-        uid: uid || `fb_${Date.now()}`,
-        name: name || 'Tài khoản Facebook',
+        uid: numericUid,
+        name: (name || `FB User ${numericUid}`).trim(),
         avatar: avatar || '',
       },
     };
@@ -1349,7 +1368,7 @@
 
       if (request.action === 'DETECT_CURRENT_FB_ACCOUNT') {
         try {
-          const res = detectCurrentFacebookAccount();
+          const res = detectCurrentFacebookAccount(request.cookieUid || '');
           sendResponse(res);
         } catch (err) {
           sendResponse({ success: false, error: err.message || 'Lỗi nhận diện tài khoản' });

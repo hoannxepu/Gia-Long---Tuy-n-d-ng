@@ -282,10 +282,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
+  let isPopupDetectingAccount = false;
   btnPopupDetectAccount?.addEventListener('click', () => {
-    if (btnPopupDetectAccount) btnPopupDetectAccount.textContent = 'Đang quét...';
+    if (isPopupDetectingAccount) return;
+    isPopupDetectingAccount = true;
+    if (btnPopupDetectAccount) {
+      btnPopupDetectAccount.disabled = true;
+      btnPopupDetectAccount.textContent = 'Đang quét...';
+    }
     chrome.runtime.sendMessage({ action: 'DETECT_CURRENT_FB_ACCOUNT_FROM_TAB' }, (res) => {
-      if (btnPopupDetectAccount) btnPopupDetectAccount.textContent = 'Quét Nick ↗';
+      isPopupDetectingAccount = false;
+      if (btnPopupDetectAccount) {
+        btnPopupDetectAccount.disabled = false;
+        btnPopupDetectAccount.textContent = 'Quét Nick ↗';
+      }
       if (res && res.success && res.account) {
         loadPopupActiveAccount();
         showToast(`✓ Đã nhận diện: ${res.account.name}`);
@@ -296,6 +306,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   // Lắng nghe thay đổi storage từ background/dashboard
+  let popupAccountRenderScheduled = false;
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName !== 'local') return;
     if (changes.savedGroups) {
@@ -313,7 +324,16 @@ document.addEventListener('DOMContentLoaded', async () => {
       renderTimeTags();
     }
     if (changes.fbAccounts || changes.activeAccountId) {
-      loadPopupActiveAccount();
+      if (!popupAccountRenderScheduled) {
+        popupAccountRenderScheduled = true;
+        requestAnimationFrame(() => {
+          popupAccountRenderScheduled = false;
+          loadPopupActiveAccount();
+        });
+      }
+    }
+    if (changes.licenseSeq || changes.licenseState || changes.licenseStatus || changes.licenseInfo || changes.autorecruit_device_id) {
+      refreshPopupLicense(false);
     }
     if (changes.postHistory) {
       renderPopupHistory();
@@ -1323,64 +1343,129 @@ document.addEventListener('DOMContentLoaded', async () => {
   const popupPlanBadge = document.getElementById('popupPlanBadge');
   const popupLicIcon = document.getElementById('popupLicIcon');
 
-  function refreshPopupLicense() {
-    chrome.storage.local.get(['autorecruit_device_id'], (st) => {
-      if (popupDeviceId) popupDeviceId.innerText = st.autorecruit_device_id || 'Đang xác định...';
+  let lastPopupLicenseSeq = 0;
+  let lastPopupFingerprint = '';
+
+  function applyPopupLicenseDom(res, devId) {
+    if (devId && popupDeviceId && popupDeviceId.innerText !== devId) {
+      popupDeviceId.innerText = devId;
+    }
+    if (!res) return;
+
+    const incomingSeq = Number(res.seq || res.license?.licenseSeq || 0);
+    if (incomingSeq > 0 && incomingSeq < lastPopupLicenseSeq) {
+      return; // Bỏ qua phản hồi cũ đến muộn
+    }
+    if (incomingSeq > lastPopupLicenseSeq) {
+      lastPopupLicenseSeq = incomingSeq;
+    }
+
+    const isValid = Boolean(res.isValid && res.license && !res.isRevoked && !res.license.isRevoked);
+    const lic = res.license || {};
+    const fp = JSON.stringify({
+      isValid,
+      state: res.state || lic.state || '',
+      isRevoked: Boolean(res.isRevoked || lic.isRevoked),
+      isExpired: Boolean(res.isExpired),
+      expiresAt: lic.expiresAt || '',
+      clientName: lic.clientName || '',
+      phone: lic.phone || '',
+      planType: lic.planType || '',
     });
+    if (fp === lastPopupFingerprint) return;
+    lastPopupFingerprint = fp;
 
-    chrome.runtime.sendMessage({ action: 'SYNC_ADMIN_STATUS' }, () => {
-      chrome.runtime.sendMessage({ action: 'CHECK_LICENSE', forceRemote: true }, (res) => {
-        if (!res) return;
-        if (res.isValid && res.license && !res.isRevoked && !res.license.isRevoked) {
-          const lic = res.license;
-          const expMs = lic.expiresAt ? new Date(lic.expiresAt).getTime() : 0;
-          const daysLeft = expMs > Date.now()
-            ? Math.max(1, Math.ceil((expMs - Date.now()) / (24 * 60 * 60 * 1000)))
-            : (typeof lic.daysLeft === 'number' ? lic.daysLeft : parseInt(lic.daysLeft || '0', 10));
-          const isExpiringSoon = daysLeft <= 3 && daysLeft >= 0;
+    if (isValid) {
+      const expMs = lic.expiresAt ? new Date(lic.expiresAt).getTime() : 0;
+      const daysLeft = expMs > Date.now()
+        ? Math.max(1, Math.ceil((expMs - Date.now()) / (24 * 60 * 60 * 1000)))
+        : (typeof lic.daysLeft === 'number' ? lic.daysLeft : parseInt(lic.daysLeft || '0', 10));
+      const isExpiringSoon = daysLeft <= 3 && daysLeft >= 0;
 
-          if (popupClientName) popupClientName.innerText = lic.clientName || 'Khách Hàng VIP';
-          if (popupClientPhone) popupClientPhone.innerText = lic.phone || 'Chưa cập nhật';
-          if (popupDaysLeft) popupDaysLeft.innerText = `${daysLeft} ngày`;
-          if (popupExpiresAt) {
-            try {
-              const expDate = new Date(lic.expiresAt).toLocaleDateString('vi-VN');
-              popupExpiresAt.innerText = expDate;
-            } catch (e) {
-              popupExpiresAt.innerText = lic.expiresAt || 'Vĩnh viễn';
-            }
-          }
-          if (popupPlanBadge) {
-            popupPlanBadge.innerText = lic.planType === 'team' ? 'DOANH NGHIỆP' : (lic.planType === 'trial' ? 'DÙNG THỬ' : 'VIP CÁ NHÂN');
-            popupPlanBadge.style.background = isExpiringSoon ? 'rgba(217,119,6,0.2)' : 'rgba(16,185,129,0.2)';
-            popupPlanBadge.style.color = isExpiringSoon ? '#fbbf24' : '#34d399';
-          }
-          if (popupLicIcon) popupLicIcon.innerText = isExpiringSoon ? '⏰' : (lic.planType === 'trial' ? '🎁' : '💎');
-        } else {
-          const isExp = res.isExpired;
-          const isRevoked = Boolean(res.isRevoked || res.license?.isRevoked);
-          if (popupClientName) popupClientName.innerText = isRevoked ? 'Đã bị khóa quyền' : (isExp ? 'Đã hết hạn' : 'Chưa kích hoạt');
-          if (popupClientPhone) popupClientPhone.innerText = '---';
-          if (popupDaysLeft) popupDaysLeft.innerText = '0 ngày';
-          if (popupExpiresAt) popupExpiresAt.innerText = 'Cần gia hạn / duyệt đơn';
-          if (popupPlanBadge) {
-            popupPlanBadge.innerText = isRevoked ? 'BỊ KHÓA' : (isExp ? 'HẾT HẠN' : 'CHƯA KÍCH HOẠT');
-            popupPlanBadge.style.background = 'rgba(225,29,72,0.2)';
-            popupPlanBadge.style.color = '#fda4af';
-          }
-          if (popupLicIcon) popupLicIcon.innerText = isRevoked ? '🚫' : (isExp ? '🚨' : '⚠️');
+      if (popupClientName) popupClientName.innerText = lic.clientName || 'Khách Hàng VIP';
+      if (popupClientPhone) popupClientPhone.innerText = lic.phone || 'Chưa cập nhật';
+      if (popupDaysLeft) popupDaysLeft.innerText = `${daysLeft} ngày`;
+      if (popupExpiresAt) {
+        try {
+          const expDate = new Date(lic.expiresAt).toLocaleDateString('vi-VN');
+          popupExpiresAt.innerText = expDate;
+        } catch (e) {
+          popupExpiresAt.innerText = lic.expiresAt || 'Vĩnh viễn';
         }
-      });
+      }
+      if (popupPlanBadge) {
+        popupPlanBadge.innerText = lic.planType === 'team' ? 'DOANH NGHIỆP' : (lic.planType === 'trial' ? 'DÙNG THỬ' : 'VIP CÁ NHÂN');
+        popupPlanBadge.style.background = isExpiringSoon ? 'rgba(217,119,6,0.2)' : 'rgba(16,185,129,0.2)';
+        popupPlanBadge.style.color = isExpiringSoon ? '#fbbf24' : '#34d399';
+      }
+      if (popupLicIcon) popupLicIcon.innerText = isExpiringSoon ? '⏰' : (lic.planType === 'trial' ? '🎁' : '💎');
+    } else {
+      const isExp = Boolean(res.isExpired || res.state === 'EXPIRED');
+      const isRevoked = Boolean(res.isRevoked || lic.isRevoked || res.state === 'REVOKED' || res.state === 'SUSPENDED');
+      if (popupClientName) popupClientName.innerText = isRevoked ? 'Đã bị khóa quyền' : (isExp ? 'Đã hết hạn' : 'Chưa kích hoạt');
+      if (popupClientPhone) popupClientPhone.innerText = '---';
+      if (popupDaysLeft) popupDaysLeft.innerText = '0 ngày';
+      if (popupExpiresAt) popupExpiresAt.innerText = 'Cần gia hạn / duyệt đơn';
+      if (popupPlanBadge) {
+        popupPlanBadge.innerText = isRevoked ? 'BỊ KHÓA' : (isExp ? 'HẾT HẠN' : 'CHƯA KÍCH HOẠT');
+        popupPlanBadge.style.background = 'rgba(225,29,72,0.2)';
+        popupPlanBadge.style.color = '#fda4af';
+      }
+      if (popupLicIcon) popupLicIcon.innerText = isRevoked ? '🚫' : (isExp ? '🚨' : '⚠️');
+    }
+  }
+
+  function refreshPopupLicense(triggerBackgroundCheck = true) {
+    chrome.runtime.sendMessage({ action: 'GET_DEVICE_ID' }, (devRes) => {
+      if (devRes && devRes.deviceId && popupDeviceId) {
+        popupDeviceId.innerText = devRes.deviceId;
+      }
     });
+
+    chrome.storage.local.get(
+      ['autorecruit_device_id', 'licenseState', 'licenseStatus', 'licenseInfo', 'licenseSeq', 'isVip', 'isRevoked', 'expiresAt', 'cachedPkgName', 'gialong_customer_phone'],
+      (st) => {
+        if (st.autorecruit_device_id && popupDeviceId) {
+          popupDeviceId.innerText = st.autorecruit_device_id;
+        }
+        const hasCachedLicense = Boolean(st.licenseState || st.licenseStatus || st.licenseInfo);
+        if (hasCachedLicense) {
+          const isAct = (st.licenseState === 'ACTIVE' || st.licenseState === 'UNKNOWN_OFFLINE' || st.licenseStatus === 'active' || st.isVip) && !st.isRevoked;
+          applyPopupLicenseDom(
+            {
+              isValid: isAct,
+              state: st.licenseState || (isAct ? 'ACTIVE' : 'UNREGISTERED'),
+              seq: st.licenseSeq || 0,
+              isRevoked: Boolean(st.isRevoked || st.licenseState === 'REVOKED'),
+              isExpired: st.licenseState === 'EXPIRED' || st.licenseStatus === 'expired',
+              license: st.licenseInfo || (isAct ? {
+                expiresAt: st.expiresAt,
+                pkgName: st.cachedPkgName || 'Gói Bản Quyền VIP',
+                phone: st.gialong_customer_phone || '',
+                clientName: 'Khách Hàng VIP',
+              } : null),
+            },
+            st.autorecruit_device_id
+          );
+        } else if (lastPopupFingerprint === '') {
+          if (popupClientName) popupClientName.innerText = 'Đang kiểm tra...';
+          if (popupPlanBadge) popupPlanBadge.innerText = 'ĐANG ĐỒNG BỘ';
+        }
+      }
+    );
+
+    if (triggerBackgroundCheck) {
+      chrome.runtime.sendMessage({ action: 'CHECK_LICENSE', forceRemote: false }, (res) => {
+        if (res) applyPopupLicenseDom(res, res.deviceId);
+      });
+    }
   }
 
   document.getElementById('popupLicenseBar')?.addEventListener('click', () => {
     chrome.tabs.create({ url: chrome.runtime.getURL('dashboard.html?tab=license&pricing=1') });
   });
 
-
-
-  refreshPopupLicense();
+  refreshPopupLicense(true);
 
   setInterval(() => {
     chrome.storage.local.get(['postJobState'], (res) => {

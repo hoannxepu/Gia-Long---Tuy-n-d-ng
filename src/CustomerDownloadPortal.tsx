@@ -241,7 +241,7 @@ export function CustomerDownloadPortal({
     }
   };
 
-  const currentVersion = packageInfo?.version || '1.0.4';
+  const currentVersion = packageInfo?.version || '1.0.5';
   const fileSizeKb = packageInfo?.sizeKb || 335;
   const zaloUrl = adminZaloUrl || 'https://zalo.me/0869029310';
 

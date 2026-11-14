@@ -310,6 +310,7 @@ function corsHeaders() {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Origin, X-Requested-With, Content-Type, Accept, Authorization, X-Admin-Pin',
+    'Cache-Control': 'no-store, no-cache, must-revalidate',
     'Content-Type': 'application/json; charset=utf-8',
   };
 }
@@ -321,6 +322,7 @@ function adminCorsHeaders(reqOrigin?: string | null) {
     'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Origin, X-Requested-With, Content-Type, Accept, Authorization, X-Admin-Pin',
+    'Cache-Control': 'no-store, no-cache, must-revalidate',
     'Content-Type': 'application/json; charset=utf-8',
     'Access-Control-Allow-Credentials': 'true',
   };
@@ -879,339 +881,494 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
 
   // ========================================================
   // ROUTE 3: KIỂM TRA TRẠNG THÁI MÁY & CẤP MÃ XÁC NHẬN (/check & /api/check)
-  // Extension gọi kiểm tra: Nếu active trả về Signed Token và hạn dùng
+  // Idempotent, chuẩn hóa machine_id, trả HTTP 500 nếu lỗi nội bộ D1, đồng bộ shape JSON
   // ========================================================
   if ((pathname === '/api/check' || pathname === '/check') && (method === 'GET' || method === 'POST')) {
-    const machineId = String(
-      url.searchParams.get('machine_id') || 
-      url.searchParams.get('deviceId') || 
-      body.machine_id || 
-      body.deviceId || 
-      ''
-    ).trim();
+    try {
+      const machineId = String(
+        url.searchParams.get('machine_id') || 
+        url.searchParams.get('deviceId') || 
+        body.machine_id || 
+        body.deviceId || 
+        ''
+      ).trim();
 
-    if (!machineId) {
-      return jsonResponse({ success: false, status: 'error', message: 'Thiếu tham số machine_id!' }, 400);
-    }
-
-    const cleanId = machineId.toLowerCase();
-    const cleanIdUpper = machineId.toUpperCase();
-
-    // Kiểm tra xem thiết bị này hiện tại có đang được gắn vào 1 bản quyền ACTIVE hợp lệ hay không
-    const activeBoundLic = edgeLicenses.find(
-      (l) => !l.isRevoked && !l.isSuspended && l.devices?.some((d) => d.deviceId.toLowerCase() === cleanId)
-    );
-
-    if (!activeBoundLic) {
-      const revUpper = edgeRevokedKeys.map((r) => String(r).trim().toUpperCase());
-      if (
-        revUpper.includes(cleanIdUpper) ||
-        revUpper.includes(`DEV:${cleanIdUpper}`) ||
-        edgeRevokedKeys.includes(cleanId) ||
-        edgeRevokedKeys.includes(`dev:${cleanId}`)
-      ) {
-        return jsonResponse({
-          success: false,
-          status: 'revoked',
-          isRevoked: true,
-          action: 'FORCE_REVOKE',
-          machine_id: machineId,
-          message: '🚨 Bản quyền của thiết bị này đã bị Quản trị viên thu hồi và ngắt kết nối!',
-        });
+      if (!machineId) {
+        return jsonResponse({ success: false, status: 'error', message: 'Thiếu tham số machine_id!' }, 400);
       }
 
-      // Kiểm tra nếu thiết bị thuộc license đã bị thu hồi trong edgeLicenses
-      const revokedLic = edgeLicenses.find((l) =>
-        l.isRevoked && (
-          (l.devices && l.devices.some((d) => d.deviceId.toLowerCase() === cleanId)) ||
-          ((l as any).revokedDevices && (l as any).revokedDevices.some((d: string) => d.toLowerCase() === cleanId))
-        )
+      const cleanId = machineId.toLowerCase();
+      const cleanIdUpper = machineId.toUpperCase();
+
+      // Luôn hợp nhất đơn hàng đã phê duyệt vào danh sách bản quyền trước khi kiểm tra để tránh race condition
+      autoConsolidateEdgeLicensesAndOrders();
+
+      // Kiểm tra xem thiết bị này hiện tại có đang được gắn vào 1 bản quyền ACTIVE hợp lệ hay không
+      const activeBoundLic = edgeLicenses.find(
+        (l) => !l.isRevoked && !l.isSuspended && l.devices?.some((d) => String(d.deviceId || '').trim().toLowerCase() === cleanId)
       );
-      if (revokedLic) {
-        return jsonResponse({
-          success: false,
-          status: 'revoked',
-          isRevoked: true,
-          action: 'FORCE_REVOKE',
-          machine_id: machineId,
-          message: `🚨 BẢN QUYỀN ĐÃ BỊ THU HỒI (NGẮT MÁY): ${revokedLic.revokeReason || 'Quản trị viên đã ngắt kết nối'}!`,
-        });
+
+      if (!activeBoundLic) {
+        const revUpper = edgeRevokedKeys.map((r) => String(r).trim().toUpperCase());
+        if (
+          revUpper.includes(cleanIdUpper) ||
+          revUpper.includes(`DEV:${cleanIdUpper}`) ||
+          edgeRevokedKeys.includes(cleanId) ||
+          edgeRevokedKeys.includes(`dev:${cleanId}`)
+        ) {
+          return jsonResponse({
+            success: false,
+            status: 'revoked',
+            isRevoked: true,
+            action: 'FORCE_REVOKE',
+            machine_id: machineId,
+            message: '🚨 Bản quyền của thiết bị này đã bị Quản trị viên thu hồi và ngắt kết nối!',
+          });
+        }
+
+        // Kiểm tra nếu thiết bị thuộc license đã bị thu hồi trong edgeLicenses
+        const revokedLic = edgeLicenses.find((l) =>
+          l.isRevoked && (
+            (l.devices && l.devices.some((d) => String(d.deviceId || '').trim().toLowerCase() === cleanId)) ||
+            ((l as any).revokedDevices && (l as any).revokedDevices.some((d: string) => String(d || '').trim().toLowerCase() === cleanId))
+          )
+        );
+        if (revokedLic) {
+          return jsonResponse({
+            success: false,
+            status: 'revoked',
+            isRevoked: true,
+            action: 'FORCE_REVOKE',
+            machine_id: machineId,
+            message: `🚨 BẢN QUYỀN ĐÃ BỊ THU HỒI (NGẮT MÁY): ${revokedLic.revokeReason || 'Quản trị viên đã ngắt kết nối'}!`,
+          });
+        }
+
+        // Kiểm tra nếu có đơn hàng của máy này đã bị thu hồi và không có đơn hợp lệ nào khác
+        const myOrders = edgeOrders.filter((o) => String(o.deviceId || '').trim().toLowerCase() === cleanId);
+        if (myOrders.length > 0 && myOrders.every((o) => o.status === 'revoked')) {
+          return jsonResponse({
+            success: false,
+            status: 'revoked',
+            isRevoked: true,
+            action: 'FORCE_REVOKE',
+            machine_id: machineId,
+            message: '🚨 Máy tính này đã bị Quản trị viên thu hồi bản quyền và ngắt máy!',
+          });
+        }
       }
 
-      // Kiểm tra nếu có đơn hàng của máy này đã bị thu hồi và không có đơn hợp lệ nào khác
-      const myOrders = edgeOrders.filter((o) => (o.deviceId || '').toLowerCase() === cleanId);
-      if (myOrders.length > 0 && myOrders.every((o) => o.status === 'revoked')) {
-        return jsonResponse({
-          success: false,
-          status: 'revoked',
-          isRevoked: true,
-          action: 'FORCE_REVOKE',
-          machine_id: machineId,
-          message: '🚨 Máy tính này đã bị Quản trị viên thu hồi bản quyền và ngắt máy!',
-        });
+      // 1. Kiểm tra trên Cloudflare D1 Database trước (so khớp chuẩn hóa LOWER(TRIM(machine_id)), ưu tiên bản ghi active)
+      const d1 = await getD1Db(env);
+      let d1Lic: any = null;
+      let d1QueryFailed = false;
+      if (d1) {
+        try {
+          d1Lic = await d1.prepare(`
+            SELECT * FROM licenses
+            WHERE LOWER(TRIM(machine_id)) = ?
+            ORDER BY CASE WHEN status = 'active' THEN 0 WHEN status = 'pending' THEN 1 ELSE 2 END, expires_at DESC, created_at DESC
+            LIMIT 1
+          `).bind(cleanId).first();
+        } catch (d1Err) {
+          console.warn('[D1 Check] Query error:', d1Err);
+          d1QueryFailed = true;
+        }
       }
-    }
 
-    // 1. Kiểm tra trên Cloudflare D1 Database trước
-    const d1 = await getD1Db(env);
-    let d1Lic: any = null;
-    if (d1) {
-      try {
-        d1Lic = await d1.prepare(`
-          SELECT * FROM licenses WHERE machine_id = ? ORDER BY created_at DESC LIMIT 1
-        `).bind(machineId).first();
-      } catch (d1Err) {
-        console.warn('[D1 Check] Query error:', d1Err);
+      if (d1Lic) {
+        if (d1Lic.status === 'pending') {
+          return jsonResponse({
+            success: true,
+            status: 'pending',
+            isRevoked: false,
+            machine_id: machineId,
+            pkg_name: d1Lic.pkg_name,
+            message: 'Đơn đăng ký đang chờ Quản trị viên phê duyệt.',
+          });
+        }
+        if (d1Lic.status === 'revoked' || d1Lic.is_revoked) {
+          return jsonResponse({
+            success: false,
+            status: 'revoked',
+            isRevoked: true,
+            action: 'FORCE_REVOKE',
+            machine_id: machineId,
+            message: '🚨 Bản quyền của thiết bị này đã bị Quản trị viên thu hồi!',
+          });
+        }
+        if (d1Lic.status === 'suspended' || d1Lic.is_suspended) {
+          return jsonResponse({
+            success: false,
+            status: 'suspended',
+            isSuspended: true,
+            machine_id: machineId,
+            message: '⏸️ Bản quyền của thiết bị đang bị Quản trị viên tạm khóa!',
+          });
+        }
+        if (d1Lic.status === 'active') {
+          const expMs = new Date(d1Lic.expires_at).getTime();
+          const now = Date.now();
+          if (!isNaN(expMs) && expMs < now) {
+            return jsonResponse({
+              success: false,
+              status: 'expired',
+              isExpired: true,
+              isRevoked: false,
+              machine_id: machineId,
+              expires_at: d1Lic.expires_at,
+              message: 'Bản quyền của máy đã hết hạn sử dụng. Vui lòng gia hạn thêm!',
+            });
+          }
+          const daysLeft = Math.max(1, Math.ceil((expMs - now) / (24 * 60 * 60 * 1000)));
+          const token = d1Lic.signed_token || generateSignedToken(machineId, d1Lic.expires_at, env.SIGNING_SECRET);
+          const plan = d1Lic.plan_type || 'individual';
+          return jsonResponse({
+            success: true,
+            status: 'active',
+            isRevoked: false,
+            machine_id: machineId,
+            plan,
+            pkg_name: d1Lic.pkg_name || 'Gói Bản Quyền VIP',
+            client_name: d1Lic.client_name || 'Khách Hàng VIP',
+            phone: d1Lic.phone || '',
+            key: d1Lic.id || '',
+            token,
+            expires_at: d1Lic.expires_at,
+            days_left: daysLeft,
+            license: {
+              key: d1Lic.id || '',
+              clientName: d1Lic.client_name || 'Khách Hàng VIP',
+              phone: d1Lic.phone || '',
+              planType: plan,
+              maxDevices: 1,
+              activeDevicesCount: 1,
+              expiresAt: d1Lic.expires_at,
+              daysLeft,
+              isExpired: false,
+              isRevoked: false,
+              isDeviceBound: true,
+            },
+            message: '✓ Bản quyền hợp lệ và đang hoạt động!',
+          });
+        }
       }
-    }
 
-    if (d1Lic) {
-      if (d1Lic.status === 'pending') {
-        return jsonResponse({
-          success: true,
-          status: 'pending',
-          machine_id: machineId,
-          pkg_name: d1Lic.pkg_name,
-          message: 'Đơn đăng ký đang chờ Quản trị viên phê duyệt.',
-        });
+      // 2. Kiểm tra trên Google Drive / Google Sheets (nếu đã cấu hình Webhook)
+      const gDriveUrl = edgeSettings.googleDriveSheetWebhookUrl || env.GOOGLE_DRIVE_WEBHOOK_URL;
+      if (gDriveUrl && gDriveUrl.startsWith('http')) {
+        try {
+          const gRes = await fetch(`${gDriveUrl}?action=check&machine_id=${encodeURIComponent(machineId)}`);
+          if (gRes.ok) {
+            const gData: any = await gRes.json();
+            if (gData && gData.success && gData.status === 'active') {
+              const expDate = gData.expires_at || new Date(Date.now() + 30 * 86400000).toISOString();
+              const daysLeft = gData.days_left || Math.max(1, Math.ceil((new Date(expDate).getTime() - Date.now()) / 86400000));
+              const token = generateSignedToken(machineId, expDate, env.SIGNING_SECRET);
+              return jsonResponse({
+                success: true,
+                status: 'active',
+                isRevoked: false,
+                machine_id: machineId,
+                plan: 'individual',
+                pkg_name: gData.pkg_name || 'Gói Bản Quyền VIP',
+                client_name: gData.client_name || 'Khách Hàng VIP',
+                token,
+                expires_at: expDate,
+                days_left: daysLeft,
+                license: {
+                  key: gData.key || '',
+                  clientName: gData.client_name || 'Khách Hàng VIP',
+                  planType: 'individual',
+                  expiresAt: expDate,
+                  daysLeft,
+                  isExpired: false,
+                  isRevoked: false,
+                  isDeviceBound: true,
+                },
+                message: '✓ Bản quyền hợp lệ từ Google Drive!',
+              });
+            }
+            if (gData && gData.status === 'pending') {
+              return jsonResponse({
+                success: true,
+                status: 'pending',
+                isRevoked: false,
+                machine_id: machineId,
+                pkg_name: gData.pkg_name || 'Gói Đăng Ký',
+                message: 'Đơn đăng ký đang chờ Quản trị viên phê duyệt trên Google Drive.',
+              });
+            }
+          }
+        } catch (gErr) {
+          console.warn('[Google Drive Check Error]', gErr);
+        }
       }
-      if (d1Lic.status === 'revoked' || d1Lic.is_revoked) {
-        return jsonResponse({
-          success: false,
-          status: 'revoked',
-          isRevoked: true,
-          machine_id: machineId,
-          message: '🚨 Bản quyền của thiết bị này đã bị Quản trị viên thu hồi!',
-        });
-      }
-      if (d1Lic.status === 'suspended' || d1Lic.is_suspended) {
-        return jsonResponse({
-          success: false,
-          status: 'suspended',
-          isSuspended: true,
-          machine_id: machineId,
-          message: '⏸️ Bản quyền của thiết bị đang bị Quản trị viên tạm khóa!',
-        });
-      }
-      if (d1Lic.status === 'active') {
-        const expMs = new Date(d1Lic.expires_at).getTime();
+
+      // 3. Fallback sang Edge Memory / KV (nếu D1 chưa có hoặc dữ liệu trong KV)
+      const matchedLic = activeBoundLic || edgeLicenses.find((l) =>
+        !l.isRevoked && l.devices?.some((d) => String(d.deviceId || '').trim().toLowerCase() === cleanId)
+      );
+
+      if (matchedLic) {
+        if (matchedLic.isRevoked) {
+          return jsonResponse({
+            success: false,
+            status: 'revoked',
+            isRevoked: true,
+            action: 'FORCE_REVOKE',
+            machine_id: machineId,
+            message: '🚨 Bản quyền máy này đã bị Quản trị viên thu hồi!',
+          });
+        }
+        if (matchedLic.isSuspended) {
+          return jsonResponse({
+            success: false,
+            status: 'suspended',
+            isSuspended: true,
+            machine_id: machineId,
+            message: '⏸️ Bản quyền máy này đang bị Quản trị viên tạm khóa!',
+          });
+        }
+        const expMs = new Date(matchedLic.expiresAt).getTime();
         const now = Date.now();
         if (!isNaN(expMs) && expMs < now) {
           return jsonResponse({
             success: false,
             status: 'expired',
+            isExpired: true,
+            isRevoked: false,
             machine_id: machineId,
-            expires_at: d1Lic.expires_at,
-            message: 'Bản quyền của máy đã hết hạn sử dụng. Vui lòng gia hạn thêm!',
+            expires_at: matchedLic.expiresAt,
+            message: 'Bản quyền đã hết hạn sử dụng!',
           });
         }
         const daysLeft = Math.max(1, Math.ceil((expMs - now) / (24 * 60 * 60 * 1000)));
+        const token = generateSignedToken(machineId, matchedLic.expiresAt, env.SIGNING_SECRET);
         return jsonResponse({
           success: true,
           status: 'active',
+          isRevoked: false,
           machine_id: machineId,
-          plan: d1Lic.plan_type || 'individual',
-          expires_at: d1Lic.expires_at,
-          days_left: daysLeft,
-          message: '✓ Bản quyền hợp lệ và đang hoạt động!',
-        });
-      }
-    }
-
-    // 2. Kiểm tra trên Google Drive / Google Sheets (nếu đã cấu hình Webhook)
-    const gDriveUrl = edgeSettings.googleDriveSheetWebhookUrl || env.GOOGLE_DRIVE_WEBHOOK_URL;
-    if (gDriveUrl && gDriveUrl.startsWith('http')) {
-      try {
-        const gRes = await fetch(`${gDriveUrl}?action=check&machine_id=${encodeURIComponent(machineId)}`);
-        if (gRes.ok) {
-          const gData: any = await gRes.json();
-          if (gData && gData.success && gData.status === 'active') {
-            const expDate = gData.expires_at || new Date(Date.now() + 30 * 86400000).toISOString();
-            return jsonResponse({
-              success: true,
-              status: 'active',
-              machine_id: machineId,
-              plan: 'individual',
-              expires_at: expDate,
-              days_left: gData.days_left || 30,
-              message: '✓ Bản quyền hợp lệ từ Google Drive!',
-            });
-          }
-          if (gData && gData.status === 'pending') {
-            return jsonResponse({
-              success: true,
-              status: 'pending',
-              machine_id: machineId,
-              pkg_name: gData.pkg_name || 'Gói Đăng Ký',
-              message: 'Đơn đăng ký đang chờ Quản trị viên phê duyệt trên Google Drive.',
-            });
-          }
-        }
-      } catch (gErr) {
-        console.warn('[Google Drive Check Error]', gErr);
-      }
-    }
-
-    // 3. Fallback sang Edge Memory / KV (nếu D1 chưa có hoặc dữ liệu cũ)
-    const matchedLic = edgeLicenses.find((l) =>
-      !l.isRevoked && l.devices?.some((d) => d.deviceId.toLowerCase() === cleanId)
-    );
-
-    if (matchedLic) {
-      if (matchedLic.isRevoked) {
-        return jsonResponse({
-          success: false,
-          status: 'revoked',
-          isRevoked: true,
-          machine_id: machineId,
-          message: '🚨 Bản quyền máy này đã bị Quản trị viên thu hồi!',
-        });
-      }
-      if (matchedLic.isSuspended) {
-        return jsonResponse({
-          success: false,
-          status: 'suspended',
-          isSuspended: true,
-          machine_id: machineId,
-          message: '⏸️ Bản quyền máy này đang bị Quản trị viên tạm khóa!',
-        });
-      }
-      const expMs = new Date(matchedLic.expiresAt).getTime();
-      const now = Date.now();
-      if (!isNaN(expMs) && expMs < now) {
-        return jsonResponse({
-          success: false,
-          status: 'expired',
-          machine_id: machineId,
+          plan: matchedLic.planType || 'individual',
+          pkg_name: matchedLic.notes || 'Gói Bản Quyền VIP',
+          client_name: matchedLic.clientName || 'Khách Hàng VIP',
+          phone: matchedLic.phone || '',
+          key: matchedLic.key,
+          token,
           expires_at: matchedLic.expiresAt,
-          message: 'Bản quyền đã hết hạn sử dụng!',
+          days_left: daysLeft,
+          license: {
+            key: matchedLic.key,
+            clientName: matchedLic.clientName,
+            phone: matchedLic.phone || '',
+            planType: matchedLic.planType || 'individual',
+            maxDevices: matchedLic.maxDevices || 1,
+            activeDevicesCount: matchedLic.devices ? matchedLic.devices.length : 1,
+            expiresAt: matchedLic.expiresAt,
+            daysLeft,
+            isExpired: false,
+            isRevoked: false,
+            isDeviceBound: true,
+          },
+          message: '✓ Bản quyền hợp lệ!',
         });
       }
-      const daysLeft = Math.max(1, Math.ceil((expMs - now) / (24 * 60 * 60 * 1000)));
-      return jsonResponse({
-        success: true,
-        status: 'active',
-        machine_id: machineId,
-        plan: matchedLic.planType || 'individual',
-        expires_at: matchedLic.expiresAt,
-        days_left: daysLeft,
-        message: '✓ Bản quyền hợp lệ!',
-      });
-    }
 
-    const pendingOrd = edgeOrders.find((o) =>
-      o.status === 'pending' && (o.deviceId || '').toLowerCase() === cleanId
-    );
-    if (pendingOrd) {
-      return jsonResponse({
-        success: true,
-        status: 'pending',
-        machine_id: machineId,
-        pkg_name: pendingOrd.pkgName,
-        message: 'Đơn mua gói đang chờ Quản trị viên duyệt.',
-      });
-    }
+      const pendingOrd = edgeOrders.find((o) =>
+        o.status === 'pending' && String(o.deviceId || '').trim().toLowerCase() === cleanId
+      );
+      if (pendingOrd) {
+        return jsonResponse({
+          success: true,
+          status: 'pending',
+          isRevoked: false,
+          machine_id: machineId,
+          pkg_name: pendingOrd.pkgName,
+          message: 'Đơn mua gói đang chờ Quản trị viên duyệt.',
+        });
+      }
 
-    return jsonResponse({
-      success: false,
-      status: 'unregistered',
-      isRevoked: false,
-      machine_id: machineId,
-      message: 'Thiết bị chưa kích hoạt bản quyền. Vui lòng gửi đơn mua gói hoặc kích hoạt mã để sử dụng.',
-    });
+      // Nếu truy vấn D1 bị lỗi nội bộ và không tìm thấy trong bộ nhớ dự phòng -> Trả HTTP 500 thay vì unregistered
+      if (d1QueryFailed) {
+        return jsonResponse({
+          success: false,
+          status: 'server_error',
+          message: 'Lỗi kết nối cơ sở dữ liệu D1 tạm thời.',
+        }, 500);
+      }
+
+      return jsonResponse({
+        success: false,
+        status: 'unregistered',
+        isRevoked: false,
+        machine_id: machineId,
+        message: 'Thiết bị chưa kích hoạt bản quyền. Vui lòng gửi đơn mua gói hoặc kích hoạt mã để sử dụng.',
+      });
+    } catch (checkErr: any) {
+      console.error('[/api/check Edge Error]', checkErr);
+      return jsonResponse({
+        success: false,
+        status: 'server_error',
+        message: 'Lỗi nội bộ máy chủ khi kiểm tra bản quyền.',
+      }, 500);
+    }
   }
 
-  // ROUTE: Xác thực bản quyền (Verify)
+  // ROUTE: Xác thực bản quyền (Verify) - Phân biệt rõ NOT_FOUND và REVOKED
   if (pathname === '/api/license/verify' && method === 'POST') {
-    const { key, deviceId } = body;
-    if (!key) return jsonResponse({ valid: false, message: 'Vui lòng cung cấp mã bản quyền!' }, 400);
-
-    const found = edgeLicenses.find((l) => l.key.trim().toUpperCase() === String(key).trim().toUpperCase());
-    if (!found) {
-      return jsonResponse({
-        valid: false,
-        isRevoked: true,
-        isDeleted: true,
-        action: 'FORCE_REVOKE',
-        message: '🚨 Mã bản quyền không tồn tại hoặc đã bị xóa khỏi hệ thống! Toàn bộ tính năng đã bị chấm dứt ngay lập tức.',
-      });
-    }
-
-    if (found.isRevoked) {
-      return jsonResponse({
-        valid: false,
-        isRevoked: true,
-        action: 'FORCE_REVOKE',
-        message: `🚨 BẢN QUYỀN ĐÃ BỊ THU HỒI: ${found.revokeReason || 'Vi phạm điều khoản sử dụng'}. Mọi tính năng đã bị vô hiệu hóa!`,
-        license: {
-          key: found.key,
-          clientName: found.clientName,
-          planType: found.planType,
-          isRevoked: true,
-          isSuspended: true,
-        },
-      });
-    }
-
-    if (found.isSuspended) {
-      return jsonResponse({
-        valid: false,
-        message: 'Mã bản quyền này đang bị tạm khóa. Vui lòng liên hệ Quản trị viên!',
-        license: {
-          key: found.key,
-          clientName: found.clientName,
-          planType: found.planType,
-          isSuspended: true,
-        },
-      });
-    }
-
-    const now = Date.now();
-    const expMs = new Date(found.expiresAt).getTime();
-    const isExpired = expMs < now;
-    const daysLeft = Math.max(0, Math.ceil((expMs - now) / (24 * 60 * 60 * 1000)));
-
-    if (isExpired) {
-      return jsonResponse({
-        valid: false,
-        isExpired: true,
-        message: `Bản quyền đã hết hạn vào ngày ${new Date(found.expiresAt).toLocaleDateString('vi-VN')}. Vui lòng gia hạn!`,
-        license: {
-          key: found.key,
-          clientName: found.clientName,
-          planType: found.planType,
-          expiresAt: found.expiresAt,
-          daysLeft: 0,
-          isExpired: true,
-        },
-      });
-    }
-
-    let isDeviceBound = false;
-    if (deviceId) {
-      const existingDev = found.devices.find((d) => d.deviceId === deviceId);
-      if (existingDev) {
-        existingDev.lastSeenAt = new Date().toISOString();
-        await syncKV();
-        isDeviceBound = true;
+    try {
+      const { key, deviceId } = body || {};
+      if (!key && !deviceId) {
+        return jsonResponse({ valid: false, isRevoked: false, message: 'Vui lòng cung cấp mã bản quyền hoặc mã thiết bị!' }, 400);
       }
-    }
 
-    return jsonResponse({
-      valid: true,
-      message: 'Bản quyền VIP hợp lệ!',
-      license: {
-        key: found.key,
-        clientName: found.clientName,
-        planType: found.planType,
-        maxDevices: found.maxDevices,
-        activeDevicesCount: found.devices.length,
-        expiresAt: found.expiresAt,
-        daysLeft,
-        isExpired: false,
-        isDeviceBound,
-      },
-    });
+      autoConsolidateEdgeLicensesAndOrders();
+
+      const rawKeyStr = String(key || '').trim();
+      const cleanKey = rawKeyStr.toUpperCase();
+      const cleanDevId = deviceId ? String(deviceId).trim() : '';
+      const isTokenOrPlaceholder =
+        cleanKey === 'GLFB-VIP-ACTIVE' ||
+        rawKeyStr.startsWith('GLFB_ED1_') ||
+        rawKeyStr.startsWith('GLFB_ED25519_') ||
+        rawKeyStr.startsWith('GLFB_SIG_');
+
+      // 1. Kiểm tra danh sách mã / thiết bị đã bị Quản trị viên thu hồi thật sự
+      const revUpper = edgeRevokedKeys.map((r) => String(r).trim().toUpperCase());
+      const isExplicitlyRevoked =
+        (!isTokenOrPlaceholder && cleanKey && revUpper.includes(cleanKey)) ||
+        (cleanDevId && (revUpper.includes(cleanDevId.toUpperCase()) || revUpper.includes(`DEV:${cleanDevId.toUpperCase()}`)));
+
+      if (isExplicitlyRevoked) {
+        return jsonResponse({
+          valid: false,
+          isRevoked: true,
+          isDeleted: true,
+          statusCode: 'REVOKED',
+          action: 'FORCE_REVOKE',
+          message: '🚨 BẢN QUYỀN ĐÃ BỊ THU HỒI / NGẮT MÁY bởi Quản trị viên!',
+        });
+      }
+
+      let found = !isTokenOrPlaceholder && cleanKey
+        ? edgeLicenses.find((l) => {
+            if (l.key.trim().toUpperCase() === cleanKey) return true;
+            if (l.aliasKeys && l.aliasKeys.some((ak) => ak.trim().toUpperCase() === cleanKey)) return true;
+            return false;
+          })
+        : undefined;
+
+      if (!found && cleanDevId && cleanDevId !== 'chưa gắn' && cleanDevId !== 'chuagan') {
+        found = edgeLicenses.find(
+          (l) => !l.isRevoked && l.devices?.some((d) => String(d.deviceId || '').trim().toLowerCase() === cleanDevId.toLowerCase())
+        );
+      }
+
+      if (!found) {
+        // Không tìm thấy mã KHÔNG PHẢI là bị thu hồi
+        return jsonResponse({
+          valid: false,
+          isRevoked: false,
+          isDeleted: false,
+          statusCode: 'NOT_FOUND',
+          message: 'Mã bản quyền không tìm thấy hoặc chưa được gắn cho thiết bị này.',
+        });
+      }
+
+      if (found.isRevoked) {
+        return jsonResponse({
+          valid: false,
+          isRevoked: true,
+          statusCode: 'REVOKED',
+          action: 'FORCE_REVOKE',
+          message: `🚨 BẢN QUYỀN ĐÃ BỊ THU HỒI: ${found.revokeReason || 'Vi phạm điều khoản sử dụng'}. Mọi tính năng đã bị vô hiệu hóa!`,
+          license: {
+            key: found.key,
+            clientName: found.clientName,
+            planType: found.planType,
+            isRevoked: true,
+            isSuspended: true,
+          },
+        });
+      }
+
+      if (found.isSuspended) {
+        return jsonResponse({
+          valid: false,
+          isRevoked: false,
+          isSuspended: true,
+          statusCode: 'SUSPENDED',
+          message: 'Mã bản quyền này đang bị tạm khóa. Vui lòng liên hệ Quản trị viên!',
+          license: {
+            key: found.key,
+            clientName: found.clientName,
+            planType: found.planType,
+            isSuspended: true,
+          },
+        });
+      }
+
+      const now = Date.now();
+      const expMs = new Date(found.expiresAt).getTime();
+      const isExpired = expMs < now;
+      const daysLeft = Math.max(0, Math.ceil((expMs - now) / (24 * 60 * 60 * 1000)));
+
+      if (isExpired) {
+        return jsonResponse({
+          valid: false,
+          isRevoked: false,
+          isExpired: true,
+          statusCode: 'EXPIRED',
+          message: `Bản quyền đã hết hạn vào ngày ${new Date(found.expiresAt).toLocaleDateString('vi-VN')}. Vui lòng gia hạn!`,
+          license: {
+            key: found.key,
+            clientName: found.clientName,
+            planType: found.planType,
+            expiresAt: found.expiresAt,
+            daysLeft: 0,
+            isExpired: true,
+          },
+        });
+      }
+
+      let isDeviceBound = false;
+      if (cleanDevId) {
+        const existingDev = found.devices.find((d) => String(d.deviceId || '').trim().toLowerCase() === cleanDevId.toLowerCase());
+        if (existingDev) {
+          existingDev.lastSeenAt = new Date().toISOString();
+          await syncKV();
+          isDeviceBound = true;
+        }
+      }
+
+      return jsonResponse({
+        valid: true,
+        isRevoked: false,
+        statusCode: 'ACTIVE',
+        message: 'Bản quyền VIP hợp lệ!',
+        license: {
+          key: found.key,
+          clientName: found.clientName,
+          phone: found.phone || '',
+          planType: found.planType,
+          maxDevices: found.maxDevices,
+          activeDevicesCount: found.devices.length,
+          expiresAt: found.expiresAt,
+          daysLeft,
+          isExpired: false,
+          isRevoked: false,
+          isDeviceBound,
+        },
+      });
+    } catch (verifyErr: any) {
+      return jsonResponse({
+        valid: false,
+        isRevoked: false,
+        statusCode: 'SERVER_ERROR',
+        message: 'Lỗi nội bộ máy chủ khi xác thực bản quyền.',
+      }, 500);
+    }
   }
 
   // ROUTE: Kiểm tra tự động theo Device ID & Số điện thoại (Nhận diện thiết bị kép)
@@ -1616,7 +1773,7 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
       sizeKb: 332,
       updatedAt: new Date().toISOString(),
       fileName: 'Gia_Long_FB_WebStore_latest.zip',
-      version: '1.0.4',
+      version: '1.0.5',
     });
   }
 
@@ -1641,7 +1798,7 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
     const { licenses } = autoConsolidateEdgeLicensesAndOrders();
     const data = {
       app: 'Gia Long - FB',
-      version: '1.0.4',
+      version: '1.0.5',
       updatedAt: new Date().toISOString(),
       licenses: licenses || edgeLicenses,
       orders: edgeOrders,
@@ -2569,7 +2726,7 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
     if (pathname === '/api/admin/backup-json' && method === 'GET') {
       const { licenses } = autoConsolidateEdgeLicensesAndOrders();
       const backupData = {
-        version: '1.0.4',
+        version: '1.0.5',
         exportedAt: new Date().toISOString(),
         licenses: licenses || edgeLicenses,
         orders: edgeOrders,

@@ -151,7 +151,7 @@
     }
   } catch (e) {}
 
-  setInterval(broadcastUpdateToExtension, 3000);
+  setInterval(broadcastUpdateToExtension, 60000);
 
   setTimeout(() => {
     window.dispatchEvent(new CustomEvent('AUTORECRUIT_EXTENSION_READY'));

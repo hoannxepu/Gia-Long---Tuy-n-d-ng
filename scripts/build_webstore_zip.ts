@@ -15,16 +15,16 @@ export function getExtensionVersion(): string {
     const manifestPath = path.join(extensionDir, 'manifest.json');
     if (fs.existsSync(manifestPath)) {
       const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
-      return manifest.version || '1.0.4';
+      return manifest.version || '1.0.5';
     }
   } catch (e) {}
-  return '1.0.4';
+  return '1.0.5';
 }
 
 export function bumpExtensionVersion(type: 'patch' | 'minor' = 'patch'): string {
   const manifestPath = path.join(extensionDir, 'manifest.json');
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
-  const current = manifest.version || '1.0.4';
+  const current = manifest.version || '1.0.5';
   const parts = current.split('.').map((n: string) => parseInt(n, 10) || 0);
   while (parts.length < 3) parts.push(0);
 
@@ -129,16 +129,19 @@ if (process.argv[1] && process.argv[1].endsWith('build_webstore_zip.ts')) {
       // Đồng bộ trực tiếp vào thư mục public để phục vụ tải trực tiếp trên Cloudflare Pages & Vercel
       fs.writeFileSync(path.join(publicDir, fileName), zipBuffer);
       fs.writeFileSync(path.join(publicDir, 'Gia_Long_FB_WebStore_latest.zip'), zipBuffer);
+      fs.writeFileSync(path.join(publicDir, 'Gia_Long_FB_WebStore_v1.0.5.zip'), zipBuffer);
       fs.writeFileSync(path.join(publicDir, 'Gia_Long_FB_WebStore_v1.0.4.zip'), zipBuffer);
 
       const distDir = path.join(rootDir, 'dist');
       if (fs.existsSync(distDir)) {
         fs.writeFileSync(path.join(distDir, fileName), zipBuffer);
         fs.writeFileSync(path.join(distDir, 'Gia_Long_FB_WebStore_latest.zip'), zipBuffer);
+        fs.writeFileSync(path.join(distDir, 'Gia_Long_FB_WebStore_v1.0.5.zip'), zipBuffer);
         fs.writeFileSync(path.join(distDir, 'Gia_Long_FB_WebStore_v1.0.4.zip'), zipBuffer);
       }
 
       // Lưu thêm các phiên bản để tương thích ngược tuyệt đối
+      fs.writeFileSync(path.join(outputDir, 'Gia_Long_FB_WebStore_v1.0.5.zip'), zipBuffer);
       fs.writeFileSync(path.join(outputDir, 'Gia_Long_FB_WebStore_v1.0.4.zip'), zipBuffer);
       fs.writeFileSync(path.join(outputDir, 'Gia_Long_FB_WebStore_v1.0.0.zip'), zipBuffer);
       fs.writeFileSync(path.join(outputDir, 'Gia_Long_FB_WebStore_Unlisted_v1.6.zip'), zipBuffer);
